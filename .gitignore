@@ -1,3 +1,4 @@
 .devcontainer/
 .npm-cache/
+.go-cache/
 DRAFT.md
