@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use unclip_store::SeaOrmBranchRepository;
+use sea_orm::DatabaseConnection;
+use unclip_store::{SeaOrmBranchRepository, SeaOrmFrameRepository};
 
 /// Build a SQLite connection URL for the given file path.
 ///
@@ -19,10 +20,23 @@ pub fn db_url(path: &Path) -> String {
     format!("sqlite://{}?mode=rwc", abs.display())
 }
 
-/// Open the database (creating and migrating it if needed) and return a
-/// branch repository over it.
-pub async fn open_repo(path: &Path) -> anyhow::Result<SeaOrmBranchRepository> {
+/// Open the database, creating and migrating it if needed.
+pub async fn open(path: &Path) -> anyhow::Result<DatabaseConnection> {
     let url = db_url(path);
-    let db = unclip_store::connect_and_migrate(&url).await?;
-    Ok(SeaOrmBranchRepository::new(db))
+    unclip_store::connect_and_migrate(&url).await
+}
+
+/// A bundle of repositories sharing one connection.
+pub struct Repos {
+    pub branches: SeaOrmBranchRepository,
+    pub frames: SeaOrmFrameRepository,
+}
+
+/// Open the database and construct the repositories over a shared connection.
+pub async fn open_repos(path: &Path) -> anyhow::Result<Repos> {
+    let conn = open(path).await?;
+    Ok(Repos {
+        branches: SeaOrmBranchRepository::new(conn.clone()),
+        frames: SeaOrmFrameRepository::new(conn),
+    })
 }

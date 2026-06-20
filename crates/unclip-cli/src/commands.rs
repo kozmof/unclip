@@ -3,8 +3,11 @@
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
-use unclip_core::{Branch, SampleQuery};
-use unclip_store::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
+use unclip_core::{validate_branch, validate_packet, Branch, Frame, SampleQuery, SelectionPacket, Slot};
+use unclip_io::split_frame_selector;
+use unclip_store::{
+    BranchRepository, FrameRepository, IndexedValue, SeaOrmBranchRepository,
+};
 
 /// Parse a `name=value` pair, used for `--o2o` / `--o2m` flags.
 pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
@@ -115,15 +118,21 @@ pub async fn tree(repo: &impl BranchRepository, root: &str) -> anyhow::Result<()
 /// Arguments for `query`, assembled by clap in `main`.
 pub struct QueryInput {
     pub under: Option<String>,
+    /// Slot resolved from `--frame name.slot`, if given.
+    pub frame_slot: Option<Slot>,
     pub require_o2o: Vec<(String, String)>,
     pub avoid_o2o: Vec<(String, String)>,
     pub avoid_o2m: Vec<(String, String)>,
 }
 
 pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::Result<()> {
-    let mut q = SampleQuery {
-        under: input.under,
-        ..Default::default()
+    // A frame slot supplies the base query; explicit flags merge on top.
+    let mut q = match &input.frame_slot {
+        Some(slot) => SampleQuery::from_slot(slot, input.under.clone()),
+        None => SampleQuery {
+            under: input.under.clone(),
+            ..Default::default()
+        },
     };
     for (name, value) in input.require_o2o {
         if q.require_o2o.insert(name.clone(), value).is_some() {
@@ -171,6 +180,131 @@ pub async fn o2m(repo: &SeaOrmBranchRepository, selector: Option<String>) -> any
         }
     }
     Ok(())
+}
+
+/// Import frames parsed from a frames file.
+pub async fn import_frames(repo: &impl FrameRepository, frames: Vec<Frame>) -> anyhow::Result<()> {
+    if frames.is_empty() {
+        eprintln!("(no frames in file)");
+        return Ok(());
+    }
+    for frame in frames {
+        let name = frame.name.clone();
+        let slots = frame.slots.len();
+        repo.save_frame(frame).await?;
+        println!("imported frame {name} ({slots} slot(s))");
+    }
+    Ok(())
+}
+
+/// `unclip frames` — list stored frames.
+pub async fn frames_list(repo: &impl FrameRepository) -> anyhow::Result<()> {
+    let frames = repo.list_frames().await?;
+    if frames.is_empty() {
+        eprintln!("(no frames)");
+        return Ok(());
+    }
+    for info in frames {
+        match &info.description {
+            Some(desc) => println!("{}\t{} slot(s)\t{}", info.name, info.slot_count, desc),
+            None => println!("{}\t{} slot(s)", info.name, info.slot_count),
+        }
+    }
+    Ok(())
+}
+
+/// `unclip frame <name>` or `unclip frame <name>.<slot>` — show as YAML.
+pub async fn frame_show(repo: &impl FrameRepository, selector: &str) -> anyhow::Result<()> {
+    let (frame_name, slot_name) = split_frame_selector(selector);
+    let frame = repo
+        .get_frame(frame_name)
+        .await?
+        .with_context(|| format!("frame not found: {frame_name}"))?;
+    match slot_name {
+        None => print!("{}", serde_yaml::to_string(&frame)?),
+        Some(slot_name) => {
+            let slot = frame
+                .slot(slot_name)
+                .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
+            print!("{}", serde_yaml::to_string(slot)?);
+        }
+    }
+    Ok(())
+}
+
+/// `unclip create <path> --frame <name.slot>` — create a skeleton branch.
+pub async fn create(
+    branch_repo: &impl BranchRepository,
+    frame_repo: &impl FrameRepository,
+    path: String,
+    selector: &str,
+) -> anyhow::Result<()> {
+    let (frame_name, slot_name) = split_frame_selector(selector);
+    let Some(slot_name) = slot_name else {
+        bail!("create requires a frame.slot selector, e.g. story.place");
+    };
+    let frame = frame_repo
+        .get_frame(frame_name)
+        .await?
+        .with_context(|| format!("frame not found: {frame_name}"))?;
+    let slot = frame
+        .slot(slot_name)
+        .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
+
+    if branch_repo.get(&path).await?.is_some() {
+        bail!("branch already exists: {path}");
+    }
+    let branch = slot.skeleton(&path);
+    branch_repo.add(branch.clone()).await?;
+    println!("created {path} from {selector}");
+    print!("{}", serde_yaml::to_string(&branch)?);
+    Ok(())
+}
+
+/// `unclip validate <target> --frame <selector>`.
+///
+/// `name.slot` validates a stored branch (by path); a frame-only selector
+/// validates a packet file (by path on disk).
+pub async fn validate(
+    branch_repo: &impl BranchRepository,
+    frame_repo: &impl FrameRepository,
+    target: &str,
+    selector: &str,
+) -> anyhow::Result<()> {
+    let (frame_name, slot_name) = split_frame_selector(selector);
+    let frame = frame_repo
+        .get_frame(frame_name)
+        .await?
+        .with_context(|| format!("frame not found: {frame_name}"))?;
+
+    let violations = match slot_name {
+        Some(slot_name) => {
+            let slot = frame
+                .slot(slot_name)
+                .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
+            let branch = branch_repo
+                .get(target)
+                .await?
+                .with_context(|| format!("branch not found: {target}"))?;
+            validate_branch(slot, &branch)
+        }
+        None => {
+            let text = std::fs::read_to_string(target)
+                .with_context(|| format!("cannot read packet file: {target}"))?;
+            let packet: SelectionPacket = serde_yaml::from_str(&text)?;
+            validate_packet(&frame, &packet)
+        }
+    };
+
+    if violations.is_empty() {
+        println!("OK: {target} satisfies {selector}");
+        Ok(())
+    } else {
+        for reason in &violations {
+            eprintln!("- {reason}");
+        }
+        bail!("{} violation(s)", violations.len());
+    }
 }
 
 enum Selector {

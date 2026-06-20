@@ -2491,6 +2491,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "sea-orm",
  "serde_yaml",
  "tokio",
  "unclip-core",

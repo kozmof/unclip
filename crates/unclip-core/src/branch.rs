@@ -69,6 +69,15 @@ impl Branch {
     }
 }
 
+/// Whether `path` lies within `scope` — either equal to it or a descendant.
+///
+/// `/a` is under `/a`; `/a/b` is under `/a`; `/ab` is not under `/a`.
+pub fn is_under(path: &str, scope: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let scope = scope.trim_end_matches('/');
+    path == scope || path.starts_with(&format!("{scope}/"))
+}
+
 /// Compute the parent path of a slash-separated scope address.
 pub fn parent_of(path: &str) -> Option<String> {
     let trimmed = path.trim_end_matches('/');

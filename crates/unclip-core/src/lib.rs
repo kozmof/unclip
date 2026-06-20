@@ -10,13 +10,15 @@ pub mod frame;
 pub mod packet;
 pub mod query;
 pub mod reference;
+pub mod validate;
 
-pub use branch::{parent_of, Branch};
+pub use branch::{is_under, parent_of, Branch};
 pub use error::{CoreError, Result};
 pub use frame::{Frame, Slot};
 pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use query::SampleQuery;
 pub use reference::Reference;
+pub use validate::{validate_branch, validate_packet};
 
 #[cfg(test)]
 mod tests {
@@ -119,6 +121,85 @@ references:
         let yaml = serde_yaml::to_string(&packet).unwrap();
         let again: SelectionPacket = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(packet, again);
+    }
+
+    const STORY_PLACE_SLOT: &str = r#"
+name: place
+under: /ikebukuro
+require_o2o:
+  domain: story
+  axis: place
+default_o2o:
+  use: scene-anchor
+avoid_o2m:
+  topic:
+    - cafe
+metadata_suggest:
+  - sensory
+  - affordances
+"#;
+
+    #[test]
+    fn validate_branch_reports_violations() {
+        let slot: Slot = serde_yaml::from_str(STORY_PLACE_SLOT).unwrap();
+
+        // A conforming branch.
+        let mut ok = Branch::new("/ikebukuro/station/coin-locker");
+        ok.o2o.insert("domain".into(), "story".into());
+        ok.o2o.insert("axis".into(), "place".into());
+        assert!(validate_branch(&slot, &ok).is_empty());
+
+        // Wrong scope, missing required o2o, and an excluded o2m value.
+        let mut bad = Branch::new("/ueno/cafe");
+        bad.o2o.insert("domain".into(), "story".into());
+        bad.o2m.insert("topic".into(), vec!["cafe".into()]);
+        let violations = validate_branch(&slot, &bad);
+        assert_eq!(violations.len(), 3, "got: {violations:?}");
+    }
+
+    #[test]
+    fn skeleton_seeds_o2o_and_metadata() {
+        let slot: Slot = serde_yaml::from_str(STORY_PLACE_SLOT).unwrap();
+        let skel = slot.skeleton("/ikebukuro/station/coin-locker");
+        assert_eq!(skel.o2o.get("domain").unwrap(), "story");
+        assert_eq!(skel.o2o.get("axis").unwrap(), "place");
+        assert_eq!(skel.o2o.get("use").unwrap(), "scene-anchor");
+        assert!(skel.o2m.is_empty());
+        assert!(skel.metadata.get("sensory").is_some());
+    }
+
+    #[test]
+    fn validate_packet_checks_slots_and_counts() {
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![serde_yaml::from_str::<Slot>(STORY_PLACE_SLOT).unwrap()],
+        };
+
+        // Packet missing the required `place` selection.
+        let empty = SelectionPacket::new(Some("story".into()), None);
+        let v = validate_packet(&frame, &empty);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].contains("expects 1"));
+
+        // Packet with a conforming selection.
+        let mut packet = SelectionPacket::new(Some("story".into()), None);
+        let mut branch = Branch::new("/ikebukuro/station/coin-locker");
+        branch.o2o.insert("domain".into(), "story".into());
+        branch.o2o.insert("axis".into(), "place".into());
+        packet.selections.push(Selection {
+            slot: Some("place".into()),
+            branch,
+        });
+        assert!(validate_packet(&frame, &packet).is_empty());
+    }
+
+    #[test]
+    fn is_under_scope() {
+        assert!(is_under("/a", "/a"));
+        assert!(is_under("/a/b", "/a"));
+        assert!(!is_under("/ab", "/a"));
+        assert!(!is_under("/b", "/a"));
     }
 
     #[test]

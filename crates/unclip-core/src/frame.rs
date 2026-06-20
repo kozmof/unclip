@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::Branch;
+
 /// A frame is a reusable constraint set composed of named slots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
@@ -56,5 +58,31 @@ impl Frame {
     /// Look up a slot by name.
     pub fn slot(&self, name: &str) -> Option<&Slot> {
         self.slots.iter().find(|s| s.name == name)
+    }
+}
+
+impl Slot {
+    /// Build a skeleton branch for this slot (DRAFT §11 `create --frame`).
+    ///
+    /// The skeleton seeds o2o from `require_o2o` plus `default_o2o`, leaves o2m
+    /// empty, and adds each `metadata_suggest` field as a null placeholder for
+    /// the author to fill in.
+    pub fn skeleton(&self, path: impl Into<String>) -> Branch {
+        let mut branch = Branch::new(path);
+        for (name, value) in &self.require_o2o {
+            branch.o2o.insert(name.clone(), value.clone());
+        }
+        for (name, value) in &self.default_o2o {
+            branch.o2o.insert(name.clone(), value.clone());
+        }
+        if !self.metadata_suggest.is_empty() {
+            let map: serde_json::Map<String, serde_json::Value> = self
+                .metadata_suggest
+                .iter()
+                .map(|k| (k.clone(), serde_json::Value::Null))
+                .collect();
+            branch.metadata = serde_json::Value::Object(map);
+        }
+        branch
     }
 }

@@ -5,7 +5,10 @@ mod db;
 
 use std::path::PathBuf;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
+use unclip_io::split_frame_selector;
+use unclip_store::FrameRepository;
 
 use commands::{parse_kv, AddInput, QueryInput};
 
@@ -63,6 +66,9 @@ enum Command {
         /// Restrict to branches under this path scope.
         #[arg(long)]
         under: Option<String>,
+        /// Base the query on a frame slot, name.slot (e.g. story.place).
+        #[arg(long)]
+        frame: Option<String>,
         /// Required one-to-one value, name=value (repeatable).
         #[arg(long = "o2o", value_parser = parse_kv)]
         o2o: Vec<(String, String)>,
@@ -87,16 +93,44 @@ enum Command {
         /// `name` (values for a name) or `name=value` (branches with it).
         selector: Option<String>,
     },
+
+    /// Import frame definitions from a YAML file.
+    ImportFrames {
+        file: PathBuf,
+    },
+
+    /// List stored frames.
+    Frames,
+
+    /// Show a frame (`name`) or one of its slots (`name.slot`) as YAML.
+    Frame {
+        selector: String,
+    },
+
+    /// Create a skeleton branch from a frame slot (name.slot).
+    Create {
+        path: String,
+        #[arg(long)]
+        frame: String,
+    },
+
+    /// Validate a branch (name.slot) or a packet file (frame name) against a frame.
+    Validate {
+        /// Branch path or packet file, depending on the frame selector.
+        target: String,
+        #[arg(long)]
+        frame: String,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let repo = db::open_repo(&cli.db).await?;
+    let repos = db::open_repos(&cli.db).await?;
 
     match cli.command {
         Command::Init => {
-            // open_repo already ran migrations; just confirm.
+            // open_repos already ran migrations; just confirm.
             println!("initialized {}", cli.db.display());
         }
         Command::Add {
@@ -108,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             o2m,
         } => {
             commands::add(
-                &repo,
+                &repos.branches,
                 AddInput {
                     path,
                     title,
@@ -120,19 +154,22 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
-        Command::Show { path } => commands::show(&repo, &path).await?,
-        Command::Ls { path } => commands::ls(&repo, &path).await?,
-        Command::Tree { path } => commands::tree(&repo, &path).await?,
+        Command::Show { path } => commands::show(&repos.branches, &path).await?,
+        Command::Ls { path } => commands::ls(&repos.branches, &path).await?,
+        Command::Tree { path } => commands::tree(&repos.branches, &path).await?,
         Command::Query {
             under,
+            frame,
             o2o,
             avoid_o2o,
             avoid_o2m,
         } => {
+            let frame_slot = resolve_query_slot(&repos.frames, frame.as_deref()).await?;
             commands::query(
-                &repo,
+                &repos.branches,
                 QueryInput {
                     under,
+                    frame_slot,
                     require_o2o: o2o,
                     avoid_o2o,
                     avoid_o2m,
@@ -140,9 +177,41 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
-        Command::O2o { selector } => commands::o2o(&repo, selector).await?,
-        Command::O2m { selector } => commands::o2m(&repo, selector).await?,
+        Command::O2o { selector } => commands::o2o(&repos.branches, selector).await?,
+        Command::O2m { selector } => commands::o2m(&repos.branches, selector).await?,
+        Command::ImportFrames { file } => {
+            let frames = unclip_io::load_frames(&file)?;
+            commands::import_frames(&repos.frames, frames).await?;
+        }
+        Command::Frames => commands::frames_list(&repos.frames).await?,
+        Command::Frame { selector } => commands::frame_show(&repos.frames, &selector).await?,
+        Command::Create { path, frame } => {
+            commands::create(&repos.branches, &repos.frames, path, &frame).await?;
+        }
+        Command::Validate { target, frame } => {
+            commands::validate(&repos.branches, &repos.frames, &target, &frame).await?;
+        }
     }
 
     Ok(())
+}
+
+/// Resolve a `--frame name.slot` selector for `query` into a slot, if given.
+async fn resolve_query_slot(
+    frames: &impl FrameRepository,
+    selector: Option<&str>,
+) -> anyhow::Result<Option<unclip_core::Slot>> {
+    let Some(selector) = selector else {
+        return Ok(None);
+    };
+    let (frame_name, slot_name) = split_frame_selector(selector);
+    let slot_name = slot_name.context("query --frame requires name.slot, e.g. story.place")?;
+    let frame = frames
+        .get_frame(frame_name)
+        .await?
+        .with_context(|| format!("frame not found: {frame_name}"))?;
+    let slot = frame
+        .slot(slot_name)
+        .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
+    Ok(Some(slot.clone()))
 }

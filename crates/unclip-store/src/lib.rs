@@ -1,9 +1,12 @@
 //! unclip-store — repository traits and SeaORM-backed persistence.
 
+pub mod frame_mapper;
+pub mod frame_repository;
 pub mod mapper;
 pub mod repository;
 pub mod seaorm;
 
+pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
 
@@ -147,5 +150,58 @@ mod tests {
         assert_eq!(with_place.len(), 2);
         let with_transit = repo.branches_with_o2m("topic", "transit").await.unwrap();
         assert_eq!(with_transit.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn frame_save_get_list_roundtrip() {
+        use unclip_core::{Frame, Slot};
+        use frame_repository::{FrameRepository, SeaOrmFrameRepository};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+
+        let place = Slot {
+            name: "place".into(),
+            under: Some("/ikebukuro".into()),
+            require_o2o: [("domain".to_string(), "story".to_string()),
+                         ("axis".to_string(), "place".to_string())]
+                .into_iter()
+                .collect(),
+            default_o2o: [("use".to_string(), "scene-anchor".to_string())]
+                .into_iter()
+                .collect(),
+            avoid_o2o: Default::default(),
+            prefer_o2m: [("density".to_string(), vec!["crowded".to_string()])]
+                .into_iter()
+                .collect(),
+            avoid_o2m: [("topic".to_string(), vec!["cafe".to_string()])]
+                .into_iter()
+                .collect(),
+            count: 1,
+            avoid_recent: true,
+            weighted: false,
+            metadata_suggest: vec!["sensory".into(), "affordances".into()],
+        };
+        let frame = Frame {
+            name: "story".into(),
+            description: Some("Story frame".into()),
+            slots: vec![place],
+        };
+
+        frames.save_frame(frame.clone()).await.unwrap();
+
+        let got = frames.get_frame("story").await.unwrap().unwrap();
+        assert_eq!(got, frame);
+
+        let list = frames.list_frames().await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].slot_count, 1);
+
+        // save_frame replaces (upsert), not duplicates.
+        frames.save_frame(frame.clone()).await.unwrap();
+        assert_eq!(frames.list_frames().await.unwrap().len(), 1);
+
+        frames.delete_frame("story").await.unwrap();
+        assert!(frames.get_frame("story").await.unwrap().is_none());
     }
 }
