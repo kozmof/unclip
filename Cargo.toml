@@ -7,6 +7,7 @@ members = [
     "crates/unclip-store",
     "crates/unclip-sample",
     "crates/unclip-io",
+    "crates/unclip-match",
     "crates/unclip-cli",
 ]
 
@@ -25,6 +26,7 @@ unclip-migration = { path = "crates/unclip-migration" }
 unclip-store = { path = "crates/unclip-store" }
 unclip-sample = { path = "crates/unclip-sample" }
 unclip-io = { path = "crates/unclip-io" }
+unclip-match = { path = "crates/unclip-match" }
 
 # CLI / async
 clap = { version = "4", features = ["derive"] }

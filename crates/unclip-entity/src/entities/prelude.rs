@@ -8,5 +8,6 @@ pub use super::frame_slot_o2m_values::Entity as FrameSlotO2mValues;
 pub use super::frame_slot_o2o_values::Entity as FrameSlotO2oValues;
 pub use super::frame_slots::Entity as FrameSlots;
 pub use super::frames::Entity as Frames;
+pub use super::pattern_entries::Entity as PatternEntries;
 pub use super::selection_packets::Entity as SelectionPackets;
 pub use super::usage_history::Entity as UsageHistory;

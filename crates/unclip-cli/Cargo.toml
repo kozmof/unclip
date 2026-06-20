@@ -13,6 +13,7 @@ unclip-core.workspace = true
 unclip-store.workspace = true
 unclip-sample.workspace = true
 unclip-io.workspace = true
+unclip-match.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

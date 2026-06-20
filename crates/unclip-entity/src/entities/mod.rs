@@ -10,5 +10,6 @@ pub mod frame_slot_o2m_values;
 pub mod frame_slot_o2o_values;
 pub mod frame_slots;
 pub mod frames;
+pub mod pattern_entries;
 pub mod selection_packets;
 pub mod usage_history;

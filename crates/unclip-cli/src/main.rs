@@ -2,6 +2,7 @@
 
 mod commands;
 mod db;
+mod matching;
 mod sampling;
 
 use std::path::PathBuf;
@@ -234,6 +235,43 @@ enum Command {
     Refs {
         path: String,
     },
+
+    /// Scan a text file for structured patterns from the archive.
+    Scan {
+        file: PathBuf,
+    },
+
+    /// Suggest o2m values mentioned in a branch's text but not yet set.
+    #[command(name = "suggest-o2m")]
+    SuggestO2m {
+        path: String,
+    },
+
+    /// Manage the pattern dictionary.
+    Pattern {
+        #[command(subcommand)]
+        action: PatternAction,
+    },
+
+    /// List stored pattern entries.
+    Patterns,
+}
+
+#[derive(Subcommand)]
+enum PatternAction {
+    /// Add a pattern mapping (provide exactly one target).
+    Add {
+        /// The text pattern to match.
+        pattern: String,
+        #[arg(long = "o2m", value_parser = parse_kv)]
+        o2m: Option<(String, String)>,
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Option<(String, String)>,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        collapse: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -435,6 +473,34 @@ async fn main() -> anyhow::Result<()> {
             commands::attach(&repos.branches, &path, value, kind, note).await?;
         }
         Command::Refs { path } => commands::refs(&repos.branches, &path).await?,
+        Command::Scan { file } => {
+            matching::scan_cmd(&repos.branches, &repos.patterns, &file).await?;
+        }
+        Command::SuggestO2m { path } => {
+            matching::suggest_o2m_cmd(&repos.branches, &repos.patterns, &path).await?;
+        }
+        Command::Pattern { action } => match action {
+            PatternAction::Add {
+                pattern,
+                o2m,
+                o2o,
+                branch,
+                collapse,
+            } => {
+                matching::pattern_add_cmd(
+                    &repos.patterns,
+                    matching::PatternAddInput {
+                        pattern,
+                        o2m,
+                        o2o,
+                        branch,
+                        collapse,
+                    },
+                )
+                .await?;
+            }
+        },
+        Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,
     }
 
     Ok(())

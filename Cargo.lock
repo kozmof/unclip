@@ -424,6 +424,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "daachorse"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99251f238b74cd219a86fe6ea9328308ebb223fcbb5b8eb5aa400b847a41dded"
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2498,6 +2504,7 @@ dependencies = [
  "tokio",
  "unclip-core",
  "unclip-io",
+ "unclip-match",
  "unclip-sample",
  "unclip-store",
 ]
@@ -2532,6 +2539,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "unclip-match"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "daachorse",
+ "serde",
+ "serde_json",
+ "unclip-core",
+]
+
+[[package]]
 name = "unclip-migration"
 version = "0.1.0"
 dependencies = [
@@ -2561,6 +2579,7 @@ dependencies = [
  "tokio",
  "unclip-core",
  "unclip-entity",
+ "unclip-match",
  "unclip-migration",
 ]
 

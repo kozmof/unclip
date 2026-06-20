@@ -8,6 +8,7 @@ license.workspace = true
 unclip-core.workspace = true
 unclip-entity.workspace = true
 unclip-migration.workspace = true
+unclip-match.workspace = true
 sea-orm.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

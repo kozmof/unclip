@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use sea_orm::DatabaseConnection;
-use unclip_store::{SeaOrmBranchRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository};
+use unclip_store::{
+    SeaOrmBranchRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository,
+};
 
 /// Build a SQLite connection URL for the given file path.
 ///
@@ -31,6 +33,7 @@ pub struct Repos {
     pub branches: SeaOrmBranchRepository,
     pub frames: SeaOrmFrameRepository,
     pub history: SeaOrmHistoryRepository,
+    pub patterns: SeaOrmPatternRepository,
 }
 
 /// Open the database and construct the repositories over a shared connection.
@@ -39,6 +42,7 @@ pub async fn open_repos(path: &Path) -> anyhow::Result<Repos> {
     Ok(Repos {
         branches: SeaOrmBranchRepository::new(conn.clone()),
         frames: SeaOrmFrameRepository::new(conn.clone()),
-        history: SeaOrmHistoryRepository::new(conn),
+        history: SeaOrmHistoryRepository::new(conn.clone()),
+        patterns: SeaOrmPatternRepository::new(conn),
     })
 }

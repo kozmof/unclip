@@ -4,11 +4,13 @@ pub mod frame_mapper;
 pub mod frame_repository;
 pub mod history;
 pub mod mapper;
+pub mod pattern_repository;
 pub mod repository;
 pub mod seaorm;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{PacketRecord, SeaOrmHistoryRepository, UsageSummary};
+pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
 
@@ -243,5 +245,47 @@ mod tests {
             .attach_reference("/nope", &Reference { kind: "file".into(), value: "x".into(), note: None })
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn pattern_add_list_roundtrip() {
+        use pattern_repository::SeaOrmPatternRepository;
+        use unclip_match::{PatternEntry, PatternTarget};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let patterns = SeaOrmPatternRepository::new(db);
+
+        patterns
+            .add(&PatternEntry::new(
+                "coin locker",
+                PatternTarget::O2m {
+                    name: "object".into(),
+                    value: "locker".into(),
+                },
+            ))
+            .await
+            .unwrap();
+        patterns
+            .add(&PatternEntry::new(
+                "akira",
+                PatternTarget::Branch {
+                    path: "/movie/akira".into(),
+                },
+            ))
+            .await
+            .unwrap();
+
+        let listed = patterns.list().await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].entry.pattern, "coin locker");
+        assert!(listed[0].enabled);
+
+        let enabled = patterns.all_enabled().await.unwrap();
+        assert_eq!(enabled.len(), 2);
+        // Branch target round-trips its path.
+        assert!(enabled.iter().any(|e| matches!(
+            &e.target,
+            PatternTarget::Branch { path } if path == "/movie/akira"
+        )));
     }
 }
