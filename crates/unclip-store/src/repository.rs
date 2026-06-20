@@ -2,13 +2,22 @@
 
 use async_trait::async_trait;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter,
-    TransactionTrait,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
+    QueryFilter, Statement, TransactionTrait,
 };
 use unclip_core::{parent_of, Branch, SampleQuery};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
 
 use crate::mapper;
+
+/// A distinct indexed value with how many branches carry it. Used to build
+/// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct IndexedValue {
+    pub name: String,
+    pub value: String,
+    pub count: i64,
+}
 
 /// Persistence boundary for branches. Application logic depends on this trait,
 /// not on SeaORM entities directly (DRAFT §24).
@@ -92,6 +101,79 @@ impl SeaOrmBranchRepository {
             .filter(branches::Column::Path.eq(path))
             .one(&self.db)
             .await?)
+    }
+
+    async fn load_branches_by_ids(&self, ids: Vec<i32>) -> anyhow::Result<Vec<Branch>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let models = branches::Entity::find()
+            .filter(branches::Column::Id.is_in(ids))
+            .all(&self.db)
+            .await?;
+        self.hydrate_all(models).await
+    }
+
+    /// Distinct o2o `name=value` pairs with branch counts, optionally for a
+    /// single name. Ordered by name then value.
+    pub async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
+        self.index_catalog("branch_o2o_values", name).await
+    }
+
+    /// Distinct o2m `name=value` pairs with branch counts, optionally for a
+    /// single name. Ordered by name then value.
+    pub async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
+        self.index_catalog("branch_o2m_values", name).await
+    }
+
+    async fn index_catalog(
+        &self,
+        table: &str,
+        name: Option<&str>,
+    ) -> anyhow::Result<Vec<IndexedValue>> {
+        // `table` is a fixed internal identifier, never user input.
+        let (filter, values) = match name {
+            Some(n) => ("WHERE name = ?", vec![n.into()]),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT name, value, COUNT(*) AS count FROM {table} {filter} \
+             GROUP BY name, value ORDER BY name, value"
+        );
+        let rows = IndexedValue::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .all(&self.db)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Branches carrying a specific o2o value.
+    pub async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+        let ids = branch_o2o_values::Entity::find()
+            .filter(branch_o2o_values::Column::Name.eq(name))
+            .filter(branch_o2o_values::Column::Value.eq(value))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|r| r.branch_id)
+            .collect();
+        self.load_branches_by_ids(ids).await
+    }
+
+    /// Branches carrying a specific o2m value.
+    pub async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+        let ids = branch_o2m_values::Entity::find()
+            .filter(branch_o2m_values::Column::Name.eq(name))
+            .filter(branch_o2m_values::Column::Value.eq(value))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|r| r.branch_id)
+            .collect();
+        self.load_branches_by_ids(ids).await
     }
 }
 

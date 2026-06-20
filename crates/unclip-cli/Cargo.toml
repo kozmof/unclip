@@ -16,3 +16,4 @@ unclip-io.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+serde_yaml.workspace = true

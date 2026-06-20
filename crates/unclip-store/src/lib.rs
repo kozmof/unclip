@@ -4,7 +4,7 @@ pub mod mapper;
 pub mod repository;
 pub mod seaorm;
 
-pub use repository::{BranchRepository, SeaOrmBranchRepository};
+pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
 
 #[cfg(test)]
@@ -103,5 +103,49 @@ mod tests {
         let found = repo.find(q).await.unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, "/ikebukuro/station/exit");
+    }
+
+    #[tokio::test]
+    async fn catalog_and_value_lookup() {
+        let repo = repo().await;
+        for (path, axis) in [
+            ("/a", "place"),
+            ("/b", "place"),
+            ("/c", "time"),
+        ] {
+            let mut br = Branch::new(path);
+            br.o2o.insert("domain".into(), "story".into());
+            br.o2o.insert("axis".into(), axis.into());
+            br.o2m.insert("topic".into(), vec!["transit".into()]);
+            repo.add(br).await.unwrap();
+        }
+
+        // Full o2o catalog: domain=story(3), axis=place(2), axis=time(1).
+        let catalog = repo.o2o_catalog(None).await.unwrap();
+        let axis_place = catalog
+            .iter()
+            .find(|v| v.name == "axis" && v.value == "place")
+            .unwrap();
+        assert_eq!(axis_place.count, 2);
+        let domain = catalog
+            .iter()
+            .find(|v| v.name == "domain" && v.value == "story")
+            .unwrap();
+        assert_eq!(domain.count, 3);
+
+        // Single-name catalog.
+        let axis_values = repo.o2o_catalog(Some("axis")).await.unwrap();
+        assert_eq!(axis_values.len(), 2);
+
+        // o2m catalog.
+        let o2m = repo.o2m_catalog(None).await.unwrap();
+        assert_eq!(o2m.len(), 1);
+        assert_eq!(o2m[0].count, 3);
+
+        // Branch lookup by value.
+        let with_place = repo.branches_with_o2o("axis", "place").await.unwrap();
+        assert_eq!(with_place.len(), 2);
+        let with_transit = repo.branches_with_o2m("topic", "transit").await.unwrap();
+        assert_eq!(with_transit.len(), 3);
     }
 }
