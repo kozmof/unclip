@@ -2,11 +2,13 @@
 
 pub mod frame_mapper;
 pub mod frame_repository;
+pub mod history;
 pub mod mapper;
 pub mod repository;
 pub mod seaorm;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
+pub use history::{PacketRecord, SeaOrmHistoryRepository, UsageSummary};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
 

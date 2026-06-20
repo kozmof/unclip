@@ -2,15 +2,19 @@
 
 mod commands;
 mod db;
+mod sampling;
 
 use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use unclip_io::split_frame_selector;
+use unclip_io::{Format, split_frame_selector};
 use unclip_store::FrameRepository;
 
 use commands::{parse_kv, AddInput, QueryInput};
+use sampling::{
+    parse_format, parse_under_override, ComposeInput, FilterInput, SampleInput, UnderOverride,
+};
 
 #[derive(Parser)]
 #[command(name = "unclip", version, about = "Outside-of-LLM possibility engine")]
@@ -121,6 +125,80 @@ enum Command {
         #[arg(long)]
         frame: String,
     },
+
+    /// Sample branches into a selection packet.
+    Sample {
+        #[arg(long)]
+        under: Option<String>,
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2o", value_parser = parse_kv)]
+        avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "prefer-o2m", value_parser = parse_kv)]
+        prefer_o2m: Vec<(String, String)>,
+        #[arg(long = "avoid-o2m", value_parser = parse_kv)]
+        avoid_o2m: Vec<(String, String)>,
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        #[arg(long)]
+        weighted: bool,
+        #[arg(long = "avoid-recent")]
+        avoid_recent: bool,
+        #[arg(long)]
+        seed: Option<u64>,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+        /// Print the packet without recording usage or saving it.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+
+    /// Compose a packet (one selection group per frame slot).
+    Compose {
+        #[arg(long)]
+        frame: String,
+        /// Scope override: `slot:/path` or `/path` (global). Repeatable.
+        #[arg(long = "under", value_parser = parse_under_override)]
+        under: Vec<UnderOverride>,
+        /// Number of packets to generate (batch).
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        #[arg(long)]
+        seed: Option<u64>,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+
+    /// Show usage history for a branch.
+    Used {
+        path: String,
+    },
+
+    /// Aggregate usage stats over a filter.
+    Stats {
+        #[arg(long)]
+        under: Option<String>,
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2o", value_parser = parse_kv)]
+        avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2m", value_parser = parse_kv)]
+        avoid_o2m: Vec<(String, String)>,
+    },
+
+    /// List branches matching a filter, least-used first.
+    Stale {
+        #[arg(long)]
+        under: Option<String>,
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2o", value_parser = parse_kv)]
+        avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2m", value_parser = parse_kv)]
+        avoid_o2m: Vec<(String, String)>,
+    },
 }
 
 #[tokio::main]
@@ -190,6 +268,104 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Validate { target, frame } => {
             commands::validate(&repos.branches, &repos.frames, &target, &frame).await?;
+        }
+        Command::Sample {
+            under,
+            o2o,
+            avoid_o2o,
+            prefer_o2m,
+            avoid_o2m,
+            count,
+            weighted,
+            avoid_recent,
+            seed,
+            format,
+            dry_run,
+        } => {
+            sampling::sample_cmd(
+                &repos.branches,
+                &repos.history,
+                SampleInput {
+                    filter: FilterInput {
+                        under,
+                        require_o2o: o2o,
+                        avoid_o2o,
+                        prefer_o2m,
+                        avoid_o2m,
+                    },
+                    count,
+                    weighted,
+                    avoid_recent,
+                    seed,
+                    format,
+                    dry_run,
+                },
+            )
+            .await?;
+        }
+        Command::Compose {
+            frame,
+            under,
+            count,
+            seed,
+            format,
+            dry_run,
+        } => {
+            sampling::compose_cmd(
+                &repos.branches,
+                &repos.frames,
+                &repos.history,
+                ComposeInput {
+                    frame,
+                    under,
+                    count,
+                    seed,
+                    format,
+                    dry_run,
+                },
+            )
+            .await?;
+        }
+        Command::Used { path } => {
+            sampling::used_cmd(&repos.branches, &repos.history, &path).await?;
+        }
+        Command::Stats {
+            under,
+            o2o,
+            avoid_o2o,
+            avoid_o2m,
+        } => {
+            sampling::stats_cmd(
+                &repos.branches,
+                &repos.history,
+                FilterInput {
+                    under,
+                    require_o2o: o2o,
+                    avoid_o2o,
+                    prefer_o2m: Vec::new(),
+                    avoid_o2m,
+                },
+            )
+            .await?;
+        }
+        Command::Stale {
+            under,
+            o2o,
+            avoid_o2o,
+            avoid_o2m,
+        } => {
+            sampling::stale_cmd(
+                &repos.branches,
+                &repos.history,
+                FilterInput {
+                    under,
+                    require_o2o: o2o,
+                    avoid_o2o,
+                    prefer_o2m: Vec::new(),
+                    avoid_o2m,
+                },
+            )
+            .await?;
         }
     }
 

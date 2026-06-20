@@ -10,7 +10,7 @@ pub struct Model {
     pub id: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub frame_name: Option<String>,
-    pub seed: Option<i32>,
+    pub seed: Option<i64>,
     #[sea_orm(column_type = "Text")]
     pub created_at: String,
     #[sea_orm(column_type = "Text", nullable)]

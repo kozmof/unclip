@@ -11,6 +11,8 @@
 //!   derive (codegen maps SQLite `REAL` to `Decimal`).
 //! - Auto-increment primary keys come out as `Option<i32>`; change to `i32`.
 //! - `selection_packets::Model::id`: `Option<String>` -> `String`.
+//! - `selection_packets::Model::seed`: `Option<i32>` -> `Option<i64>` (seeds
+//!   are 64-bit; SQLite INTEGER holds them).
 //! - `frame_slot_o2o_values` / `frame_slot_o2m_values` have no DB primary key;
 //!   declare a composite `primary_key` over all four columns.
 

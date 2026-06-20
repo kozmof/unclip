@@ -1,0 +1,333 @@
+//! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
+
+use anyhow::{bail, Context};
+use unclip_core::{Branch, SampleQuery, Selection, SelectionPacket};
+use unclip_io::Format;
+use unclip_sample::{new_packet_id, random_seed, rng_from_seed, sample};
+use unclip_store::{BranchRepository, PacketRecord, SeaOrmHistoryRepository};
+
+/// How many recent usage rows define the "recently used" set.
+const RECENT_LIMIT: u64 = 50;
+
+/// Filters shared by `sample`, `stats`, and `stale`.
+pub struct FilterInput {
+    pub under: Option<String>,
+    pub require_o2o: Vec<(String, String)>,
+    pub avoid_o2o: Vec<(String, String)>,
+    pub prefer_o2m: Vec<(String, String)>,
+    pub avoid_o2m: Vec<(String, String)>,
+}
+
+impl FilterInput {
+    fn into_query(self, count: usize, weighted: bool, avoid_recent: bool) -> anyhow::Result<SampleQuery> {
+        let mut q = SampleQuery {
+            under: self.under,
+            count,
+            weighted,
+            avoid_recent,
+            ..Default::default()
+        };
+        for (name, value) in self.require_o2o {
+            if q.require_o2o.insert(name.clone(), value).is_some() {
+                bail!("duplicate required o2o name `{name}` (o2o values are one-to-one)");
+            }
+        }
+        for (name, value) in self.avoid_o2o {
+            q.avoid_o2o.insert(name, value);
+        }
+        for (name, value) in self.prefer_o2m {
+            q.prefer_o2m.entry(name).or_default().push(value);
+        }
+        for (name, value) in self.avoid_o2m {
+            q.avoid_o2m.entry(name).or_default().push(value);
+        }
+        Ok(q)
+    }
+}
+
+/// Arguments for `sample`.
+pub struct SampleInput {
+    pub filter: FilterInput,
+    pub count: usize,
+    pub weighted: bool,
+    pub avoid_recent: bool,
+    pub seed: Option<u64>,
+    pub format: Format,
+    pub dry_run: bool,
+}
+
+pub async fn sample_cmd(
+    branches: &impl BranchRepository,
+    history: &SeaOrmHistoryRepository,
+    input: SampleInput,
+) -> anyhow::Result<()> {
+    let SampleInput {
+        filter,
+        count,
+        weighted,
+        avoid_recent,
+        seed,
+        format,
+        dry_run,
+    } = input;
+
+    let query = filter.into_query(count, weighted, avoid_recent)?;
+    let candidates = branches.find(query.clone()).await?;
+
+    let recent = if avoid_recent {
+        history.recent_branch_ids(RECENT_LIMIT).await?
+    } else {
+        Default::default()
+    };
+
+    let seed = seed.unwrap_or_else(random_seed);
+    let mut rng = rng_from_seed(seed);
+    let chosen: Vec<Branch> = sample(&candidates, &query, &recent, &mut rng)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    let mut packet = SelectionPacket::new(None, Some(seed));
+    packet.created_at = Some(now());
+    packet.query = Some(query_json(&query));
+    packet.selections = chosen
+        .iter()
+        .map(|b| Selection {
+            slot: None,
+            branch: b.clone(),
+        })
+        .collect();
+
+    print!("{}", unclip_io::render_packet(&packet, format)?);
+
+    if !dry_run {
+        let id = new_packet_id(&mut rng);
+        save_packet(history, &id, None, &packet).await?;
+        record_usages(history, "sample", &id, &chosen).await?;
+    }
+    Ok(())
+}
+
+/// clap value parser for `--format`.
+pub fn parse_format(s: &str) -> anyhow::Result<Format> {
+    s.parse()
+}
+
+/// A `--under` override for compose: a slot-specific or global scope.
+pub type UnderOverride = (Option<String>, String);
+
+/// Parse `slot:/path` (slot-specific) or `/path` (global) overrides.
+pub fn parse_under_override(raw: &str) -> anyhow::Result<UnderOverride> {
+    match raw.split_once(':') {
+        Some((slot, path)) if !slot.is_empty() => Ok((Some(slot.to_string()), path.to_string())),
+        _ => Ok((None, raw.to_string())),
+    }
+}
+
+/// Arguments for `compose`.
+pub struct ComposeInput {
+    pub frame: String,
+    pub under: Vec<UnderOverride>,
+    pub count: usize,
+    pub seed: Option<u64>,
+    pub format: Format,
+    pub dry_run: bool,
+}
+
+pub async fn compose_cmd(
+    branches: &impl BranchRepository,
+    frames: &impl unclip_store::FrameRepository,
+    history: &SeaOrmHistoryRepository,
+    input: ComposeInput,
+) -> anyhow::Result<()> {
+    let frame = frames
+        .get_frame(&input.frame)
+        .await?
+        .with_context(|| format!("frame not found: {}", input.frame))?;
+
+    let base_seed = input.seed.unwrap_or_else(random_seed);
+    let mut packets = Vec::with_capacity(input.count.max(1));
+
+    for k in 0..input.count.max(1) {
+        let seed = base_seed.wrapping_add(k as u64);
+        let mut rng = rng_from_seed(seed);
+
+        let mut packet = SelectionPacket::new(Some(frame.name.clone()), Some(seed));
+        packet.created_at = Some(now());
+        packet.query = Some(serde_json::json!({ "frame": frame.name }));
+
+        for slot in &frame.slots {
+            let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
+            let query = SampleQuery::from_slot(slot, under);
+            let candidates = branches.find(query.clone()).await?;
+            let recent = if slot.avoid_recent {
+                history.recent_branch_ids(RECENT_LIMIT).await?
+            } else {
+                Default::default()
+            };
+            let chosen = sample(&candidates, &query, &recent, &mut rng);
+            for branch in chosen {
+                packet.selections.push(Selection {
+                    slot: Some(slot.name.clone()),
+                    branch: branch.clone(),
+                });
+            }
+        }
+        packets.push(packet);
+    }
+
+    print!("{}", unclip_io::render_packets(&packets, input.format)?);
+
+    if !input.dry_run {
+        for packet in &packets {
+            // Derive a deterministic packet id from its seed.
+            let id = new_packet_id(&mut rng_from_seed(packet.seed.unwrap_or(0)));
+            save_packet(history, &id, Some(&frame.name), packet).await?;
+            for selection in &packet.selections {
+                if let Some(branch_id) = selection.branch.id {
+                    history
+                        .record_usage(branch_id, "compose", None, Some(&id))
+                        .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> {
+    // Slot-specific override wins; otherwise the first global override.
+    overrides
+        .iter()
+        .find(|(slot, _)| slot.as_deref() == Some(slot_name))
+        .or_else(|| overrides.iter().find(|(slot, _)| slot.is_none()))
+        .map(|(_, path)| path.clone())
+}
+
+/// `unclip used <path>`.
+pub async fn used_cmd(
+    branches: &impl BranchRepository,
+    history: &SeaOrmHistoryRepository,
+    path: &str,
+) -> anyhow::Result<()> {
+    let branch = branches
+        .get(path)
+        .await?
+        .with_context(|| format!("branch not found: {path}"))?;
+    let id = branch.id.context("branch has no id")?;
+    let summary = history.usage_for(id).await?;
+    println!("{path}\tused {} time(s)", summary.count);
+    if let Some(last) = summary.last_used {
+        println!("last used: {last}");
+    }
+    Ok(())
+}
+
+/// `unclip stats` — aggregate usage over a filter.
+pub async fn stats_cmd(
+    branches: &impl BranchRepository,
+    history: &SeaOrmHistoryRepository,
+    filter: FilterInput,
+) -> anyhow::Result<()> {
+    let query = filter.into_query(usize::MAX, false, false)?;
+    let matched = branches.find(query).await?;
+
+    let mut total_uses = 0u64;
+    let mut unused = 0u64;
+    for branch in &matched {
+        if let Some(id) = branch.id {
+            let count = history.usage_for(id).await?.count;
+            total_uses += count;
+            if count == 0 {
+                unused += 1;
+            }
+        }
+    }
+    println!("branches: {}", matched.len());
+    println!("total uses: {total_uses}");
+    println!("unused: {unused}");
+    Ok(())
+}
+
+/// `unclip stale` — branches matching a filter, least-used first.
+pub async fn stale_cmd(
+    branches: &impl BranchRepository,
+    history: &SeaOrmHistoryRepository,
+    filter: FilterInput,
+) -> anyhow::Result<()> {
+    let query = filter.into_query(usize::MAX, false, false)?;
+    let matched = branches.find(query).await?;
+
+    let mut rows = Vec::with_capacity(matched.len());
+    for branch in matched {
+        let summary = match branch.id {
+            Some(id) => history.usage_for(id).await?,
+            None => Default::default(),
+        };
+        rows.push((branch.path, summary.count, summary.last_used));
+    }
+    // Least used first; ties broken by oldest last-used (None sorts first).
+    rows.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
+
+    if rows.is_empty() {
+        eprintln!("(no matching branches)");
+        return Ok(());
+    }
+    for (path, count, _) in rows {
+        println!("{path}\tuses={count}");
+    }
+    Ok(())
+}
+
+async fn record_usages(
+    history: &SeaOrmHistoryRepository,
+    command: &str,
+    packet_id: &str,
+    chosen: &[Branch],
+) -> anyhow::Result<()> {
+    for branch in chosen {
+        if let Some(branch_id) = branch.id {
+            history
+                .record_usage(branch_id, command, None, Some(packet_id))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn save_packet(
+    history: &SeaOrmHistoryRepository,
+    id: &str,
+    frame_name: Option<&str>,
+    packet: &SelectionPacket,
+) -> anyhow::Result<()> {
+    let packet_json = serde_json::to_string(packet)?;
+    let query_json = packet.query.as_ref().map(|q| q.to_string());
+    history
+        .save_packet(PacketRecord {
+            id,
+            frame_name,
+            seed: packet.seed,
+            query_json: query_json.as_deref(),
+            packet_json: &packet_json,
+        })
+        .await?;
+    Ok(())
+}
+
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn query_json(query: &SampleQuery) -> serde_json::Value {
+    serde_json::json!({
+        "under": query.under,
+        "require_o2o": query.require_o2o,
+        "avoid_o2o": query.avoid_o2o,
+        "prefer_o2m": query.prefer_o2m,
+        "avoid_o2m": query.avoid_o2m,
+        "count": query.count,
+        "weighted": query.weighted,
+        "avoid_recent": query.avoid_recent,
+    })
+}
