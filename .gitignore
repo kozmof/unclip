@@ -2,3 +2,7 @@
 .npm-cache/
 .go-cache/
 DRAFT.md
+/target
+*.db
+*.db-shm
+*.db-wal

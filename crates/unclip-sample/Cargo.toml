@@ -1,0 +1,8 @@
+[package]
+name = "unclip-sample"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unclip-core.workspace = true

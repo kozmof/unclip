@@ -1,0 +1,18 @@
+[package]
+name = "unclip-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "unclip"
+path = "src/main.rs"
+
+[dependencies]
+unclip-core.workspace = true
+unclip-store.workspace = true
+unclip-sample.workspace = true
+unclip-io.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true

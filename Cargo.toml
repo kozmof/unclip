@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/unclip-core",
+    "crates/unclip-entity",
+    "crates/unclip-migration",
+    "crates/unclip-store",
+    "crates/unclip-sample",
+    "crates/unclip-io",
+    "crates/unclip-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["kozmof"]
+repository = "https://github.com/kozmof/unclip"
+
+[workspace.dependencies]
+# Internal crates
+unclip-core = { path = "crates/unclip-core" }
+unclip-entity = { path = "crates/unclip-entity" }
+unclip-migration = { path = "crates/unclip-migration" }
+unclip-store = { path = "crates/unclip-store" }
+unclip-sample = { path = "crates/unclip-sample" }
+unclip-io = { path = "crates/unclip-io" }
+
+# CLI / async
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Persistence
+sea-orm = { version = "1.1", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+] }
+sea-orm-migration = { version = "1.1", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# Async traits
+async-trait = "0.1"

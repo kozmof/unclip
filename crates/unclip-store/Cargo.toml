@@ -1,0 +1,18 @@
+[package]
+name = "unclip-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unclip-core.workspace = true
+unclip-entity.workspace = true
+unclip-migration.workspace = true
+sea-orm.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[dev-dependencies]
+tokio.workspace = true
