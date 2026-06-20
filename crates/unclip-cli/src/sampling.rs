@@ -148,6 +148,15 @@ pub async fn compose_cmd(
     let base_seed = input.seed.unwrap_or_else(random_seed);
     let mut packets = Vec::with_capacity(input.count.max(1));
 
+    // The recent set is independent of slot and packet; fetch it once if any
+    // slot needs it.
+    let recent = if frame.slots.iter().any(|s| s.avoid_recent) {
+        history.recent_branch_ids(RECENT_LIMIT).await?
+    } else {
+        Default::default()
+    };
+    let empty_recent = std::collections::HashSet::new();
+
     for k in 0..input.count.max(1) {
         let seed = base_seed.wrapping_add(k as u64);
         let mut rng = rng_from_seed(seed);
@@ -160,12 +169,8 @@ pub async fn compose_cmd(
             let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
             let query = SampleQuery::from_slot(slot, under);
             let candidates = branches.find(query.clone()).await?;
-            let recent = if slot.avoid_recent {
-                history.recent_branch_ids(RECENT_LIMIT).await?
-            } else {
-                Default::default()
-            };
-            let chosen = sample(&candidates, &query, &recent, &mut rng);
+            let slot_recent = if slot.avoid_recent { &recent } else { &empty_recent };
+            let chosen = sample(&candidates, &query, slot_recent, &mut rng);
             for branch in chosen {
                 packet.selections.push(Selection {
                     slot: Some(slot.name.clone()),
@@ -245,15 +250,16 @@ pub async fn stats_cmd(
     let query = filter.into_query(usize::MAX, false, false)?;
     let matched = branches.find(query).await?;
 
+    let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
+    let summaries = history.usage_summaries(&ids).await?;
+
     let mut total_uses = 0u64;
     let mut unused = 0u64;
-    for branch in &matched {
-        if let Some(id) = branch.id {
-            let count = history.usage_for(id).await?.count;
-            total_uses += count;
-            if count == 0 {
-                unused += 1;
-            }
+    for id in &ids {
+        let count = summaries.get(id).map(|s| s.count).unwrap_or(0);
+        total_uses += count;
+        if count == 0 {
+            unused += 1;
         }
     }
     println!("branches: {}", matched.len());
@@ -271,12 +277,15 @@ pub async fn stale_cmd(
     let query = filter.into_query(usize::MAX, false, false)?;
     let matched = branches.find(query).await?;
 
+    let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
+    let summaries = history.usage_summaries(&ids).await?;
+
     let mut rows = Vec::with_capacity(matched.len());
     for branch in matched {
-        let summary = match branch.id {
-            Some(id) => history.usage_for(id).await?,
-            None => Default::default(),
-        };
+        let summary = branch
+            .id
+            .and_then(|id| summaries.get(&id).cloned())
+            .unwrap_or_default();
         rows.push((branch.path, summary.count, summary.last_used));
     }
     // Least used first; ties broken by oldest last-used (None sorts first).

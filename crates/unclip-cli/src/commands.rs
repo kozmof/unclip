@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
 use unclip_core::{
-    validate_branch, validate_packet, Branch, Frame, Reference, SampleQuery, SelectionPacket, Slot,
+    validate_branch, validate_packet, validate_path, Branch, Frame, Reference, SampleQuery,
+    SelectionPacket, Slot,
 };
 use unclip_io::split_frame_selector;
 use unclip_store::{
@@ -33,6 +34,7 @@ pub struct AddInput {
 }
 
 pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Result<()> {
+    validate_path(&input.path)?;
     if repo.get(&input.path).await?.is_some() {
         bail!("branch already exists: {}", input.path);
     }

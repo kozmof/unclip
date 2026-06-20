@@ -1,5 +1,7 @@
 //! Repository trait and SeaORM-backed implementation for branches.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
@@ -89,10 +91,49 @@ impl SeaOrmBranchRepository {
         mapper::assemble_branch(model, o2o, o2m, refs)
     }
 
+    /// Hydrate many branches with a fixed number of queries (no N+1): load all
+    /// child rows for the whole id set at once, then group them per branch.
     async fn hydrate_all(&self, models: Vec<branches::Model>) -> anyhow::Result<Vec<Branch>> {
+        if models.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<i32> = models.iter().map(|m| m.id).collect();
+
+        let o2o = branch_o2o_values::Entity::find()
+            .filter(branch_o2o_values::Column::BranchId.is_in(ids.clone()))
+            .all(&self.db)
+            .await?;
+        let o2m = branch_o2m_values::Entity::find()
+            .filter(branch_o2m_values::Column::BranchId.is_in(ids.clone()))
+            .all(&self.db)
+            .await?;
+        let refs = branch_references::Entity::find()
+            .filter(branch_references::Column::BranchId.is_in(ids))
+            .all(&self.db)
+            .await?;
+
+        let mut o2o_by_id: HashMap<i32, Vec<branch_o2o_values::Model>> = HashMap::new();
+        for row in o2o {
+            o2o_by_id.entry(row.branch_id).or_default().push(row);
+        }
+        let mut o2m_by_id: HashMap<i32, Vec<branch_o2m_values::Model>> = HashMap::new();
+        for row in o2m {
+            o2m_by_id.entry(row.branch_id).or_default().push(row);
+        }
+        let mut refs_by_id: HashMap<i32, Vec<branch_references::Model>> = HashMap::new();
+        for row in refs {
+            refs_by_id.entry(row.branch_id).or_default().push(row);
+        }
+
         let mut out = Vec::with_capacity(models.len());
         for model in models {
-            out.push(self.hydrate(model).await?);
+            let id = model.id;
+            out.push(mapper::assemble_branch(
+                model,
+                o2o_by_id.remove(&id).unwrap_or_default(),
+                o2m_by_id.remove(&id).unwrap_or_default(),
+                refs_by_id.remove(&id).unwrap_or_default(),
+            )?);
         }
         Ok(out)
     }

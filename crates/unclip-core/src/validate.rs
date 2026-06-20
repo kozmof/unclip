@@ -6,9 +6,29 @@
 //! scoring signal, not a requirement (DRAFT §6, §10).
 
 use crate::branch::is_under;
+use crate::error::{CoreError, Result};
 use crate::frame::{Frame, Slot};
 use crate::packet::SelectionPacket;
 use crate::Branch;
+
+/// Validate a branch path address.
+///
+/// A path must be absolute (`/`-prefixed), have no empty segments (no `//`),
+/// no trailing slash, and contain no whitespace. The bare root `/` is not a
+/// valid branch address.
+pub fn validate_path(path: &str) -> Result<()> {
+    let invalid = |path: &str| CoreError::InvalidPath(path.to_string());
+
+    if path == "/" || !path.starts_with('/') || path.ends_with('/') {
+        return Err(invalid(path));
+    }
+    for segment in path.split('/').skip(1) {
+        if segment.is_empty() || segment.chars().any(char::is_whitespace) {
+            return Err(invalid(path));
+        }
+    }
+    Ok(())
+}
 
 /// Check a single branch against a slot's hard constraints.
 pub fn validate_branch(slot: &Slot, branch: &Branch) -> Vec<String> {

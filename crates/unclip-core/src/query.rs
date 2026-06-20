@@ -15,7 +15,6 @@ pub struct SampleQuery {
 
     pub avoid_recent: bool,
     pub weighted: bool,
-    pub max_depth: Option<usize>,
     pub count: usize,
 }
 
@@ -30,7 +29,6 @@ impl SampleQuery {
             avoid_o2m: slot.avoid_o2m.clone(),
             avoid_recent: slot.avoid_recent,
             weighted: slot.weighted,
-            max_depth: None,
             count: slot.count,
         }
     }

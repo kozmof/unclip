@@ -104,8 +104,10 @@ mod tests {
         assert_eq!(ancestor_paths, vec!["/ikebukuro", "/ikebukuro/station"]);
 
         // find: scope + required o2o.
-        let mut q = SampleQuery::default();
-        q.under = Some("/ikebukuro".into());
+        let mut q = SampleQuery {
+            under: Some("/ikebukuro".into()),
+            ..Default::default()
+        };
         q.require_o2o.insert("axis".into(), "place".into());
         let found = repo.find(q).await.unwrap();
         assert_eq!(found.len(), 1);

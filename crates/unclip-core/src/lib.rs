@@ -18,7 +18,7 @@ pub use frame::{Frame, Slot};
 pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use query::SampleQuery;
 pub use reference::Reference;
-pub use validate::{validate_branch, validate_packet};
+pub use validate::{validate_branch, validate_packet, validate_path};
 
 #[cfg(test)]
 mod tests {
@@ -192,6 +192,16 @@ metadata_suggest:
             branch,
         });
         assert!(validate_packet(&frame, &packet).is_empty());
+    }
+
+    #[test]
+    fn validate_path_accepts_and_rejects() {
+        assert!(validate_path("/ikebukuro/station/exit").is_ok());
+        assert!(validate_path("/a").is_ok());
+
+        for bad in ["/", "", "ikebukuro", "/a/", "/a//b", "/a/ b"] {
+            assert!(validate_path(bad).is_err(), "expected `{bad}` to be invalid");
+        }
     }
 
     #[test]
