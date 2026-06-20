@@ -206,4 +206,42 @@ mod tests {
         frames.delete_frame("story").await.unwrap();
         assert!(frames.get_frame("story").await.unwrap().is_none());
     }
+
+    #[tokio::test]
+    async fn attach_reference_appends() {
+        let repo = repo().await;
+        repo.add(Branch::new("/ueno/cafe")).await.unwrap();
+
+        repo.attach_reference(
+            "/ueno/cafe",
+            &Reference {
+                kind: "file".into(),
+                value: "refs/cafe.jpg".into(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        repo.attach_reference(
+            "/ueno/cafe",
+            &Reference {
+                kind: "url".into(),
+                value: "https://example.com".into(),
+                note: Some("ext".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let branch = repo.get("/ueno/cafe").await.unwrap().unwrap();
+        assert_eq!(branch.references.len(), 2);
+        assert_eq!(branch.references[0].kind, "file");
+        assert_eq!(branch.references[1].note.as_deref(), Some("ext"));
+
+        // Attaching to a missing branch errors.
+        assert!(repo
+            .attach_reference("/nope", &Reference { kind: "file".into(), value: "x".into(), note: None })
+            .await
+            .is_err());
+    }
 }

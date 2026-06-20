@@ -19,7 +19,7 @@ pub struct FilterInput {
 }
 
 impl FilterInput {
-    fn into_query(self, count: usize, weighted: bool, avoid_recent: bool) -> anyhow::Result<SampleQuery> {
+    pub fn into_query(self, count: usize, weighted: bool, avoid_recent: bool) -> anyhow::Result<SampleQuery> {
         let mut q = SampleQuery {
             under: self.under,
             count,
@@ -202,6 +202,19 @@ fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> 
         .find(|(slot, _)| slot.as_deref() == Some(slot_name))
         .or_else(|| overrides.iter().find(|(slot, _)| slot.is_none()))
         .map(|(_, path)| path.clone())
+}
+
+/// `unclip export` — find branches by filter and render them.
+pub async fn export_cmd(
+    branches: &impl BranchRepository,
+    filter: FilterInput,
+    format: Format,
+) -> anyhow::Result<()> {
+    let query = filter.into_query(usize::MAX, false, false)?;
+    let mut matched = branches.find(query).await?;
+    matched.sort_by(|a, b| a.path.cmp(&b.path));
+    print!("{}", unclip_io::render_branches(&matched, format)?);
+    Ok(())
 }
 
 /// `unclip used <path>`.

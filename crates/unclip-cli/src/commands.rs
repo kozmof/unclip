@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
-use unclip_core::{validate_branch, validate_packet, Branch, Frame, SampleQuery, SelectionPacket, Slot};
+use unclip_core::{
+    validate_branch, validate_packet, Branch, Frame, Reference, SampleQuery, SelectionPacket, Slot,
+};
 use unclip_io::split_frame_selector;
 use unclip_store::{
     BranchRepository, FrameRepository, IndexedValue, SeaOrmBranchRepository,
@@ -180,6 +182,74 @@ pub async fn o2m(repo: &SeaOrmBranchRepository, selector: Option<String>) -> any
         }
     }
     Ok(())
+}
+
+/// `unclip import <file>` — bulk import branches (upsert by path).
+pub async fn import(repo: &impl BranchRepository, branches: Vec<Branch>) -> anyhow::Result<()> {
+    if branches.is_empty() {
+        eprintln!("(no branches in file)");
+        return Ok(());
+    }
+    let (mut added, mut updated) = (0usize, 0usize);
+    for mut branch in branches {
+        branch.id = None;
+        if repo.get(&branch.path).await?.is_some() {
+            repo.update(branch).await?;
+            updated += 1;
+        } else {
+            repo.add(branch).await?;
+            added += 1;
+        }
+    }
+    println!("imported {} branch(es): {added} added, {updated} updated", added + updated);
+    Ok(())
+}
+
+/// `unclip attach <path> <value>` — attach a reference to a branch.
+pub async fn attach(
+    repo: &SeaOrmBranchRepository,
+    path: &str,
+    value: String,
+    kind: Option<String>,
+    note: Option<String>,
+) -> anyhow::Result<()> {
+    let kind = kind.unwrap_or_else(|| infer_reference_kind(&value));
+    let reference = Reference {
+        kind: kind.clone(),
+        value: value.clone(),
+        note,
+    };
+    repo.attach_reference(path, &reference).await?;
+    println!("attached {kind} `{value}` to {path}");
+    Ok(())
+}
+
+/// `unclip refs <path>` — list a branch's references.
+pub async fn refs(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
+    let branch = repo
+        .get(path)
+        .await?
+        .with_context(|| format!("branch not found: {path}"))?;
+    if branch.references.is_empty() {
+        eprintln!("(no references on {path})");
+        return Ok(());
+    }
+    for r in branch.references {
+        match &r.note {
+            Some(note) => println!("{}\t{}\t{}", r.kind, r.value, note),
+            None => println!("{}\t{}", r.kind, r.value),
+        }
+    }
+    Ok(())
+}
+
+/// Infer a reference type from its value: URLs vs. local files.
+fn infer_reference_kind(value: &str) -> String {
+    if value.starts_with("http://") || value.starts_with("https://") {
+        "url".to_string()
+    } else {
+        "file".to_string()
+    }
 }
 
 /// Import frames parsed from a frames file.

@@ -199,6 +199,41 @@ enum Command {
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
         avoid_o2m: Vec<(String, String)>,
     },
+
+    /// Import branches from a YAML/JSON/JSONL file (upsert by path).
+    Import {
+        file: PathBuf,
+    },
+
+    /// Export branches matching a filter.
+    Export {
+        #[arg(long)]
+        under: Option<String>,
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2o", value_parser = parse_kv)]
+        avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "avoid-o2m", value_parser = parse_kv)]
+        avoid_o2m: Vec<(String, String)>,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+    },
+
+    /// Attach a reference to a branch.
+    Attach {
+        path: String,
+        value: String,
+        /// Reference type (default: inferred — url for http(s), else file).
+        #[arg(long = "type")]
+        kind: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+
+    /// List a branch's references.
+    Refs {
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -367,6 +402,39 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
+        Command::Import { file } => {
+            let branches = unclip_io::load_branches_file(&file)?;
+            commands::import(&repos.branches, branches).await?;
+        }
+        Command::Export {
+            under,
+            o2o,
+            avoid_o2o,
+            avoid_o2m,
+            format,
+        } => {
+            sampling::export_cmd(
+                &repos.branches,
+                FilterInput {
+                    under,
+                    require_o2o: o2o,
+                    avoid_o2o,
+                    prefer_o2m: Vec::new(),
+                    avoid_o2m,
+                },
+                format,
+            )
+            .await?;
+        }
+        Command::Attach {
+            path,
+            value,
+            kind,
+            note,
+        } => {
+            commands::attach(&repos.branches, &path, value, kind, note).await?;
+        }
+        Command::Refs { path } => commands::refs(&repos.branches, &path).await?,
     }
 
     Ok(())

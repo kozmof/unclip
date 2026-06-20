@@ -2,10 +2,11 @@
 
 use async_trait::async_trait;
 use sea_orm::{
+    ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, Statement, TransactionTrait,
 };
-use unclip_core::{parent_of, Branch, SampleQuery};
+use unclip_core::{parent_of, Branch, Reference, SampleQuery};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
 
 use crate::mapper;
@@ -161,6 +162,27 @@ impl SeaOrmBranchRepository {
             .map(|r| r.branch_id)
             .collect();
         self.load_branches_by_ids(ids).await
+    }
+
+    /// Attach a single reference to an existing branch.
+    pub async fn attach_reference(
+        &self,
+        path: &str,
+        reference: &Reference,
+    ) -> anyhow::Result<()> {
+        let model = self
+            .model_by_path(path)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("branch not found: {path}"))?;
+        let am = branch_references::ActiveModel {
+            id: NotSet,
+            branch_id: Set(model.id),
+            r#type: Set(reference.kind.clone()),
+            value: Set(reference.value.clone()),
+            note: Set(reference.note.clone()),
+        };
+        branch_references::Entity::insert(am).exec(&self.db).await?;
+        Ok(())
     }
 
     /// Branches carrying a specific o2m value.
