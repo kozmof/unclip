@@ -4,8 +4,8 @@ use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
 };
+use unclip_core::{PatternEntry, PatternTarget};
 use unclip_entity::pattern_entries;
-use unclip_match::{PatternEntry, PatternTarget};
 
 /// A stored pattern entry with its id and enabled flag.
 #[derive(Debug, Clone, PartialEq, Eq)]

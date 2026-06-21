@@ -325,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn pattern_add_list_roundtrip() {
         use pattern_repository::SeaOrmPatternRepository;
-        use unclip_match::{PatternEntry, PatternTarget};
+        use unclip_core::{PatternEntry, PatternTarget};
 
         let db = connect_and_migrate("sqlite::memory:").await.unwrap();
         let patterns = SeaOrmPatternRepository::new(db);

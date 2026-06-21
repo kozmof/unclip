@@ -4,8 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, Statement,
+    DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect, Statement,
 };
 use unclip_entity::{selection_packets, usage_history};
 
@@ -123,21 +122,15 @@ impl SeaOrmHistoryRepository {
     }
 
     /// Usage count and last-used timestamp for a branch.
+    ///
+    /// Delegates to the batched aggregate so a single branch and a set of
+    /// branches share one code path (and one query shape).
     pub async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary> {
-        let count = usage_history::Entity::find()
-            .filter(usage_history::Column::BranchId.eq(branch_id as i32))
-            .count(&self.db)
-            .await?;
-        let last = usage_history::Entity::find()
-            .filter(usage_history::Column::BranchId.eq(branch_id as i32))
-            .order_by_desc(usage_history::Column::UsedAt)
-            .one(&self.db)
+        Ok(self
+            .usage_summaries(&[branch_id])
             .await?
-            .map(|r| r.used_at);
-        Ok(UsageSummary {
-            count,
-            last_used: last,
-        })
+            .remove(&branch_id)
+            .unwrap_or_default())
     }
 
     /// Persist a selection packet.

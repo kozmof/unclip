@@ -7,7 +7,7 @@ use sea_orm::{
     sea_query::LikeExpr,
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
-    QueryFilter, Statement, TransactionTrait,
+    QueryFilter, QueryOrder, Statement, TransactionTrait,
 };
 use unclip_core::{parent_of, Branch, Reference, SampleQuery};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
@@ -129,6 +129,7 @@ impl SeaOrmBranchRepository {
             .await?;
         let refs = branch_references::Entity::find()
             .filter(branch_references::Column::BranchId.eq(id))
+            .order_by_asc(branch_references::Column::Id)
             .all(&self.db)
             .await?;
         mapper::assemble_branch(model, o2o, o2m, refs)
@@ -152,6 +153,7 @@ impl SeaOrmBranchRepository {
             .await?;
         let refs = branch_references::Entity::find()
             .filter(branch_references::Column::BranchId.is_in(ids))
+            .order_by_asc(branch_references::Column::Id)
             .all(&self.db)
             .await?;
 

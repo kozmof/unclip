@@ -146,7 +146,7 @@ pub async fn compose_cmd(
         .with_context(|| format!("frame not found: {}", input.frame))?;
 
     let base_seed = input.seed.unwrap_or_else(random_seed);
-    let mut packets = Vec::with_capacity(input.count.max(1));
+    let mut packets = Vec::with_capacity(input.count);
 
     // The recent set is independent of slot and packet; fetch it once if any
     // slot needs it.
@@ -167,7 +167,7 @@ pub async fn compose_cmd(
         slot_plans.push((slot, query, candidates));
     }
 
-    for k in 0..input.count.max(1) {
+    for k in 0..input.count {
         let seed = base_seed.wrapping_add(k as u64);
         let mut rng = rng_from_seed(seed);
 
