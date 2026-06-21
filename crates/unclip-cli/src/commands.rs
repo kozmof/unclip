@@ -150,9 +150,9 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
         },
     };
     merge_o2o(&mut q.require_o2o, input.require_o2o)?;
-    for (name, value) in input.avoid_o2o {
-        q.avoid_o2o.insert(name, value);
-    }
+    // avoid_o2o is one value per name (DRAFT §5); reject a repeated name rather
+    // than silently keeping the last, matching require_o2o.
+    merge_o2o(&mut q.avoid_o2o, input.avoid_o2o)?;
     for (name, value) in input.require_o2m {
         q.require_o2m.entry(name).or_default().push(value);
     }

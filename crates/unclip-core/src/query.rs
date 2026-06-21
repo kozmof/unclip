@@ -4,7 +4,10 @@ use serde::Serialize;
 
 use crate::frame::Slot;
 
-/// An independent set of filters used by sampling and composition.
+/// What to draw from: the hard scope/o2o/o2m filters plus the soft `prefer_o2m`
+/// scoring signal. *How* to draw — count, weighting, recency — lives in
+/// [`SampleParams`], so the type the store's `find` consumes carries only
+/// fields it actually filters on (no sampling-only knobs riding along).
 ///
 /// `Serialize` is derived so a query can be embedded verbatim in a packet's
 /// `query` field; new fields are then carried automatically (no hand-written
@@ -19,14 +22,10 @@ pub struct SampleQuery {
     pub require_o2m: BTreeMap<String, Vec<String>>,
     pub prefer_o2m: BTreeMap<String, Vec<String>>,
     pub avoid_o2m: BTreeMap<String, Vec<String>>,
-
-    pub avoid_recent: bool,
-    pub weighted: bool,
-    pub count: usize,
 }
 
 impl SampleQuery {
-    /// Derive a query from a frame slot, optionally overriding the scope.
+    /// Derive the filter from a frame slot, optionally overriding the scope.
     pub fn from_slot(slot: &Slot, under_override: Option<String>) -> Self {
         Self {
             under: under_override.or_else(|| slot.under.clone()),
@@ -35,9 +34,28 @@ impl SampleQuery {
             require_o2m: slot.require_o2m.clone(),
             prefer_o2m: slot.prefer_o2m.clone(),
             avoid_o2m: slot.avoid_o2m.clone(),
-            avoid_recent: slot.avoid_recent,
-            weighted: slot.weighted,
+        }
+    }
+}
+
+/// How to draw from the filtered candidates: how many, whether to weight by
+/// `weight`, and whether to penalize recently-used branches. Separate from
+/// [`SampleQuery`] so filter-only callers (`find`, `stats`, `stale`, `export`)
+/// never have to invent a count.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct SampleParams {
+    pub count: usize,
+    pub weighted: bool,
+    pub avoid_recent: bool,
+}
+
+impl SampleParams {
+    /// Derive the sampling controls from a frame slot.
+    pub fn from_slot(slot: &Slot) -> Self {
+        Self {
             count: slot.count,
+            weighted: slot.weighted,
+            avoid_recent: slot.avoid_recent,
         }
     }
 }

@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use unclip_core::{Branch, SampleQuery};
+use unclip_core::{Branch, SampleParams, SampleQuery};
 
 /// Each matched `prefer_o2m` value multiplies the score by this much.
 const PREFER_BONUS_PER_MATCH: f64 = 0.5;
@@ -45,8 +45,13 @@ pub fn random_packet_id() -> String {
 }
 
 /// Score a single candidate against the query and recency set.
-pub fn score(branch: &Branch, query: &SampleQuery, recent_ids: &HashSet<i64>) -> f64 {
-    let mut s = if query.weighted {
+pub fn score(
+    branch: &Branch,
+    query: &SampleQuery,
+    params: &SampleParams,
+    recent_ids: &HashSet<i64>,
+) -> f64 {
+    let mut s = if params.weighted {
         branch.weight.max(0.0)
     } else {
         1.0
@@ -60,7 +65,7 @@ pub fn score(branch: &Branch, query: &SampleQuery, recent_ids: &HashSet<i64>) ->
     }
     s *= 1.0 + PREFER_BONUS_PER_MATCH * matches as f64;
 
-    if query.avoid_recent {
+    if params.avoid_recent {
         if let Some(id) = branch.id {
             if recent_ids.contains(&id) {
                 s *= RECENT_PENALTY;
@@ -71,15 +76,16 @@ pub fn score(branch: &Branch, query: &SampleQuery, recent_ids: &HashSet<i64>) ->
     s.max(MIN_SCORE)
 }
 
-/// Select up to `query.count` branches from `candidates` by weighted random
+/// Select up to `params.count` branches from `candidates` by weighted random
 /// selection without replacement. Returns references into `candidates`.
 pub fn sample<'a>(
     candidates: &'a [Branch],
     query: &SampleQuery,
+    params: &SampleParams,
     recent_ids: &HashSet<i64>,
     rng: &mut StdRng,
 ) -> Vec<&'a Branch> {
-    let take = query.count.min(candidates.len());
+    let take = params.count.min(candidates.len());
     if take == 0 {
         return Vec::new();
     }
@@ -88,7 +94,7 @@ pub fn sample<'a>(
     let mut pool: Vec<(usize, f64)> = candidates
         .iter()
         .enumerate()
-        .map(|(i, b)| (i, score(b, query, recent_ids)))
+        .map(|(i, b)| (i, score(b, query, params, recent_ids)))
         .collect();
 
     let mut chosen = Vec::with_capacity(take);
@@ -122,8 +128,8 @@ mod tests {
         b
     }
 
-    fn query(count: usize) -> SampleQuery {
-        SampleQuery {
+    fn params(count: usize) -> SampleParams {
+        SampleParams {
             count,
             ..Default::default()
         }
@@ -134,19 +140,20 @@ mod tests {
         let candidates: Vec<Branch> = (0..10)
             .map(|i| branch(&format!("/b{i}"), i, 1.0))
             .collect();
-        let q = query(3);
+        let q = SampleQuery::default();
+        let p = params(3);
         let recent = HashSet::new();
 
         let a = {
             let mut rng = rng_from_seed(42);
-            sample(&candidates, &q, &recent, &mut rng)
+            sample(&candidates, &q, &p, &recent, &mut rng)
                 .iter()
                 .map(|b| b.path.clone())
                 .collect::<Vec<_>>()
         };
         let b = {
             let mut rng = rng_from_seed(42);
-            sample(&candidates, &q, &recent, &mut rng)
+            sample(&candidates, &q, &p, &recent, &mut rng)
                 .iter()
                 .map(|b| b.path.clone())
                 .collect::<Vec<_>>()
@@ -162,7 +169,7 @@ mod tests {
     fn count_capped_at_candidates() {
         let candidates = vec![branch("/a", 1, 1.0), branch("/b", 2, 1.0)];
         let mut rng = rng_from_seed(1);
-        let chosen = sample(&candidates, &query(5), &HashSet::new(), &mut rng);
+        let chosen = sample(&candidates, &SampleQuery::default(), &params(5), &HashSet::new(), &mut rng);
         assert_eq!(chosen.len(), 2);
     }
 
@@ -174,13 +181,14 @@ mod tests {
             .insert("density".into(), vec!["crowded".into()]);
         let plain = branch("/q", 2, 1.0);
 
-        let mut q = query(1);
+        let mut q = SampleQuery::default();
         let mut prefer = BTreeMap::new();
         prefer.insert("density".to_string(), vec!["crowded".to_string()]);
         q.prefer_o2m = prefer;
 
+        let p = params(1);
         let recent = HashSet::new();
-        assert!(score(&preferred, &q, &recent) > score(&plain, &q, &recent));
+        assert!(score(&preferred, &q, &p, &recent) > score(&plain, &q, &p, &recent));
     }
 
     #[test]
@@ -188,10 +196,11 @@ mod tests {
         let b = branch("/x", 7, 1.0);
         let recent: HashSet<i64> = [7].into_iter().collect();
 
-        let mut q = query(1);
-        assert_eq!(score(&b, &q, &recent), score(&b, &q, &HashSet::new()));
+        let q = SampleQuery::default();
+        let mut p = params(1);
+        assert_eq!(score(&b, &q, &p, &recent), score(&b, &q, &p, &HashSet::new()));
 
-        q.avoid_recent = true;
-        assert!(score(&b, &q, &recent) < score(&b, &q, &HashSet::new()));
+        p.avoid_recent = true;
+        assert!(score(&b, &q, &p, &recent) < score(&b, &q, &p, &HashSet::new()));
     }
 }

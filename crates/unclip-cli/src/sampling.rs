@@ -1,7 +1,7 @@
 //! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
 
 use anyhow::Context;
-use unclip_core::{Branch, SampleQuery, Selection, SelectionPacket};
+use unclip_core::{Branch, SampleParams, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
 use unclip_store::{now, BranchRepository, PacketRecord, SeaOrmHistoryRepository};
@@ -20,18 +20,18 @@ pub struct FilterInput {
 }
 
 impl FilterInput {
-    pub fn into_query(self, count: usize, weighted: bool, avoid_recent: bool) -> anyhow::Result<SampleQuery> {
+    /// Assemble the hard/soft filter from the parsed flags. Sampling controls
+    /// (count/weighted/avoid_recent) are not part of the filter — callers that
+    /// draw build a [`SampleParams`] separately.
+    pub fn into_query(self) -> anyhow::Result<SampleQuery> {
         let mut q = SampleQuery {
             under: self.under,
-            count,
-            weighted,
-            avoid_recent,
             ..Default::default()
         };
         crate::commands::merge_o2o(&mut q.require_o2o, self.require_o2o)?;
-        for (name, value) in self.avoid_o2o {
-            q.avoid_o2o.insert(name, value);
-        }
+        // avoid_o2o is one value per name (DRAFT §5); a repeated name is a usage
+        // error, mirroring require_o2o rather than silently keeping the last.
+        crate::commands::merge_o2o(&mut q.avoid_o2o, self.avoid_o2o)?;
         for (name, value) in self.require_o2m {
             q.require_o2m.entry(name).or_default().push(value);
         }
@@ -71,7 +71,12 @@ pub async fn sample_cmd(
         dry_run,
     } = input;
 
-    let query = filter.into_query(count, weighted, avoid_recent)?;
+    let query = filter.into_query()?;
+    let params = SampleParams {
+        count,
+        weighted,
+        avoid_recent,
+    };
     let candidates = branches.find(query.clone()).await?;
 
     let recent = if avoid_recent {
@@ -82,14 +87,14 @@ pub async fn sample_cmd(
 
     let seed = seed.unwrap_or_else(random_seed);
     let mut rng = rng_from_seed(seed);
-    let chosen: Vec<Branch> = sample(&candidates, &query, &recent, &mut rng)
+    let chosen: Vec<Branch> = sample(&candidates, &query, &params, &recent, &mut rng)
         .into_iter()
         .cloned()
         .collect();
 
     let mut packet = SelectionPacket::new(None, Some(seed));
     packet.created_at = Some(now());
-    packet.query = Some(serde_json::to_value(&query)?);
+    packet.query = Some(query_provenance(&query, &params)?);
     packet.selections = chosen
         .iter()
         .map(|b| Selection {
@@ -175,8 +180,9 @@ pub async fn compose_cmd(
     for slot in &frame.slots {
         let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
         let query = SampleQuery::from_slot(slot, under);
+        let params = SampleParams::from_slot(slot);
         let candidates = branches.find(query.clone()).await?;
-        slot_plans.push((slot, query, candidates));
+        slot_plans.push((slot, query, params, candidates));
     }
 
     for k in 0..input.count {
@@ -187,9 +193,9 @@ pub async fn compose_cmd(
         packet.created_at = Some(now());
         packet.query = Some(serde_json::json!({ "frame": frame.name }));
 
-        for (slot, query, candidates) in &slot_plans {
+        for (slot, query, params, candidates) in &slot_plans {
             let slot_recent = if slot.avoid_recent { &recent } else { &empty_recent };
-            let chosen = sample(candidates, query, slot_recent, &mut rng);
+            let chosen = sample(candidates, query, params, slot_recent, &mut rng);
             for branch in chosen {
                 packet.selections.push(Selection {
                     slot: Some(slot.name.clone()),
@@ -227,7 +233,7 @@ pub async fn export_cmd(
     filter: FilterInput,
     format: Format,
 ) -> anyhow::Result<()> {
-    let query = filter.into_query(usize::MAX, false, false)?;
+    let query = filter.into_query()?;
     let mut matched = branches.find(query).await?;
     matched.sort_by(|a, b| a.path.cmp(&b.path));
     print!("{}", unclip_io::render_branches(&matched, format)?);
@@ -259,7 +265,7 @@ pub async fn stats_cmd(
     history: &SeaOrmHistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
-    let query = filter.into_query(usize::MAX, false, false)?;
+    let query = filter.into_query()?;
     let matched = branches.find(query).await?;
 
     let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
@@ -286,7 +292,7 @@ pub async fn stale_cmd(
     history: &SeaOrmHistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
-    let query = filter.into_query(usize::MAX, false, false)?;
+    let query = filter.into_query()?;
     let matched = branches.find(query).await?;
 
     let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
@@ -311,6 +317,19 @@ pub async fn stale_cmd(
         println!("{path}\tuses={count}");
     }
     Ok(())
+}
+
+/// Build the packet `query` provenance value: the filter plus the sampling
+/// controls, flattened into one object so a packet records exactly how it was
+/// drawn (count/weighted/avoid_recent) alongside what it was drawn from.
+fn query_provenance(query: &SampleQuery, params: &SampleParams) -> anyhow::Result<serde_json::Value> {
+    let mut value = serde_json::to_value(query)?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("count".into(), params.count.into());
+        obj.insert("weighted".into(), params.weighted.into());
+        obj.insert("avoid_recent".into(), params.avoid_recent.into());
+    }
+    Ok(value)
 }
 
 /// Persist a packet and the usage rows for its selected branches in one

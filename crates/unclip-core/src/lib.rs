@@ -18,7 +18,7 @@ pub use error::{CoreError, Result};
 pub use frame::{Frame, Slot};
 pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use pattern::{PatternEntry, PatternTarget};
-pub use query::SampleQuery;
+pub use query::{SampleParams, SampleQuery};
 pub use reference::Reference;
 pub use validate::{validate_branch, validate_packet, validate_path};
 
@@ -255,7 +255,10 @@ avoid_recent: true
         let q = SampleQuery::from_slot(&slot, Some("/ikebukuro".into()));
         assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
         assert_eq!(q.require_o2o.get("axis").unwrap(), "place");
-        assert!(q.avoid_recent);
-        assert_eq!(q.count, 1);
+
+        // Sampling controls split off into SampleParams.
+        let p = SampleParams::from_slot(&slot);
+        assert!(p.avoid_recent);
+        assert_eq!(p.count, 1);
     }
 }
