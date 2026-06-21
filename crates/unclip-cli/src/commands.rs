@@ -49,6 +49,11 @@ pub struct AddInput {
 
 pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Result<()> {
     validate_path(&input.path)?;
+    // A non-finite weight (NaN/inf) would poison the sampler's score sum, so
+    // reject it at the boundary rather than persisting an unusable branch.
+    if !input.weight.is_finite() {
+        bail!("weight must be a finite number, got {}", input.weight);
+    }
     if repo.get(&input.path).await?.is_some() {
         bail!("branch already exists: {}", input.path);
     }

@@ -5,15 +5,19 @@ use unclip_migration::{Migrator, MigratorTrait};
 
 /// Open a connection to the given SQLite URL and enable foreign keys.
 ///
-/// In-memory databases are pinned to a single pooled connection so the schema
-/// and data survive for the lifetime of the pool. A `busy_timeout` lets a
-/// second writer (e.g. a concurrent CLI invocation) wait briefly for a lock
-/// instead of failing immediately with "database is locked".
+/// The pool is pinned to a single connection. SQLite `PRAGMA`s are
+/// connection-scoped, so a pool with several connections would leave
+/// `foreign_keys`/`busy_timeout` set only on whichever connection happened to
+/// run them. Since this is a single-process CLI, one connection is plenty and
+/// guarantees both pragmas apply to every query. It also keeps in-memory
+/// databases (whose schema lives only in their connection) working.
+///
+/// `busy_timeout` lets a second writer (e.g. a concurrent CLI invocation in a
+/// separate process) wait briefly for a lock instead of failing immediately
+/// with "database is locked".
 pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
     let mut opt = ConnectOptions::new(url.to_owned());
-    if url.contains(":memory:") {
-        opt.max_connections(1).min_connections(1);
-    }
+    opt.max_connections(1).min_connections(1);
     let db = Database::connect(opt).await?;
     db.execute_unprepared("PRAGMA foreign_keys = ON;").await?;
     db.execute_unprepared("PRAGMA busy_timeout = 5000;").await?;

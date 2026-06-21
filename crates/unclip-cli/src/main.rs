@@ -292,7 +292,9 @@ enum PatternAction {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let repos = db::open_repos(&cli.db).await?;
+    // Only `init` may create the database; other commands require it to exist.
+    let create = matches!(cli.command, Command::Init);
+    let repos = db::open_repos(&cli.db, create).await?;
 
     match cli.command {
         Command::Init => {

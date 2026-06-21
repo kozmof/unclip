@@ -58,6 +58,12 @@ impl Matcher {
     }
 
     /// Find all (overlapping) pattern hits in `text`.
+    ///
+    /// Matches are constrained to word boundaries: a hit counts only when the
+    /// characters immediately before and after it are non-alphanumeric (or the
+    /// string edge). This stops short values from matching inside larger words
+    /// (e.g. `red` inside `predator`, `tense` inside `intense`) while still
+    /// allowing multi-word patterns and values separated by punctuation.
     pub fn scan(&self, text: &str) -> Vec<PatternHit> {
         let Some(automaton) = &self.automaton else {
             return Vec::new();
@@ -65,6 +71,9 @@ impl Matcher {
         let haystack = text.to_lowercase();
         let mut hits = Vec::new();
         for m in automaton.find_overlapping_iter(&haystack) {
+            if !at_word_boundary(&haystack, m.start(), m.end()) {
+                continue;
+            }
             let group = &self.groups[m.value() as usize];
             for entry in group {
                 hits.push(PatternHit {
@@ -77,6 +86,20 @@ impl Matcher {
         }
         hits
     }
+}
+
+/// Whether the `[start, end)` byte range in `haystack` is delimited by word
+/// boundaries — i.e. the neighbouring characters are not alphanumeric.
+fn at_word_boundary(haystack: &str, start: usize, end: usize) -> bool {
+    let before_ok = haystack[..start]
+        .chars()
+        .next_back()
+        .is_none_or(|c| !c.is_alphanumeric());
+    let after_ok = haystack[end..]
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric());
+    before_ok && after_ok
 }
 
 #[cfg(test)]
@@ -114,6 +137,33 @@ mod tests {
         let targets: Vec<_> = hits.iter().map(|h| h.target.describe()).collect();
         assert!(targets.contains(&"o2m object=locker".to_string()));
         assert!(targets.contains(&"o2m color.dominant=red".to_string()));
+    }
+
+    #[test]
+    fn only_matches_on_word_boundaries() {
+        let entries = vec![
+            PatternEntry::new(
+                "red",
+                PatternTarget::O2m {
+                    name: "color".into(),
+                    value: "red".into(),
+                },
+            ),
+            PatternEntry::new(
+                "tense",
+                PatternTarget::O2m {
+                    name: "mood".into(),
+                    value: "tense".into(),
+                },
+            ),
+        ];
+        let m = Matcher::build(entries).unwrap();
+
+        // Substrings inside larger words must not match.
+        assert!(m.scan("a predator in the intense dark").is_empty());
+
+        // Whole words, and words bounded by punctuation, do match.
+        assert_eq!(m.scan("a RED, tense room").len(), 2);
     }
 
     #[test]
