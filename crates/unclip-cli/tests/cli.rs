@@ -125,7 +125,10 @@ fn duplicate_o2o_name_on_add_is_rejected() {
     let path = db.path();
     unclip(&path, &["init"]);
 
-    let out = unclip(&path, &["add", "/a", "--o2o", "axis=place", "--o2o", "axis=time"]);
+    let out = unclip(
+        &path,
+        &["add", "/a", "--o2o", "axis=place", "--o2o", "axis=time"],
+    );
     assert!(!out.status.success());
     assert!(stderr(&out).contains("duplicate o2o name"));
 }
@@ -141,7 +144,13 @@ fn duplicate_avoid_o2o_name_on_query_is_rejected() {
 
     let out = unclip(
         &path,
-        &["query", "--avoid-o2o", "axis=place", "--avoid-o2o", "axis=time"],
+        &[
+            "query",
+            "--avoid-o2o",
+            "axis=place",
+            "--avoid-o2o",
+            "axis=time",
+        ],
     );
     assert!(!out.status.success());
     assert!(stderr(&out).contains("duplicate o2o name"));
@@ -159,11 +168,29 @@ fn sample_seed_is_reproducible_and_dry_run_records_nothing() {
 
     let one = unclip(
         &path,
-        &["sample", "--count", "3", "--seed", "42", "--format", "jsonl", "--dry-run"],
+        &[
+            "sample",
+            "--count",
+            "3",
+            "--seed",
+            "42",
+            "--format",
+            "jsonl",
+            "--dry-run",
+        ],
     );
     let two = unclip(
         &path,
-        &["sample", "--count", "3", "--seed", "42", "--format", "jsonl", "--dry-run"],
+        &[
+            "sample",
+            "--count",
+            "3",
+            "--seed",
+            "42",
+            "--format",
+            "jsonl",
+            "--dry-run",
+        ],
     );
     assert!(one.status.success() && two.status.success());
     // The packets carry a wall-clock `created_at`, so compare only the
@@ -180,7 +207,9 @@ fn sample_seed_is_reproducible_and_dry_run_records_nothing() {
     assert!(stdout(&stats).contains("total uses: 0"));
 
     // A real sample records usage.
-    assert!(unclip(&path, &["sample", "--count", "1", "--seed", "1"]).status.success());
+    assert!(unclip(&path, &["sample", "--count", "1", "--seed", "1"])
+        .status
+        .success());
     let stats = unclip(&path, &["stats"]);
     assert!(stdout(&stats).contains("total uses: 1"));
 }

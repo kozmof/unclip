@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "frame_slot_o2o_values")]
 pub struct Model {
-    // The table has no DB-level primary key (DRAFT §16); declare a composite
+    // The table has no DB-level primary key; declare a composite
     // key over all columns so SeaORM can treat it as an entity.
     #[sea_orm(primary_key, auto_increment = false)]
     pub slot_id: i32,

@@ -3,7 +3,7 @@
 //! Validation reports a list of human-readable violation reasons. An empty
 //! list means the subject satisfies the constraints. Only *hard* constraints
 //! are checked (scope / require_o2o / avoid_o2o / require_o2m / avoid_o2m);
-//! `prefer_o2m` is a scoring signal, not a requirement (DRAFT §6, §10).
+//! `prefer_o2m` is a scoring signal, not a requirement.
 
 use crate::branch::is_under;
 use crate::error::{CoreError, Result};
@@ -43,9 +43,9 @@ pub fn validate_branch(slot: &Slot, branch: &Branch) -> Vec<String> {
     for (name, value) in &slot.require_o2o {
         match branch.o2o.get(name) {
             Some(actual) if actual == value => {}
-            Some(actual) => violations.push(format!(
-                "o2o `{name}` is `{actual}`, required `{value}`"
-            )),
+            Some(actual) => {
+                violations.push(format!("o2o `{name}` is `{actual}`, required `{value}`"))
+            }
             None => violations.push(format!("missing required o2o `{name}={value}`")),
         }
     }
@@ -93,9 +93,7 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
                     violations.push(format!("[{slot_name}] {reason}"));
                 }
             }
-            None => violations.push(format!(
-                "selection references unknown slot `{slot_name}`"
-            )),
+            None => violations.push(format!("selection references unknown slot `{slot_name}`")),
         }
     }
 

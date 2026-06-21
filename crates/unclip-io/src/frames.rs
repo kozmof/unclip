@@ -1,4 +1,4 @@
-//! Parsing of frame-definition YAML files (DRAFT §10).
+//! Parsing of frame-definition YAML files.
 //!
 //! ```yaml
 //! frames:
@@ -63,7 +63,7 @@ pub fn split_frame_selector(selector: &str) -> (&str, Option<&str>) {
 mod tests {
     use super::*;
 
-    // Mirrors the frame definition in DRAFT §10.
+    // Mirrors the frame definition.
     const STORY_FRAME: &str = r#"
 frames:
   story:
@@ -110,6 +110,9 @@ frames:
     #[test]
     fn split_selector() {
         assert_eq!(split_frame_selector("story"), ("story", None));
-        assert_eq!(split_frame_selector("story.place"), ("story", Some("place")));
+        assert_eq!(
+            split_frame_selector("story.place"),
+            ("story", Some("place"))
+        );
     }
 }

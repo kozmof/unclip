@@ -1,8 +1,6 @@
 .devcontainer/
 .npm-cache/
 .go-cache/
-DRAFT.md
-STATUS.md
 /target
 *.db
 *.db-shm

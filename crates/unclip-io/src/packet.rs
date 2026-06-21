@@ -1,4 +1,4 @@
-//! Rendering selection packets to YAML / JSON / JSONL (DRAFT §14).
+//! Rendering selection packets to YAML / JSON / JSONL.
 
 use std::str::FromStr;
 
@@ -43,8 +43,7 @@ pub fn render_packet(packet: &SelectionPacket, format: Format) -> anyhow::Result
 pub fn render_packets(packets: &[SelectionPacket], format: Format) -> anyhow::Result<String> {
     match format {
         Format::Yaml => {
-            let docs: Result<Vec<_>, _> =
-                packets.iter().map(serde_yaml::to_string).collect();
+            let docs: Result<Vec<_>, _> = packets.iter().map(serde_yaml::to_string).collect();
             Ok(docs?.join("---\n"))
         }
         Format::Json => {

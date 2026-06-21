@@ -1,4 +1,4 @@
-//! Hand-written entity for `pattern_entries` (DRAFT §18).
+//! Hand-written entity for `pattern_entries`.
 //!
 //! Not produced by sea-orm-codegen, so it needs no post-generation fixups.
 

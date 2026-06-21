@@ -1,6 +1,6 @@
 //! daachorse-backed multi-pattern scanner.
 //!
-//! The matcher is built from database-derived patterns (DRAFT §17: "Build
+//! The matcher is built from database-derived patterns ("Build
 //! daachorse automata from database state. Do not make daachorse the
 //! database."). Matching is case-insensitive (patterns and haystack are
 //! lowercased), so reported offsets are into the lowercased text.

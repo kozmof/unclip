@@ -1,7 +1,7 @@
 //! unclip-match — fast multi-pattern scanning over language surfaces.
 //!
 //! SQLite is the structured truth; daachorse is an in-memory matcher built
-//! from database state (DRAFT §17).
+//! from database state.
 
 pub mod dictionary;
 pub mod matcher;

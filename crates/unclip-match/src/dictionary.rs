@@ -1,4 +1,4 @@
-//! Pattern dictionary types (DRAFT §18).
+//! Pattern dictionary types.
 //!
 //! The data types `PatternEntry`/`PatternTarget` live in `unclip-core` (so the
 //! store can persist them without depending on the matcher) and are re-exported

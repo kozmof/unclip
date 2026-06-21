@@ -65,7 +65,7 @@ impl Frame {
 }
 
 impl Slot {
-    /// Build a skeleton branch for this slot (DRAFT §11 `create --frame`).
+    /// Build a skeleton branch for this slot (`create --frame`).
     ///
     /// The skeleton seeds o2o from `require_o2o` plus `default_o2o`, leaves o2m
     /// empty, and adds each `metadata_suggest` field as a null placeholder for

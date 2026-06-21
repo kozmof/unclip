@@ -1,4 +1,4 @@
-//! Branch import and export in YAML / JSON / JSONL (DRAFT §15).
+//! Branch import and export in YAML / JSON / JSONL.
 //!
 //! Import accepts either a top-level sequence of branches or a mapping with a
 //! `branches:` key. JSONL files (one branch per line) are detected by the

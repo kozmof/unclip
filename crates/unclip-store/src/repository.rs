@@ -24,7 +24,7 @@ pub struct IndexedValue {
 }
 
 /// Persistence boundary for branches. Application logic depends on this trait,
-/// not on SeaORM entities directly (DRAFT §24).
+/// not on SeaORM entities directly.
 #[async_trait]
 pub trait BranchRepository {
     async fn add(&self, branch: Branch) -> anyhow::Result<()>;
@@ -99,15 +99,21 @@ impl SeaOrmBranchRepository {
     ) -> anyhow::Result<()> {
         let o2o = mapper::o2o_active_models(branch_id, branch);
         if !o2o.is_empty() {
-            branch_o2o_values::Entity::insert_many(o2o).exec(txn).await?;
+            branch_o2o_values::Entity::insert_many(o2o)
+                .exec(txn)
+                .await?;
         }
         let o2m = mapper::o2m_active_models(branch_id, branch);
         if !o2m.is_empty() {
-            branch_o2m_values::Entity::insert_many(o2m).exec(txn).await?;
+            branch_o2m_values::Entity::insert_many(o2m)
+                .exec(txn)
+                .await?;
         }
         let refs = mapper::reference_active_models(branch_id, branch);
         if !refs.is_empty() {
-            branch_references::Entity::insert_many(refs).exec(txn).await?;
+            branch_references::Entity::insert_many(refs)
+                .exec(txn)
+                .await?;
         }
         Ok(())
     }
@@ -237,7 +243,6 @@ impl SeaOrmBranchRepository {
         .await?;
         Ok(rows)
     }
-
 }
 
 #[async_trait]
@@ -370,12 +375,14 @@ impl BranchRepository for SeaOrmBranchRepository {
             // filter rather than one `IN (…)` (which would match *any*).
             for value in values {
                 select = select.filter(
-                    branches::Column::Id.in_subquery(o2m_subquery(name, std::slice::from_ref(value))),
+                    branches::Column::Id
+                        .in_subquery(o2m_subquery(name, std::slice::from_ref(value))),
                 );
             }
         }
         for (name, values) in &query.avoid_o2m {
-            select = select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
+            select =
+                select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
         }
         let models = select.all(&self.db).await?;
         self.hydrate_all(models).await
@@ -475,7 +482,10 @@ impl BranchRepository for SeaOrmBranchRepository {
                 None => {
                     branch.id = None;
                     let am = mapper::branch_active_model(&branch, &now, &now);
-                    let branch_id = branches::Entity::insert(am).exec(&txn).await?.last_insert_id;
+                    let branch_id = branches::Entity::insert(am)
+                        .exec(&txn)
+                        .await?
+                        .last_insert_id;
                     Self::insert_children(&txn, branch_id, &branch).await?;
                     added += 1;
                 }

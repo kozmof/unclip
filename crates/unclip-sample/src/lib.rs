@@ -3,7 +3,7 @@
 //! The sampler operates on already-filtered candidates (hard scope/o2o/o2m
 //! filters are applied by the store). It scores each candidate and draws
 //! `count` of them by weighted random selection without replacement, using a
-//! seeded RNG so results are reproducible (DRAFT §21).
+//! seeded RNG so results are reproducible.
 //!
 //! ```text
 //! score = weight × prefer_o2m_bonus × recent_usage_penalty
@@ -137,9 +137,7 @@ mod tests {
 
     #[test]
     fn deterministic_for_same_seed() {
-        let candidates: Vec<Branch> = (0..10)
-            .map(|i| branch(&format!("/b{i}"), i, 1.0))
-            .collect();
+        let candidates: Vec<Branch> = (0..10).map(|i| branch(&format!("/b{i}"), i, 1.0)).collect();
         let q = SampleQuery::default();
         let p = params(3);
         let recent = HashSet::new();
@@ -169,7 +167,13 @@ mod tests {
     fn count_capped_at_candidates() {
         let candidates = vec![branch("/a", 1, 1.0), branch("/b", 2, 1.0)];
         let mut rng = rng_from_seed(1);
-        let chosen = sample(&candidates, &SampleQuery::default(), &params(5), &HashSet::new(), &mut rng);
+        let chosen = sample(
+            &candidates,
+            &SampleQuery::default(),
+            &params(5),
+            &HashSet::new(),
+            &mut rng,
+        );
         assert_eq!(chosen.len(), 2);
     }
 
@@ -198,7 +202,10 @@ mod tests {
 
         let q = SampleQuery::default();
         let mut p = params(1);
-        assert_eq!(score(&b, &q, &p, &recent), score(&b, &q, &p, &HashSet::new()));
+        assert_eq!(
+            score(&b, &q, &p, &recent),
+            score(&b, &q, &p, &HashSet::new())
+        );
 
         p.avoid_recent = true;
         assert!(score(&b, &q, &p, &recent) < score(&b, &q, &p, &HashSet::new()));

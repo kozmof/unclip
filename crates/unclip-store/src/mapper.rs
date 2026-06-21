@@ -12,7 +12,11 @@ use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, bra
 /// Build a `branches` active model for insertion/update.
 ///
 /// `id` is left unset when `None` so SQLite assigns it.
-pub fn branch_active_model(branch: &Branch, created_at: &str, updated_at: &str) -> branches::ActiveModel {
+pub fn branch_active_model(
+    branch: &Branch,
+    created_at: &str,
+    updated_at: &str,
+) -> branches::ActiveModel {
     let metadata_json = if branch.metadata.is_null() {
         None
     } else {
@@ -100,7 +104,7 @@ pub fn assemble_branch(
         o2o_map.insert(row.name, row.value);
     }
 
-    // o2m values are a set (DRAFT §6); return them in a deterministic order.
+    // o2m values are a set; return them in a deterministic order.
     let mut o2m_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for row in o2m {
         o2m_map.entry(row.name).or_default().push(row.value);

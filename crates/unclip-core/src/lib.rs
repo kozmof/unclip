@@ -1,6 +1,6 @@
 //! unclip-core — pure domain model with no persistence dependencies.
 //!
-//! The model has six primary concepts (DRAFT §2): path, o2o, o2m, metadata,
+//! The model has six primary concepts: path, o2o, o2m, metadata,
 //! frame, packet. These types stay independent from any SeaORM entity so the
 //! store layer can map to/from them freely.
 
@@ -26,7 +26,7 @@ pub use validate::{validate_branch, validate_packet, validate_path};
 mod tests {
     use super::*;
 
-    /// The "recommended branch" YAML from DRAFT §8.
+    /// The "recommended branch" YAML.
     const RECOMMENDED_BRANCH: &str = r#"
 path: /ikebukuro/station/coin-locker
 title: Coin Locker Area
@@ -161,10 +161,9 @@ metadata_suggest:
 
     #[test]
     fn validate_branch_checks_require_o2m() {
-        let slot: Slot = serde_yaml::from_str(
-            "name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n",
-        )
-        .unwrap();
+        let slot: Slot =
+            serde_yaml::from_str("name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n")
+                .unwrap();
 
         // Carries both required values -> no violations.
         let mut ok = Branch::new("/a");
@@ -223,7 +222,10 @@ metadata_suggest:
         assert!(validate_path("/a").is_ok());
 
         for bad in ["/", "", "ikebukuro", "/a/", "/a//b", "/a/ b"] {
-            assert!(validate_path(bad).is_err(), "expected `{bad}` to be invalid");
+            assert!(
+                validate_path(bad).is_err(),
+                "expected `{bad}` to be invalid"
+            );
         }
     }
 

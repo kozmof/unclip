@@ -84,7 +84,10 @@ impl SeaOrmFrameRepository {
             weighted: Set(slot.weighted as i32),
             metadata_suggest_json: Set(frame_mapper::metadata_suggest_json(slot)?),
         };
-        let slot_id = frame_slots::Entity::insert(am).exec(txn).await?.last_insert_id;
+        let slot_id = frame_slots::Entity::insert(am)
+            .exec(txn)
+            .await?
+            .last_insert_id;
 
         let o2o: Vec<_> = frame_mapper::slot_o2o_rows(slot)
             .into_iter()
@@ -96,7 +99,9 @@ impl SeaOrmFrameRepository {
             })
             .collect();
         if !o2o.is_empty() {
-            frame_slot_o2o_values::Entity::insert_many(o2o).exec(txn).await?;
+            frame_slot_o2o_values::Entity::insert_many(o2o)
+                .exec(txn)
+                .await?;
         }
 
         let o2m: Vec<_> = frame_mapper::slot_o2m_rows(slot)
@@ -109,7 +114,9 @@ impl SeaOrmFrameRepository {
             })
             .collect();
         if !o2m.is_empty() {
-            frame_slot_o2m_values::Entity::insert_many(o2m).exec(txn).await?;
+            frame_slot_o2m_values::Entity::insert_many(o2m)
+                .exec(txn)
+                .await?;
         }
         Ok(())
     }

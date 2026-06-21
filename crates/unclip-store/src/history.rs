@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect, Statement,
-    TransactionTrait,
+    DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect,
+    Statement, TransactionTrait,
 };
 use unclip_entity::{selection_packets, usage_history};
 
@@ -188,7 +188,9 @@ impl SeaOrmHistoryRepository {
                     packet_id: Set(Some(record.id.to_string())),
                 })
                 .collect();
-            usage_history::Entity::insert_many(usages).exec(&txn).await?;
+            usage_history::Entity::insert_many(usages)
+                .exec(&txn)
+                .await?;
         }
 
         txn.commit().await?;

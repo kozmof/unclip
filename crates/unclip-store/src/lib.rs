@@ -33,8 +33,10 @@ mod tests {
         b.o2o.insert("axis".into(), "place".into());
         b.o2o.insert("use".into(), "scene-anchor".into());
         // o2m is a set; values are stored/returned in sorted order.
-        b.o2m.insert("mood".into(), vec!["hidden".into(), "tense".into()]);
-        b.o2m.insert("topic".into(), vec!["locker".into(), "transit".into()]);
+        b.o2m
+            .insert("mood".into(), vec!["hidden".into(), "tense".into()]);
+        b.o2m
+            .insert("topic".into(), vec!["locker".into(), "transit".into()]);
         b.weight = 1.5;
         b.metadata = json!({ "affordances": ["a key can be exchanged by mistake"] });
         b.references = vec![Reference {
@@ -59,8 +61,7 @@ mod tests {
 
         // update mutates indexed values.
         let mut edited = got.clone();
-        edited.o2m
-            .insert("mood".into(), vec!["urgent".into()]);
+        edited.o2m.insert("mood".into(), vec!["urgent".into()]);
         edited.title = Some("Renamed".into());
         repo.update(edited.clone()).await.unwrap();
 
@@ -155,7 +156,13 @@ mod tests {
         q.avoid_o2o.insert("mood".into(), "tense".into());
         q.avoid_o2m.insert("topic".into(), vec!["cafe".into()]);
 
-        let found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        let found: Vec<_> = repo
+            .find(q)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|b| b.path)
+            .collect();
         assert_eq!(found, vec!["/keep".to_string()]);
     }
 
@@ -180,7 +187,13 @@ mod tests {
         q.require_o2m
             .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
 
-        let found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        let found: Vec<_> = repo
+            .find(q)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|b| b.path)
+            .collect();
         assert_eq!(found, vec!["/both".to_string()]);
     }
 
@@ -219,7 +232,13 @@ mod tests {
             under: Some("/a_b".into()),
             ..Default::default()
         };
-        let mut found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        let mut found: Vec<_> = repo
+            .find(q)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|b| b.path)
+            .collect();
         found.sort();
         assert_eq!(found, vec!["/a_b", "/a_b/child"]);
     }
@@ -227,11 +246,7 @@ mod tests {
     #[tokio::test]
     async fn catalog_and_value_lookup() {
         let repo = repo().await;
-        for (path, axis) in [
-            ("/a", "place"),
-            ("/b", "place"),
-            ("/c", "time"),
-        ] {
+        for (path, axis) in [("/a", "place"), ("/b", "place"), ("/c", "time")] {
             let mut br = Branch::new(path);
             br.o2o.insert("domain".into(), "story".into());
             br.o2o.insert("axis".into(), axis.into());
@@ -270,8 +285,8 @@ mod tests {
 
     #[tokio::test]
     async fn frame_save_get_list_roundtrip() {
-        use unclip_core::{Frame, Slot};
         use frame_repository::{FrameRepository, SeaOrmFrameRepository};
+        use unclip_core::{Frame, Slot};
 
         let db = connect_and_migrate("sqlite::memory:").await.unwrap();
         let frames = SeaOrmFrameRepository::new(db);
@@ -279,10 +294,12 @@ mod tests {
         let place = Slot {
             name: "place".into(),
             under: Some("/ikebukuro".into()),
-            require_o2o: [("domain".to_string(), "story".to_string()),
-                         ("axis".to_string(), "place".to_string())]
-                .into_iter()
-                .collect(),
+            require_o2o: [
+                ("domain".to_string(), "story".to_string()),
+                ("axis".to_string(), "place".to_string()),
+            ]
+            .into_iter()
+            .collect(),
             default_o2o: [("use".to_string(), "scene-anchor".to_string())]
                 .into_iter()
                 .collect(),
@@ -340,10 +357,7 @@ mod tests {
         // Second import: `/a` is updated (child rows replaced), `/c` is new.
         let mut a2 = Branch::new("/a");
         a2.o2m.insert("topic".into(), vec!["two".into()]);
-        let (added, updated) = repo
-            .upsert_many(vec![a2, Branch::new("/c")])
-            .await
-            .unwrap();
+        let (added, updated) = repo.upsert_many(vec![a2, Branch::new("/c")]).await.unwrap();
         assert_eq!((added, updated), (1, 1));
 
         let got = repo.get("/a").await.unwrap().unwrap();
@@ -383,7 +397,14 @@ mod tests {
 
         // Attaching to a missing branch errors.
         assert!(repo
-            .attach_reference("/nope", &Reference { kind: "file".into(), value: "x".into(), note: None })
+            .attach_reference(
+                "/nope",
+                &Reference {
+                    kind: "file".into(),
+                    value: "x".into(),
+                    note: None
+                }
+            )
             .await
             .is_err());
     }

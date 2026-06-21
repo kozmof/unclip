@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-/// Pattern dictionary table (DRAFT §18).
+/// Pattern dictionary table.
 const UP_SQL: &str = r#"
 CREATE TABLE pattern_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

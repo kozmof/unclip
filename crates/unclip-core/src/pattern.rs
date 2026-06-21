@@ -1,4 +1,4 @@
-//! Pattern-dictionary data types (DRAFT §18).
+//! Pattern-dictionary data types.
 //!
 //! These are plain domain values describing how a matched text pattern maps to
 //! a structured target. They live in core (not in `unclip-match`) so the store
@@ -11,14 +11,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PatternTarget {
-    O2m { name: String, value: String },
-    O2o { name: String, value: String },
-    Branch { path: String },
+    O2m {
+        name: String,
+        value: String,
+    },
+    O2o {
+        name: String,
+        value: String,
+    },
+    Branch {
+        path: String,
+    },
     /// Reserved: a pattern that collapses a match down to a branch reference.
     /// It can be stored and is surfaced by `scan`, but no automatic collapse
     /// behavior is implemented yet — it carries no special matching semantics
     /// beyond being reported.
-    CollapsePattern { path: String },
+    CollapsePattern {
+        path: String,
+    },
 }
 
 impl PatternTarget {

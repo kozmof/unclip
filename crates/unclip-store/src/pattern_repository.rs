@@ -1,4 +1,4 @@
-//! Repository for the pattern dictionary (DRAFT §18).
+//! Repository for the pattern dictionary.
 
 use sea_orm::{
     ActiveValue::{NotSet, Set},

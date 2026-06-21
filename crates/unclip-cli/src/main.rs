@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use unclip_io::{Format, split_frame_selector};
+use unclip_io::{split_frame_selector, Format};
 use unclip_store::FrameRepository;
 
 use commands::{parse_kv, AddInput, QueryInput};
@@ -52,19 +52,13 @@ enum Command {
     },
 
     /// Show a branch as YAML.
-    Show {
-        path: String,
-    },
+    Show { path: String },
 
     /// List the direct children of a path.
-    Ls {
-        path: String,
-    },
+    Ls { path: String },
 
     /// Print the branch tree under a path.
-    Tree {
-        path: String,
-    },
+    Tree { path: String },
 
     /// Find branches by scope and hard o2o/o2m filters.
     Query {
@@ -103,17 +97,13 @@ enum Command {
     },
 
     /// Import frame definitions from a YAML file.
-    ImportFrames {
-        file: PathBuf,
-    },
+    ImportFrames { file: PathBuf },
 
     /// List stored frames.
     Frames,
 
     /// Show a frame (`name`) or one of its slots (`name.slot`) as YAML.
-    Frame {
-        selector: String,
-    },
+    Frame { selector: String },
 
     /// Create a skeleton branch from a frame slot (name.slot).
     Create {
@@ -178,9 +168,7 @@ enum Command {
     },
 
     /// Show usage history for a branch.
-    Used {
-        path: String,
-    },
+    Used { path: String },
 
     /// Aggregate usage stats over a filter.
     Stats {
@@ -211,9 +199,7 @@ enum Command {
     },
 
     /// Import branches from a YAML/JSON/JSONL file (upsert by path).
-    Import {
-        file: PathBuf,
-    },
+    Import { file: PathBuf },
 
     /// Export branches matching a filter.
     Export {
@@ -243,20 +229,14 @@ enum Command {
     },
 
     /// List a branch's references.
-    Refs {
-        path: String,
-    },
+    Refs { path: String },
 
     /// Scan a text file for structured patterns from the archive.
-    Scan {
-        file: PathBuf,
-    },
+    Scan { file: PathBuf },
 
     /// Suggest o2m values mentioned in a branch's text but not yet set.
     #[command(name = "suggest-o2m")]
-    SuggestO2m {
-        path: String,
-    },
+    SuggestO2m { path: String },
 
     /// Manage the pattern dictionary.
     Pattern {
@@ -285,19 +265,13 @@ enum PatternAction {
     },
 
     /// Remove a pattern entry by id.
-    Remove {
-        id: i64,
-    },
+    Remove { id: i64 },
 
     /// Enable a previously disabled pattern entry.
-    Enable {
-        id: i64,
-    },
+    Enable { id: i64 },
 
     /// Disable a pattern entry without removing it.
-    Disable {
-        id: i64,
-    },
+    Disable { id: i64 },
 }
 
 #[tokio::main]

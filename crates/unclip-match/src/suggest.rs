@@ -79,7 +79,10 @@ mod tests {
         let text = "a crowded corridor with a locker";
         let suggestions = suggest_o2m(&matcher(), text, &existing);
         // `locker` already present; only `density=crowded` is suggested.
-        assert_eq!(suggestions, vec![("density".to_string(), "crowded".to_string())]);
+        assert_eq!(
+            suggestions,
+            vec![("density".to_string(), "crowded".to_string())]
+        );
     }
 
     #[test]

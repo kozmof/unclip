@@ -1,5 +1,5 @@
 //! `scan`, `suggest-o2m`, and pattern-dictionary (`pattern add`/`patterns`)
-//! handlers, built on the daachorse matcher (DRAFT §17–18).
+//! handlers, built on the daachorse matcher.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -9,7 +9,7 @@ use unclip_match::{branch_text, suggest_o2m, Matcher, PatternEntry, PatternTarge
 use unclip_store::{BranchRepository, SeaOrmPatternRepository};
 
 /// Build a matcher from database state: o2o/o2m catalogs, branch titles, and
-/// user-defined pattern entries (DRAFT §17).
+/// user-defined pattern entries.
 pub async fn build_matcher(
     branches: &impl BranchRepository,
     patterns: &SeaOrmPatternRepository,
@@ -134,15 +134,16 @@ pub async fn pattern_add_cmd(
 
     let entry = PatternEntry::new(input.pattern.clone(), target);
     let id = patterns.add(&entry).await?;
-    println!("added pattern #{id}: {} → {}", input.pattern, entry.target.describe());
+    println!(
+        "added pattern #{id}: {} → {}",
+        input.pattern,
+        entry.target.describe()
+    );
     Ok(())
 }
 
 /// `unclip pattern remove <id>` — delete a pattern entry.
-pub async fn pattern_remove_cmd(
-    patterns: &SeaOrmPatternRepository,
-    id: i64,
-) -> anyhow::Result<()> {
+pub async fn pattern_remove_cmd(patterns: &SeaOrmPatternRepository, id: i64) -> anyhow::Result<()> {
     if patterns.remove(id).await? {
         println!("removed pattern #{id}");
         Ok(())
@@ -175,7 +176,12 @@ pub async fn patterns_cmd(patterns: &SeaOrmPatternRepository) -> anyhow::Result<
     }
     for p in stored {
         let flag = if p.enabled { "" } else { "\t[disabled]" };
-        println!("{}\t{}\t→ {}{flag}", p.id, p.entry.pattern, p.entry.target.describe());
+        println!(
+            "{}\t{}\t→ {}{flag}",
+            p.id,
+            p.entry.pattern,
+            p.entry.target.describe()
+        );
     }
     Ok(())
 }

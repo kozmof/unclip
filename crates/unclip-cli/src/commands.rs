@@ -22,7 +22,7 @@ pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
 }
 
 /// Merge `name=value` pairs into a one-to-one o2o map, rejecting any name that
-/// is already present. o2o values are one-to-one (DRAFT §5), so a repeated name
+/// is already present. o2o values are one-to-one, so a repeated name
 /// — whether across flags or colliding with a frame slot's base value — is a
 /// usage error.
 pub fn merge_o2o(
@@ -150,7 +150,7 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
         },
     };
     merge_o2o(&mut q.require_o2o, input.require_o2o)?;
-    // avoid_o2o is one value per name (DRAFT §5); reject a repeated name rather
+    // avoid_o2o is one value per name; reject a repeated name rather
     // than silently keeping the last, matching require_o2o.
     merge_o2o(&mut q.avoid_o2o, input.avoid_o2o)?;
     for (name, value) in input.require_o2m {
@@ -177,9 +177,7 @@ pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyh
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2o_catalog(None).await?),
         Selector::Name(name) => print_catalog(repo.o2o_catalog(Some(&name)).await?),
-        Selector::Pair(name, value) => {
-            print_branches(repo.branches_with_o2o(&name, &value).await?)
-        }
+        Selector::Pair(name, value) => print_branches(repo.branches_with_o2o(&name, &value).await?),
     }
     Ok(())
 }
@@ -189,9 +187,7 @@ pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyh
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2m_catalog(None).await?),
         Selector::Name(name) => print_catalog(repo.o2m_catalog(Some(&name)).await?),
-        Selector::Pair(name, value) => {
-            print_branches(repo.branches_with_o2m(&name, &value).await?)
-        }
+        Selector::Pair(name, value) => print_branches(repo.branches_with_o2m(&name, &value).await?),
     }
     Ok(())
 }
@@ -211,7 +207,10 @@ pub async fn import(
             .with_context(|| format!("invalid branch in import: {}", branch.path))?;
     }
     let (added, updated) = repo.upsert_many(branches).await?;
-    println!("imported {} branch(es): {added} added, {updated} updated", added + updated);
+    println!(
+        "imported {} branch(es): {added} added, {updated} updated",
+        added + updated
+    );
     Ok(())
 }
 

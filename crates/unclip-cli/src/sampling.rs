@@ -29,7 +29,7 @@ impl FilterInput {
             ..Default::default()
         };
         crate::commands::merge_o2o(&mut q.require_o2o, self.require_o2o)?;
-        // avoid_o2o is one value per name (DRAFT §5); a repeated name is a usage
+        // avoid_o2o is one value per name; a repeated name is a usage
         // error, mirroring require_o2o rather than silently keeping the last.
         crate::commands::merge_o2o(&mut q.avoid_o2o, self.avoid_o2o)?;
         for (name, value) in self.require_o2m {
@@ -194,7 +194,11 @@ pub async fn compose_cmd(
         packet.query = Some(serde_json::json!({ "frame": frame.name }));
 
         for (slot, query, params, candidates) in &slot_plans {
-            let slot_recent = if slot.avoid_recent { &recent } else { &empty_recent };
+            let slot_recent = if slot.avoid_recent {
+                &recent
+            } else {
+                &empty_recent
+            };
             let chosen = sample(candidates, query, params, slot_recent, &mut rng);
             for branch in chosen {
                 packet.selections.push(Selection {
@@ -322,7 +326,10 @@ pub async fn stale_cmd(
 /// Build the packet `query` provenance value: the filter plus the sampling
 /// controls, flattened into one object so a packet records exactly how it was
 /// drawn (count/weighted/avoid_recent) alongside what it was drawn from.
-fn query_provenance(query: &SampleQuery, params: &SampleParams) -> anyhow::Result<serde_json::Value> {
+fn query_provenance(
+    query: &SampleQuery,
+    params: &SampleParams,
+) -> anyhow::Result<serde_json::Value> {
     let mut value = serde_json::to_value(query)?;
     if let Some(obj) = value.as_object_mut() {
         obj.insert("count".into(), params.count.into());
@@ -362,4 +369,3 @@ async fn persist_packet(
         )
         .await
 }
-
