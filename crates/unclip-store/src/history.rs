@@ -77,6 +77,9 @@ impl SeaOrmHistoryRepository {
     pub async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>> {
         let rows = usage_history::Entity::find()
             .order_by_desc(usage_history::Column::UsedAt)
+            // `id` breaks ties so rows sharing a millisecond timestamp have a
+            // stable, deterministic order under `LIMIT`.
+            .order_by_desc(usage_history::Column::Id)
             .limit(limit)
             .all(&self.db)
             .await?;

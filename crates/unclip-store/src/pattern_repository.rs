@@ -50,6 +50,28 @@ impl SeaOrmPatternRepository {
         rows.into_iter().map(row_to_stored).collect()
     }
 
+    /// Remove a pattern entry by id. Returns whether a row was deleted.
+    pub async fn remove(&self, id: i64) -> anyhow::Result<bool> {
+        let res = pattern_entries::Entity::delete_by_id(id as i32)
+            .exec(&self.db)
+            .await?;
+        Ok(res.rows_affected > 0)
+    }
+
+    /// Enable or disable a pattern entry by id. Returns whether a row matched.
+    pub async fn set_enabled(&self, id: i64, enabled: bool) -> anyhow::Result<bool> {
+        let am = pattern_entries::ActiveModel {
+            enabled: Set(enabled as i32),
+            ..Default::default()
+        };
+        let res = pattern_entries::Entity::update_many()
+            .set(am)
+            .filter(pattern_entries::Column::Id.eq(id as i32))
+            .exec(&self.db)
+            .await?;
+        Ok(res.rows_affected > 0)
+    }
+
     /// All enabled pattern entries as matcher input.
     pub async fn all_enabled(&self) -> anyhow::Result<Vec<PatternEntry>> {
         let rows = pattern_entries::Entity::find()

@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context};
-use unclip_core::SampleQuery;
 use unclip_match::{branch_text, suggest_o2m, Matcher, PatternEntry, PatternTarget};
 use unclip_store::{BranchRepository, SeaOrmBranchRepository, SeaOrmPatternRepository};
 
@@ -35,13 +34,8 @@ pub async fn build_matcher(
             },
         ));
     }
-    for branch in branches.find(SampleQuery::default()).await? {
-        if let Some(title) = branch.title {
-            entries.push(PatternEntry::new(
-                title,
-                PatternTarget::Branch { path: branch.path },
-            ));
-        }
+    for (path, title) in branches.titles().await? {
+        entries.push(PatternEntry::new(title, PatternTarget::Branch { path }));
     }
 
     entries.extend(patterns.all_enabled().await?);
@@ -142,6 +136,34 @@ pub async fn pattern_add_cmd(
     let id = patterns.add(&entry).await?;
     println!("added pattern #{id}: {} → {}", input.pattern, entry.target.describe());
     Ok(())
+}
+
+/// `unclip pattern remove <id>` — delete a pattern entry.
+pub async fn pattern_remove_cmd(
+    patterns: &SeaOrmPatternRepository,
+    id: i64,
+) -> anyhow::Result<()> {
+    if patterns.remove(id).await? {
+        println!("removed pattern #{id}");
+        Ok(())
+    } else {
+        bail!("no pattern entry with id {id}")
+    }
+}
+
+/// `unclip pattern enable|disable <id>` — toggle a pattern entry.
+pub async fn pattern_set_enabled_cmd(
+    patterns: &SeaOrmPatternRepository,
+    id: i64,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    if patterns.set_enabled(id, enabled).await? {
+        let state = if enabled { "enabled" } else { "disabled" };
+        println!("{state} pattern #{id}");
+        Ok(())
+    } else {
+        bail!("no pattern entry with id {id}")
+    }
 }
 
 /// `unclip patterns` — list stored pattern entries.

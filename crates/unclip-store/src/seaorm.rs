@@ -6,7 +6,9 @@ use unclip_migration::{Migrator, MigratorTrait};
 /// Open a connection to the given SQLite URL and enable foreign keys.
 ///
 /// In-memory databases are pinned to a single pooled connection so the schema
-/// and data survive for the lifetime of the pool.
+/// and data survive for the lifetime of the pool. A `busy_timeout` lets a
+/// second writer (e.g. a concurrent CLI invocation) wait briefly for a lock
+/// instead of failing immediately with "database is locked".
 pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
     let mut opt = ConnectOptions::new(url.to_owned());
     if url.contains(":memory:") {
@@ -14,6 +16,7 @@ pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
     }
     let db = Database::connect(opt).await?;
     db.execute_unprepared("PRAGMA foreign_keys = ON;").await?;
+    db.execute_unprepared("PRAGMA busy_timeout = 5000;").await?;
     Ok(db)
 }
 

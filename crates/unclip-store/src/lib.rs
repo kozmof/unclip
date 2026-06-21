@@ -134,6 +134,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn find_applies_avoid_o2o_and_o2m_in_sql() {
+        let repo = repo().await;
+
+        // /keep: plain. /skip_o2o: excluded by avoid_o2o. /skip_o2m: excluded
+        // by avoid_o2m.
+        repo.add(Branch::new("/keep")).await.unwrap();
+
+        let mut skip_o2o = Branch::new("/skip-o2o");
+        skip_o2o.o2o.insert("mood".into(), "tense".into());
+        repo.add(skip_o2o).await.unwrap();
+
+        let mut skip_o2m = Branch::new("/skip-o2m");
+        skip_o2m
+            .o2m
+            .insert("topic".into(), vec!["cafe".into(), "transit".into()]);
+        repo.add(skip_o2m).await.unwrap();
+
+        let mut q = SampleQuery::default();
+        q.avoid_o2o.insert("mood".into(), "tense".into());
+        q.avoid_o2m.insert("topic".into(), vec!["cafe".into()]);
+
+        let found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        assert_eq!(found, vec!["/keep".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn titles_projects_path_and_title_only() {
+        let repo = repo().await;
+        let mut titled = Branch::new("/a");
+        titled.title = Some("Alpha".into());
+        repo.add(titled).await.unwrap();
+        repo.add(Branch::new("/b")).await.unwrap(); // no title
+
+        let titles = repo.titles().await.unwrap();
+        assert_eq!(titles, vec![("/a".to_string(), "Alpha".to_string())]);
+    }
+
+    #[tokio::test]
     async fn scope_matching_treats_underscore_literally() {
         // `_` is a SQL LIKE wildcard; a scope like `/a_b` must not match `/axb`.
         let repo = repo().await;
@@ -362,5 +400,41 @@ mod tests {
             &e.target,
             PatternTarget::Branch { path } if path == "/movie/akira"
         )));
+    }
+
+    #[tokio::test]
+    async fn pattern_disable_enable_remove() {
+        use pattern_repository::SeaOrmPatternRepository;
+        use unclip_core::{PatternEntry, PatternTarget};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let patterns = SeaOrmPatternRepository::new(db);
+
+        let id = patterns
+            .add(&PatternEntry::new(
+                "locker",
+                PatternTarget::O2m {
+                    name: "object".into(),
+                    value: "locker".into(),
+                },
+            ))
+            .await
+            .unwrap();
+
+        // Disable removes it from matcher input but keeps the row.
+        assert!(patterns.set_enabled(id, false).await.unwrap());
+        assert!(patterns.all_enabled().await.unwrap().is_empty());
+        assert_eq!(patterns.list().await.unwrap().len(), 1);
+        assert!(!patterns.list().await.unwrap()[0].enabled);
+
+        // Re-enable.
+        assert!(patterns.set_enabled(id, true).await.unwrap());
+        assert_eq!(patterns.all_enabled().await.unwrap().len(), 1);
+
+        // Remove deletes the row; a second remove reports no match.
+        assert!(patterns.remove(id).await.unwrap());
+        assert!(patterns.list().await.unwrap().is_empty());
+        assert!(!patterns.remove(id).await.unwrap());
+        assert!(!patterns.set_enabled(id, true).await.unwrap());
     }
 }

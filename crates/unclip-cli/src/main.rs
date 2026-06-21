@@ -272,6 +272,21 @@ enum PatternAction {
         #[arg(long)]
         collapse: Option<String>,
     },
+
+    /// Remove a pattern entry by id.
+    Remove {
+        id: i64,
+    },
+
+    /// Enable a previously disabled pattern entry.
+    Enable {
+        id: i64,
+    },
+
+    /// Disable a pattern entry without removing it.
+    Disable {
+        id: i64,
+    },
 }
 
 #[tokio::main]
@@ -498,6 +513,15 @@ async fn main() -> anyhow::Result<()> {
                     },
                 )
                 .await?;
+            }
+            PatternAction::Remove { id } => {
+                matching::pattern_remove_cmd(&repos.patterns, id).await?;
+            }
+            PatternAction::Enable { id } => {
+                matching::pattern_set_enabled_cmd(&repos.patterns, id, true).await?;
+            }
+            PatternAction::Disable { id } => {
+                matching::pattern_set_enabled_cmd(&repos.patterns, id, false).await?;
             }
         },
         Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,

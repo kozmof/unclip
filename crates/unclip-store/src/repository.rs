@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use sea_orm::{
-    sea_query::LikeExpr,
+    sea_query::{LikeExpr, Query, SelectStatement},
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
-    QueryFilter, QueryOrder, Statement, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
 use unclip_core::{parent_of, Branch, Reference, SampleQuery};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
@@ -117,22 +117,15 @@ impl SeaOrmBranchRepository {
     }
 
     /// Load a branch's child rows and assemble the full domain value.
+    ///
+    /// Delegates to `hydrate_all` so single- and multi-branch loads share one
+    /// grouping/assembly path.
     async fn hydrate(&self, model: branches::Model) -> anyhow::Result<Branch> {
-        let id = model.id;
-        let o2o = branch_o2o_values::Entity::find()
-            .filter(branch_o2o_values::Column::BranchId.eq(id))
-            .all(&self.db)
-            .await?;
-        let o2m = branch_o2m_values::Entity::find()
-            .filter(branch_o2m_values::Column::BranchId.eq(id))
-            .all(&self.db)
-            .await?;
-        let refs = branch_references::Entity::find()
-            .filter(branch_references::Column::BranchId.eq(id))
-            .order_by_asc(branch_references::Column::Id)
-            .all(&self.db)
-            .await?;
-        mapper::assemble_branch(model, o2o, o2m, refs)
+        Ok(self
+            .hydrate_all(vec![model])
+            .await?
+            .pop()
+            .expect("hydrate_all yields one branch for one model"))
     }
 
     /// Hydrate many branches with a fixed number of queries (no N+1): load all
@@ -271,6 +264,29 @@ impl SeaOrmBranchRepository {
         Ok(())
     }
 
+    /// `(path, title)` for every branch that has a title.
+    ///
+    /// A projection — it loads only the two columns the matcher needs, avoiding
+    /// the full o2o/o2m/reference hydration of `find`.
+    pub async fn titles(&self) -> anyhow::Result<Vec<(String, String)>> {
+        #[derive(FromQueryResult)]
+        struct TitleRow {
+            path: String,
+            title: Option<String>,
+        }
+        let rows = branches::Entity::find()
+            .select_only()
+            .column(branches::Column::Path)
+            .column(branches::Column::Title)
+            .into_model::<TitleRow>()
+            .all(&self.db)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.title.map(|t| (r.path, t)))
+            .collect())
+    }
+
     /// Branches carrying a specific o2m value.
     pub async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
         let ids = branch_o2m_values::Entity::find()
@@ -391,8 +407,9 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>> {
-        // Scope filter in SQL; hard o2o/o2m filters applied in Rust over the
-        // hydrated candidates. Soft scoring is the sampler's job (Phase 7).
+        // All hard filters (scope + require/avoid o2o/o2m) run in SQL against the
+        // indexed child tables, so only matching rows are hydrated. Soft scoring
+        // is the sampler's job (Phase 7).
         let mut select = branches::Entity::find();
         if let Some(under) = &query.under {
             let under = under.trim_end_matches('/').to_string();
@@ -402,14 +419,17 @@ impl BranchRepository for SeaOrmBranchRepository {
                     .or(branches::Column::Path.like(descendant_like(&under))),
             );
         }
+        for (name, value) in &query.require_o2o {
+            select = select.filter(branches::Column::Id.in_subquery(o2o_subquery(name, value)));
+        }
+        for (name, value) in &query.avoid_o2o {
+            select = select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, value)));
+        }
+        for (name, values) in &query.avoid_o2m {
+            select = select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
+        }
         let models = select.all(&self.db).await?;
-        let candidates = self.hydrate_all(models).await?;
-
-        let kept = candidates
-            .into_iter()
-            .filter(|b| matches_hard_filters(b, &query))
-            .collect();
-        Ok(kept)
+        self.hydrate_all(models).await
     }
 
     /// Atomic batch upsert: the whole set is applied in one transaction, so a
@@ -467,24 +487,25 @@ fn descendant_like(scope: &str) -> LikeExpr {
     LikeExpr::new(pattern).escape('\\')
 }
 
-/// Apply the hard require/avoid filters (scope is already applied in SQL).
-fn matches_hard_filters(branch: &Branch, query: &SampleQuery) -> bool {
-    for (name, value) in &query.require_o2o {
-        if branch.o2o.get(name) != Some(value) {
-            return false;
-        }
-    }
-    for (name, value) in &query.avoid_o2o {
-        if branch.o2o.get(name) == Some(value) {
-            return false;
-        }
-    }
-    for (name, avoided) in &query.avoid_o2m {
-        if let Some(values) = branch.o2m.get(name) {
-            if avoided.iter().any(|v| values.contains(v)) {
-                return false;
-            }
-        }
-    }
-    true
+/// Subquery selecting branch ids that carry the o2o pair `name=value`.
+fn o2o_subquery(name: &str, value: &str) -> SelectStatement {
+    Query::select()
+        .column(branch_o2o_values::Column::BranchId)
+        .from(branch_o2o_values::Entity)
+        .and_where(branch_o2o_values::Column::Name.eq(name))
+        .and_where(branch_o2o_values::Column::Value.eq(value))
+        .to_owned()
+}
+
+/// Subquery selecting branch ids that carry any of `values` under o2m `name`.
+///
+/// An empty `values` yields an empty result set, so `NOT IN (…)` keeps every
+/// branch — matching "avoid nothing".
+fn o2m_subquery(name: &str, values: &[String]) -> SelectStatement {
+    Query::select()
+        .column(branch_o2m_values::Column::BranchId)
+        .from(branch_o2m_values::Entity)
+        .and_where(branch_o2m_values::Column::Name.eq(name))
+        .and_where(branch_o2m_values::Column::Value.is_in(values.to_vec()))
+        .to_owned()
 }
