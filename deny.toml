@@ -5,6 +5,13 @@
 # Fail on any security advisory or unmaintained/yanked crate.
 version = 2
 yanked = "deny"
+ignore = [
+    # proc-macro-error2 is unmaintained (build-time only), pulled transitively
+    # through sea-orm-macros -> sea-bae. Not a vulnerability, and the advisory
+    # states no safe upgrade exists; we cannot drop it until sea-orm migrates
+    # off it upstream. Revisit when bumping sea-orm.
+    { id = "RUSTSEC-2026-0173", reason = "transitive, build-time, no fix available upstream (sea-orm)" },
+]
 
 [licenses]
 version = 2
