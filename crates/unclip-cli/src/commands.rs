@@ -51,15 +51,11 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
         }
     }
 
+    // o2m is a set, but the store layer enforces that (dedup + canonical order)
+    // on the way to SQL, so we just group the flag values by name here.
     let mut o2m: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, value) in input.o2m {
-        let bucket = o2m.entry(name).or_default();
-        if !bucket.contains(&value) {
-            bucket.push(value);
-        }
-    }
-    for values in o2m.values_mut() {
-        values.sort();
+        o2m.entry(name).or_default().push(value);
     }
     branch.o2m = o2m;
 

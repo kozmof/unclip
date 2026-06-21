@@ -361,6 +361,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_packet_with_usages_persists_both() {
+        use history::{PacketRecord, SeaOrmHistoryRepository};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let branches = SeaOrmBranchRepository::new(db.clone());
+        let history = SeaOrmHistoryRepository::new(db);
+
+        // Two branches to record usage against.
+        branches.add(Branch::new("/a")).await.unwrap();
+        branches.add(Branch::new("/b")).await.unwrap();
+        let a = branches.get("/a").await.unwrap().unwrap().id.unwrap();
+        let b = branches.get("/b").await.unwrap().unwrap().id.unwrap();
+
+        history
+            .save_packet_with_usages(
+                PacketRecord {
+                    id: "pkt-1",
+                    frame_name: None,
+                    seed: Some(7),
+                    query_json: None,
+                    packet_json: "{}",
+                },
+                "sample",
+                &[a, b],
+            )
+            .await
+            .unwrap();
+
+        // Each branch now has exactly one usage tied to the packet.
+        assert_eq!(history.usage_for(a).await.unwrap().count, 1);
+        assert_eq!(history.usage_for(b).await.unwrap().count, 1);
+    }
+
+    #[tokio::test]
     async fn pattern_add_list_roundtrip() {
         use pattern_repository::SeaOrmPatternRepository;
         use unclip_core::{PatternEntry, PatternTarget};

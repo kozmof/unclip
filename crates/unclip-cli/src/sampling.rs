@@ -102,8 +102,7 @@ pub async fn sample_cmd(
 
     if !dry_run {
         let id = random_packet_id();
-        save_packet(history, &id, None, &packet).await?;
-        record_usages(history, "sample", &id, &chosen).await?;
+        persist_packet(history, &id, None, "sample", &packet).await?;
     }
     Ok(())
 }
@@ -194,14 +193,7 @@ pub async fn compose_cmd(
         for packet in &packets {
             // Packet id is random (seed-independent) so re-runs do not collide.
             let id = random_packet_id();
-            save_packet(history, &id, Some(&frame.name), packet).await?;
-            for selection in &packet.selections {
-                if let Some(branch_id) = selection.branch.id {
-                    history
-                        .record_usage(branch_id, "compose", None, Some(&id))
-                        .await?;
-                }
-            }
+            persist_packet(history, &id, Some(&frame.name), "compose", packet).await?;
         }
     }
     Ok(())
@@ -308,39 +300,34 @@ pub async fn stale_cmd(
     Ok(())
 }
 
-async fn record_usages(
-    history: &SeaOrmHistoryRepository,
-    command: &str,
-    packet_id: &str,
-    chosen: &[Branch],
-) -> anyhow::Result<()> {
-    for branch in chosen {
-        if let Some(branch_id) = branch.id {
-            history
-                .record_usage(branch_id, command, None, Some(packet_id))
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-async fn save_packet(
+/// Persist a packet and the usage rows for its selected branches in one
+/// transaction, so history can never record a packet without its usages.
+async fn persist_packet(
     history: &SeaOrmHistoryRepository,
     id: &str,
     frame_name: Option<&str>,
+    command: &str,
     packet: &SelectionPacket,
 ) -> anyhow::Result<()> {
     let packet_json = serde_json::to_string(packet)?;
     let query_json = packet.query.as_ref().map(|q| q.to_string());
+    let branch_ids: Vec<i64> = packet
+        .selections
+        .iter()
+        .filter_map(|s| s.branch.id)
+        .collect();
     history
-        .save_packet(PacketRecord {
-            id,
-            frame_name,
-            seed: packet.seed,
-            query_json: query_json.as_deref(),
-            packet_json: &packet_json,
-        })
-        .await?;
-    Ok(())
+        .save_packet_with_usages(
+            PacketRecord {
+                id,
+                frame_name,
+                seed: packet.seed,
+                query_json: query_json.as_deref(),
+                packet_json: &packet_json,
+            },
+            command,
+            &branch_ids,
+        )
+        .await
 }
 

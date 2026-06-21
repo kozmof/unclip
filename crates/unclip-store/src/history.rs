@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect, Statement,
+    TransactionTrait,
 };
 use unclip_entity::{selection_packets, usage_history};
 
@@ -147,6 +148,50 @@ impl SeaOrmHistoryRepository {
             packet_json: Set(record.packet_json.to_string()),
         };
         selection_packets::Entity::insert(am).exec(&self.db).await?;
+        Ok(())
+    }
+
+    /// Persist a packet and the usage rows for its selected branches atomically.
+    ///
+    /// The packet row and one `usage_history` row per id in `branch_ids` are
+    /// written in a single transaction, so a failure part-way through cannot
+    /// leave a packet without its usages (or vice versa). All rows share one
+    /// `used_at`/`created_at` timestamp.
+    pub async fn save_packet_with_usages(
+        &self,
+        record: PacketRecord<'_>,
+        command: &str,
+        branch_ids: &[i64],
+    ) -> anyhow::Result<()> {
+        let ts = now();
+        let txn = self.db.begin().await?;
+
+        let packet = selection_packets::ActiveModel {
+            id: Set(record.id.to_string()),
+            frame_name: Set(record.frame_name.map(str::to_string)),
+            seed: Set(record.seed.map(|s| s as i64)),
+            created_at: Set(ts.clone()),
+            query_json: Set(record.query_json.map(str::to_string)),
+            packet_json: Set(record.packet_json.to_string()),
+        };
+        selection_packets::Entity::insert(packet).exec(&txn).await?;
+
+        if !branch_ids.is_empty() {
+            let usages: Vec<usage_history::ActiveModel> = branch_ids
+                .iter()
+                .map(|&id| usage_history::ActiveModel {
+                    id: NotSet,
+                    branch_id: Set(id as i32),
+                    used_at: Set(ts.clone()),
+                    command: Set(Some(command.to_string())),
+                    context: Set(None),
+                    packet_id: Set(Some(record.id.to_string())),
+                })
+                .collect();
+            usage_history::Entity::insert_many(usages).exec(&txn).await?;
+        }
+
+        txn.commit().await?;
         Ok(())
     }
 }
