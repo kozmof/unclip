@@ -187,22 +187,20 @@ pub async fn o2m(repo: &SeaOrmBranchRepository, selector: Option<String>) -> any
 }
 
 /// `unclip import <file>` — bulk import branches (upsert by path).
-pub async fn import(repo: &impl BranchRepository, branches: Vec<Branch>) -> anyhow::Result<()> {
+pub async fn import(
+    repo: &(impl BranchRepository + Sync),
+    branches: Vec<Branch>,
+) -> anyhow::Result<()> {
     if branches.is_empty() {
         eprintln!("(no branches in file)");
         return Ok(());
     }
-    let (mut added, mut updated) = (0usize, 0usize);
-    for mut branch in branches {
-        branch.id = None;
-        if repo.get(&branch.path).await?.is_some() {
-            repo.update(branch).await?;
-            updated += 1;
-        } else {
-            repo.add(branch).await?;
-            added += 1;
-        }
+    // Reject a malformed file before any write, rather than partially importing.
+    for branch in &branches {
+        validate_path(&branch.path)
+            .with_context(|| format!("invalid branch in import: {}", branch.path))?;
     }
+    let (added, updated) = repo.upsert_many(branches).await?;
     println!("imported {} branch(es): {added} added, {updated} updated", added + updated);
     Ok(())
 }

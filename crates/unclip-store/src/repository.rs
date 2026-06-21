@@ -37,6 +37,26 @@ pub trait BranchRepository {
     async fn ancestors(&self, path: &str) -> anyhow::Result<Vec<Branch>>;
 
     async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>>;
+
+    /// Insert or replace many branches (upsert by path), returning the
+    /// `(added, updated)` counts.
+    ///
+    /// Implementations should run the whole batch atomically. The default
+    /// falls back to a per-branch, non-transactional upsert.
+    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)> {
+        let (mut added, mut updated) = (0usize, 0usize);
+        for mut branch in branches {
+            branch.id = None;
+            if self.get(&branch.path).await?.is_some() {
+                self.update(branch).await?;
+                updated += 1;
+            } else {
+                self.add(branch).await?;
+                added += 1;
+            }
+        }
+        Ok((added, updated))
+    }
 }
 
 /// SeaORM implementation backed by SQLite.
@@ -72,6 +92,28 @@ impl SeaOrmBranchRepository {
             branch_references::Entity::insert_many(refs).exec(txn).await?;
         }
         Ok(())
+    }
+
+    /// Replace a branch's child rows wholesale (delete then re-insert) within a
+    /// transaction.
+    async fn replace_children(
+        txn: &DatabaseTransaction,
+        branch_id: i32,
+        branch: &Branch,
+    ) -> anyhow::Result<()> {
+        branch_o2o_values::Entity::delete_many()
+            .filter(branch_o2o_values::Column::BranchId.eq(branch_id))
+            .exec(txn)
+            .await?;
+        branch_o2m_values::Entity::delete_many()
+            .filter(branch_o2m_values::Column::BranchId.eq(branch_id))
+            .exec(txn)
+            .await?;
+        branch_references::Entity::delete_many()
+            .filter(branch_references::Column::BranchId.eq(branch_id))
+            .exec(txn)
+            .await?;
+        Self::insert_children(txn, branch_id, branch).await
     }
 
     /// Load a branch's child rows and assemble the full domain value.
@@ -280,20 +322,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         let am = mapper::branch_active_model(&branch, &created_at, &now);
         branches::Entity::update(am).exec(&txn).await?;
 
-        // Replace child rows wholesale.
-        branch_o2o_values::Entity::delete_many()
-            .filter(branch_o2o_values::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        branch_o2m_values::Entity::delete_many()
-            .filter(branch_o2m_values::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        branch_references::Entity::delete_many()
-            .filter(branch_references::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        Self::insert_children(&txn, branch_id, &branch).await?;
+        Self::replace_children(&txn, branch_id, &branch).await?;
 
         txn.commit().await?;
         Ok(())
@@ -379,6 +408,41 @@ impl BranchRepository for SeaOrmBranchRepository {
             .filter(|b| matches_hard_filters(b, &query))
             .collect();
         Ok(kept)
+    }
+
+    /// Atomic batch upsert: the whole set is applied in one transaction, so a
+    /// failure on any branch rolls the entire import back.
+    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)> {
+        let now = crate::history::now();
+        let txn = self.db.begin().await?;
+        let (mut added, mut updated) = (0usize, 0usize);
+
+        for mut branch in branches {
+            let existing = branches::Entity::find()
+                .filter(branches::Column::Path.eq(&branch.path))
+                .one(&txn)
+                .await?;
+            match existing {
+                Some(model) => {
+                    let branch_id = model.id;
+                    branch.id = Some(branch_id as i64);
+                    let am = mapper::branch_active_model(&branch, &model.created_at, &now);
+                    branches::Entity::update(am).exec(&txn).await?;
+                    Self::replace_children(&txn, branch_id, &branch).await?;
+                    updated += 1;
+                }
+                None => {
+                    branch.id = None;
+                    let am = mapper::branch_active_model(&branch, &now, &now);
+                    let branch_id = branches::Entity::insert(am).exec(&txn).await?.last_insert_id;
+                    Self::insert_children(&txn, branch_id, &branch).await?;
+                    added += 1;
+                }
+            }
+        }
+
+        txn.commit().await?;
+        Ok((added, updated))
     }
 }
 

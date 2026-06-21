@@ -157,6 +157,16 @@ pub async fn compose_cmd(
     };
     let empty_recent = std::collections::HashSet::new();
 
+    // Candidate sets depend only on the slot and its `under` scope, both fixed
+    // across the batch — fetch them once per slot rather than per packet.
+    let mut slot_plans = Vec::with_capacity(frame.slots.len());
+    for slot in &frame.slots {
+        let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
+        let query = SampleQuery::from_slot(slot, under);
+        let candidates = branches.find(query.clone()).await?;
+        slot_plans.push((slot, query, candidates));
+    }
+
     for k in 0..input.count.max(1) {
         let seed = base_seed.wrapping_add(k as u64);
         let mut rng = rng_from_seed(seed);
@@ -165,12 +175,9 @@ pub async fn compose_cmd(
         packet.created_at = Some(now());
         packet.query = Some(serde_json::json!({ "frame": frame.name }));
 
-        for slot in &frame.slots {
-            let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
-            let query = SampleQuery::from_slot(slot, under);
-            let candidates = branches.find(query.clone()).await?;
+        for (slot, query, candidates) in &slot_plans {
             let slot_recent = if slot.avoid_recent { &recent } else { &empty_recent };
-            let chosen = sample(&candidates, &query, slot_recent, &mut rng);
+            let chosen = sample(candidates, query, slot_recent, &mut rng);
             for branch in chosen {
                 packet.selections.push(Selection {
                     slot: Some(slot.name.clone()),

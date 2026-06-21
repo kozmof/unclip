@@ -259,6 +259,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_many_inserts_and_replaces() {
+        let repo = repo().await;
+
+        // First import: both are new.
+        let mut a = Branch::new("/a");
+        a.o2m.insert("topic".into(), vec!["one".into()]);
+        let (added, updated) = repo
+            .upsert_many(vec![a.clone(), Branch::new("/b")])
+            .await
+            .unwrap();
+        assert_eq!((added, updated), (2, 0));
+
+        // Second import: `/a` is updated (child rows replaced), `/c` is new.
+        let mut a2 = Branch::new("/a");
+        a2.o2m.insert("topic".into(), vec!["two".into()]);
+        let (added, updated) = repo
+            .upsert_many(vec![a2, Branch::new("/c")])
+            .await
+            .unwrap();
+        assert_eq!((added, updated), (1, 1));
+
+        let got = repo.get("/a").await.unwrap().unwrap();
+        assert_eq!(got.o2m.get("topic").unwrap(), &vec!["two".to_string()]);
+    }
+
+    #[tokio::test]
     async fn attach_reference_appends() {
         let repo = repo().await;
         repo.add(Branch::new("/ueno/cafe")).await.unwrap();
