@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use sea_orm::{
+    sea_query::LikeExpr,
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, Statement, TransactionTrait,
@@ -243,7 +244,7 @@ impl SeaOrmBranchRepository {
 #[async_trait]
 impl BranchRepository for SeaOrmBranchRepository {
     async fn add(&self, branch: Branch) -> anyhow::Result<()> {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = crate::history::now();
         let txn = self.db.begin().await?;
 
         let am = mapper::branch_active_model(&branch, &now, &now);
@@ -269,7 +270,7 @@ impl BranchRepository for SeaOrmBranchRepository {
             .ok_or_else(|| anyhow::anyhow!("branch not found: {}", branch.path))?;
         let branch_id = existing.id;
         let created_at = existing.created_at.clone();
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = crate::history::now();
 
         let txn = self.db.begin().await?;
 
@@ -334,9 +335,8 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn descendants(&self, path: &str) -> anyhow::Result<Vec<Branch>> {
-        let prefix = format!("{}/%", path.trim_end_matches('/'));
         let models = branches::Entity::find()
-            .filter(branches::Column::Path.like(prefix))
+            .filter(branches::Column::Path.like(descendant_like(path)))
             .all(&self.db)
             .await?;
         self.hydrate_all(models).await
@@ -365,11 +365,10 @@ impl BranchRepository for SeaOrmBranchRepository {
         let mut select = branches::Entity::find();
         if let Some(under) = &query.under {
             let under = under.trim_end_matches('/').to_string();
-            let prefix = format!("{under}/%");
             select = select.filter(
                 branches::Column::Path
                     .eq(under.clone())
-                    .or(branches::Column::Path.like(prefix)),
+                    .or(branches::Column::Path.like(descendant_like(&under))),
             );
         }
         let models = select.all(&self.db).await?;
@@ -381,6 +380,25 @@ impl BranchRepository for SeaOrmBranchRepository {
             .collect();
         Ok(kept)
     }
+}
+
+/// Build a `LIKE` pattern matching the strict descendants of `scope`.
+///
+/// Paths may legitimately contain `_` and `%`, which are SQL `LIKE`
+/// metacharacters; without escaping, a scope like `/a_b` would also match
+/// `/axb/...`. We escape `%`, `_`, and the `\` escape character itself and
+/// emit an explicit `ESCAPE '\'` clause so only real descendants match.
+fn descendant_like(scope: &str) -> LikeExpr {
+    let scope = scope.trim_end_matches('/');
+    let mut pattern = String::with_capacity(scope.len() + 2);
+    for ch in scope.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    pattern.push_str("/%");
+    LikeExpr::new(pattern).escape('\\')
 }
 
 /// Apply the hard require/avoid filters (scope is already applied in SQL).

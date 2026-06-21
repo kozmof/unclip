@@ -1,5 +1,7 @@
 //! Repository for frames (reusable constraint sets).
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
@@ -37,16 +39,6 @@ pub struct SeaOrmFrameRepository {
 impl SeaOrmFrameRepository {
     pub fn new(db: DatabaseConnection) -> Self {
         Self { db }
-    }
-
-    async fn slot_ids(&self, frame_id: i32) -> anyhow::Result<Vec<i32>> {
-        Ok(frame_slots::Entity::find()
-            .filter(frame_slots::Column::FrameId.eq(frame_id))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|s| s.id)
-            .collect())
     }
 
     /// Delete a frame and its slot/value rows within an existing transaction.
@@ -193,16 +185,20 @@ impl FrameRepository for SeaOrmFrameRepository {
         let mut frames_list = frames::Entity::find().all(&self.db).await?;
         frames_list.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut out = Vec::with_capacity(frames_list.len());
-        for frame in frames_list {
-            let slot_count = self.slot_ids(frame.id).await?.len();
-            out.push(FrameInfo {
+        // Count slots per frame in one query rather than one query per frame.
+        let mut slot_counts: HashMap<i32, usize> = HashMap::new();
+        for slot in frame_slots::Entity::find().all(&self.db).await? {
+            *slot_counts.entry(slot.frame_id).or_default() += 1;
+        }
+
+        Ok(frames_list
+            .into_iter()
+            .map(|frame| FrameInfo {
+                slot_count: slot_counts.get(&frame.id).copied().unwrap_or(0),
                 name: frame.name,
                 description: frame.description,
-                slot_count,
-            });
-        }
-        Ok(out)
+            })
+            .collect())
     }
 
     async fn delete_frame(&self, name: &str) -> anyhow::Result<()> {

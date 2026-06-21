@@ -337,8 +337,10 @@ async fn save_packet(
     Ok(())
 }
 
+/// Millisecond-precision, `Z`-suffixed UTC timestamp, matching the canonical
+/// format the store writes (so packet `created_at` values sort consistently).
 fn now() -> String {
-    chrono::Utc::now().to_rfc3339()
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn query_json(query: &SampleQuery) -> serde_json::Value {

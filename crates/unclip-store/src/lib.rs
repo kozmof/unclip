@@ -115,6 +115,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scope_matching_treats_underscore_literally() {
+        // `_` is a SQL LIKE wildcard; a scope like `/a_b` must not match `/axb`.
+        let repo = repo().await;
+        for path in ["/a_b", "/a_b/child", "/axb", "/axb/child"] {
+            repo.add(Branch::new(path)).await.unwrap();
+        }
+
+        let mut descendants: Vec<_> = repo
+            .descendants("/a_b")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|b| b.path)
+            .collect();
+        descendants.sort();
+        assert_eq!(descendants, vec!["/a_b/child"]);
+
+        // `find` applies the same scope filter (self + descendants).
+        let q = SampleQuery {
+            under: Some("/a_b".into()),
+            ..Default::default()
+        };
+        let mut found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        found.sort();
+        assert_eq!(found, vec!["/a_b", "/a_b/child"]);
+    }
+
+    #[tokio::test]
     async fn catalog_and_value_lookup() {
         let repo = repo().await;
         for (path, axis) in [
