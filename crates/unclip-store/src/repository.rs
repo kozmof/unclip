@@ -214,17 +214,19 @@ impl SeaOrmBranchRepository {
 
     async fn index_catalog(
         &self,
-        table: &str,
+        table: IndexTable,
         name: Option<&str>,
     ) -> anyhow::Result<Vec<IndexedValue>> {
-        // `table` is a fixed internal identifier, never user input.
+        // The table name comes from a closed enum (never user input), so it is
+        // safe to interpolate; `name` is always passed as a bound parameter.
         let (filter, values) = match name {
             Some(n) => ("WHERE name = ?", vec![n.into()]),
             None => ("", Vec::new()),
         };
         let sql = format!(
-            "SELECT name, value, COUNT(*) AS count FROM {table} {filter} \
-             GROUP BY name, value ORDER BY name, value"
+            "SELECT name, value, COUNT(*) AS count FROM {} {filter} \
+             GROUP BY name, value ORDER BY name, value",
+            table.as_table()
         );
         let rows = IndexedValue::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -362,6 +364,16 @@ impl BranchRepository for SeaOrmBranchRepository {
         for (name, value) in &query.avoid_o2o {
             select = select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, value)));
         }
+        for (name, values) in &query.require_o2m {
+            // o2m is a set: a required name may list several values, each of
+            // which the branch must carry, so every value is its own membership
+            // filter rather than one `IN (…)` (which would match *any*).
+            for value in values {
+                select = select.filter(
+                    branches::Column::Id.in_subquery(o2m_subquery(name, std::slice::from_ref(value))),
+                );
+            }
+        }
         for (name, values) in &query.avoid_o2m {
             select = select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
         }
@@ -370,11 +382,11 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog("branch_o2o_values", name).await
+        self.index_catalog(IndexTable::O2o, name).await
     }
 
     async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog("branch_o2m_values", name).await
+        self.index_catalog(IndexTable::O2m, name).await
     }
 
     async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
@@ -472,6 +484,24 @@ impl BranchRepository for SeaOrmBranchRepository {
 
         txn.commit().await?;
         Ok((added, updated))
+    }
+}
+
+/// The indexed child table a catalog query runs against. A closed enum so the
+/// table name interpolated into `index_catalog`'s SQL can only ever be one of
+/// these fixed identifiers.
+#[derive(Debug, Clone, Copy)]
+enum IndexTable {
+    O2o,
+    O2m,
+}
+
+impl IndexTable {
+    fn as_table(self) -> &'static str {
+        match self {
+            IndexTable::O2o => "branch_o2o_values",
+            IndexTable::O2m => "branch_o2m_values",
+        }
     }
 }
 

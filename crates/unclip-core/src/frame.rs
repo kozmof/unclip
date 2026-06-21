@@ -33,6 +33,9 @@ pub struct Slot {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub avoid_o2o: BTreeMap<String, String>,
 
+    /// Hard o2m requirements: a candidate must carry every listed value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub require_o2m: BTreeMap<String, Vec<String>>,
     /// o2m values that increase score.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub prefer_o2m: BTreeMap<String, Vec<String>>,

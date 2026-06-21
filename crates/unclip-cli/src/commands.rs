@@ -136,6 +136,7 @@ pub struct QueryInput {
     pub frame_slot: Option<Slot>,
     pub require_o2o: Vec<(String, String)>,
     pub avoid_o2o: Vec<(String, String)>,
+    pub require_o2m: Vec<(String, String)>,
     pub avoid_o2m: Vec<(String, String)>,
 }
 
@@ -151,6 +152,9 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
     merge_o2o(&mut q.require_o2o, input.require_o2o)?;
     for (name, value) in input.avoid_o2o {
         q.avoid_o2o.insert(name, value);
+    }
+    for (name, value) in input.require_o2m {
+        q.require_o2m.entry(name).or_default().push(value);
     }
     for (name, value) in input.avoid_o2m {
         q.avoid_o2m.entry(name).or_default().push(value);

@@ -160,6 +160,27 @@ metadata_suggest:
     }
 
     #[test]
+    fn validate_branch_checks_require_o2m() {
+        let slot: Slot = serde_yaml::from_str(
+            "name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n",
+        )
+        .unwrap();
+
+        // Carries both required values -> no violations.
+        let mut ok = Branch::new("/a");
+        ok.o2m
+            .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
+        assert!(validate_branch(&slot, &ok).is_empty());
+
+        // Missing one required value -> exactly one violation.
+        let mut partial = Branch::new("/b");
+        partial.o2m.insert("mood".into(), vec!["tense".into()]);
+        let violations = validate_branch(&slot, &partial);
+        assert_eq!(violations.len(), 1, "got: {violations:?}");
+        assert!(violations[0].contains("hidden"));
+    }
+
+    #[test]
     fn skeleton_seeds_o2o_and_metadata() {
         let slot: Slot = serde_yaml::from_str(STORY_PLACE_SLOT).unwrap();
         let skel = slot.skeleton("/ikebukuro/station/coin-locker");

@@ -80,6 +80,9 @@ enum Command {
         /// Excluded one-to-one value, name=value (repeatable).
         #[arg(long = "avoid-o2o", value_parser = parse_kv)]
         avoid_o2o: Vec<(String, String)>,
+        /// Required one-to-many value, name=value (repeatable).
+        #[arg(long = "require-o2m", value_parser = parse_kv)]
+        require_o2m: Vec<(String, String)>,
         /// Excluded one-to-many value, name=value (repeatable).
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
         avoid_o2m: Vec<(String, String)>,
@@ -135,6 +138,8 @@ enum Command {
         o2o: Vec<(String, String)>,
         #[arg(long = "avoid-o2o", value_parser = parse_kv)]
         avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "require-o2m", value_parser = parse_kv)]
+        require_o2m: Vec<(String, String)>,
         #[arg(long = "prefer-o2m", value_parser = parse_kv)]
         prefer_o2m: Vec<(String, String)>,
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
@@ -185,6 +190,8 @@ enum Command {
         o2o: Vec<(String, String)>,
         #[arg(long = "avoid-o2o", value_parser = parse_kv)]
         avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "require-o2m", value_parser = parse_kv)]
+        require_o2m: Vec<(String, String)>,
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
         avoid_o2m: Vec<(String, String)>,
     },
@@ -197,6 +204,8 @@ enum Command {
         o2o: Vec<(String, String)>,
         #[arg(long = "avoid-o2o", value_parser = parse_kv)]
         avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "require-o2m", value_parser = parse_kv)]
+        require_o2m: Vec<(String, String)>,
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
         avoid_o2m: Vec<(String, String)>,
     },
@@ -214,6 +223,8 @@ enum Command {
         o2o: Vec<(String, String)>,
         #[arg(long = "avoid-o2o", value_parser = parse_kv)]
         avoid_o2o: Vec<(String, String)>,
+        #[arg(long = "require-o2m", value_parser = parse_kv)]
+        require_o2m: Vec<(String, String)>,
         #[arg(long = "avoid-o2m", value_parser = parse_kv)]
         avoid_o2m: Vec<(String, String)>,
         #[arg(long, default_value = "yaml", value_parser = parse_format)]
@@ -330,6 +341,7 @@ async fn main() -> anyhow::Result<()> {
             frame,
             o2o,
             avoid_o2o,
+            require_o2m,
             avoid_o2m,
         } => {
             let frame_slot = resolve_query_slot(&repos.frames, frame.as_deref()).await?;
@@ -340,6 +352,7 @@ async fn main() -> anyhow::Result<()> {
                     frame_slot,
                     require_o2o: o2o,
                     avoid_o2o,
+                    require_o2m,
                     avoid_o2m,
                 },
             )
@@ -363,6 +376,7 @@ async fn main() -> anyhow::Result<()> {
             under,
             o2o,
             avoid_o2o,
+            require_o2m,
             prefer_o2m,
             avoid_o2m,
             count,
@@ -380,6 +394,7 @@ async fn main() -> anyhow::Result<()> {
                         under,
                         require_o2o: o2o,
                         avoid_o2o,
+                        require_o2m,
                         prefer_o2m,
                         avoid_o2m,
                     },
@@ -423,6 +438,7 @@ async fn main() -> anyhow::Result<()> {
             under,
             o2o,
             avoid_o2o,
+            require_o2m,
             avoid_o2m,
         } => {
             sampling::stats_cmd(
@@ -432,6 +448,7 @@ async fn main() -> anyhow::Result<()> {
                     under,
                     require_o2o: o2o,
                     avoid_o2o,
+                    require_o2m,
                     prefer_o2m: Vec::new(),
                     avoid_o2m,
                 },
@@ -442,6 +459,7 @@ async fn main() -> anyhow::Result<()> {
             under,
             o2o,
             avoid_o2o,
+            require_o2m,
             avoid_o2m,
         } => {
             sampling::stale_cmd(
@@ -451,6 +469,7 @@ async fn main() -> anyhow::Result<()> {
                     under,
                     require_o2o: o2o,
                     avoid_o2o,
+                    require_o2m,
                     prefer_o2m: Vec::new(),
                     avoid_o2m,
                 },
@@ -465,6 +484,7 @@ async fn main() -> anyhow::Result<()> {
             under,
             o2o,
             avoid_o2o,
+            require_o2m,
             avoid_o2m,
             format,
         } => {
@@ -474,6 +494,7 @@ async fn main() -> anyhow::Result<()> {
                     under,
                     require_o2o: o2o,
                     avoid_o2o,
+                    require_o2m,
                     prefer_o2m: Vec::new(),
                     avoid_o2m,
                 },

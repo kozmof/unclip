@@ -11,6 +11,7 @@ pub const O2O_DEFAULT: &str = "default";
 pub const O2O_AVOID: &str = "avoid";
 
 /// o2m mode discriminators stored in `frame_slot_o2m_values.mode`.
+pub const O2M_REQUIRE: &str = "require";
 pub const O2M_PREFER: &str = "prefer";
 pub const O2M_AVOID: &str = "avoid";
 
@@ -33,17 +34,23 @@ pub fn assemble_slot(
         target.insert(row.name, row.value);
     }
 
+    let mut require_o2m: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut prefer_o2m: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut avoid_o2m: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for row in o2m {
         let target = match row.mode.as_str() {
+            O2M_REQUIRE => &mut require_o2m,
             O2M_PREFER => &mut prefer_o2m,
             O2M_AVOID => &mut avoid_o2m,
             other => anyhow::bail!("unknown o2m slot mode `{other}`"),
         };
         target.entry(row.name).or_default().push(row.value);
     }
-    for values in prefer_o2m.values_mut().chain(avoid_o2m.values_mut()) {
+    for values in require_o2m
+        .values_mut()
+        .chain(prefer_o2m.values_mut())
+        .chain(avoid_o2m.values_mut())
+    {
         values.sort();
     }
 
@@ -58,6 +65,7 @@ pub fn assemble_slot(
         require_o2o,
         default_o2o,
         avoid_o2o,
+        require_o2m,
         prefer_o2m,
         avoid_o2m,
         count: model.count.max(0) as usize,
@@ -85,6 +93,11 @@ pub fn slot_o2o_rows(slot: &Slot) -> Vec<(&'static str, String, String)> {
 /// Flatten a slot's o2m maps into `(mode, name, value)` rows.
 pub fn slot_o2m_rows(slot: &Slot) -> Vec<(&'static str, String, String)> {
     let mut rows = Vec::new();
+    for (name, values) in &slot.require_o2m {
+        for value in values {
+            rows.push((O2M_REQUIRE, name.clone(), value.clone()));
+        }
+    }
     for (name, values) in &slot.prefer_o2m {
         for value in values {
             rows.push((O2M_PREFER, name.clone(), value.clone()));

@@ -14,6 +14,7 @@ pub struct FilterInput {
     pub under: Option<String>,
     pub require_o2o: Vec<(String, String)>,
     pub avoid_o2o: Vec<(String, String)>,
+    pub require_o2m: Vec<(String, String)>,
     pub prefer_o2m: Vec<(String, String)>,
     pub avoid_o2m: Vec<(String, String)>,
 }
@@ -30,6 +31,9 @@ impl FilterInput {
         crate::commands::merge_o2o(&mut q.require_o2o, self.require_o2o)?;
         for (name, value) in self.avoid_o2o {
             q.avoid_o2o.insert(name, value);
+        }
+        for (name, value) in self.require_o2m {
+            q.require_o2m.entry(name).or_default().push(value);
         }
         for (name, value) in self.prefer_o2m {
             q.prefer_o2m.entry(name).or_default().push(value);

@@ -160,6 +160,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn find_applies_require_o2m_in_sql() {
+        let repo = repo().await;
+
+        // /both carries every required value; /partial is missing one; /none has
+        // neither. require_o2m must keep only /both.
+        let mut both = Branch::new("/both");
+        both.o2m
+            .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
+        repo.add(both).await.unwrap();
+
+        let mut partial = Branch::new("/partial");
+        partial.o2m.insert("mood".into(), vec!["tense".into()]);
+        repo.add(partial).await.unwrap();
+
+        repo.add(Branch::new("/none")).await.unwrap();
+
+        let mut q = SampleQuery::default();
+        q.require_o2m
+            .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
+
+        let found: Vec<_> = repo.find(q).await.unwrap().into_iter().map(|b| b.path).collect();
+        assert_eq!(found, vec!["/both".to_string()]);
+    }
+
+    #[tokio::test]
     async fn titles_projects_path_and_title_only() {
         let repo = repo().await;
         let mut titled = Branch::new("/a");
@@ -262,6 +287,9 @@ mod tests {
                 .into_iter()
                 .collect(),
             avoid_o2o: Default::default(),
+            require_o2m: [("mood".to_string(), vec!["tense".to_string()])]
+                .into_iter()
+                .collect(),
             prefer_o2m: [("density".to_string(), vec!["crowded".to_string()])]
                 .into_iter()
                 .collect(),
