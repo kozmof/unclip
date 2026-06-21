@@ -6,12 +6,12 @@ use std::path::Path;
 
 use anyhow::{bail, Context};
 use unclip_match::{branch_text, suggest_o2m, Matcher, PatternEntry, PatternTarget};
-use unclip_store::{BranchRepository, SeaOrmBranchRepository, SeaOrmPatternRepository};
+use unclip_store::{BranchRepository, SeaOrmPatternRepository};
 
 /// Build a matcher from database state: o2o/o2m catalogs, branch titles, and
 /// user-defined pattern entries (DRAFT §17).
 pub async fn build_matcher(
-    branches: &SeaOrmBranchRepository,
+    branches: &impl BranchRepository,
     patterns: &SeaOrmPatternRepository,
 ) -> anyhow::Result<Matcher> {
     let mut entries: Vec<PatternEntry> = Vec::new();
@@ -44,7 +44,7 @@ pub async fn build_matcher(
 
 /// `unclip scan <file>` — report which structured patterns appear in text.
 pub async fn scan_cmd(
-    branches: &SeaOrmBranchRepository,
+    branches: &impl BranchRepository,
     patterns: &SeaOrmPatternRepository,
     file: &Path,
 ) -> anyhow::Result<()> {
@@ -73,7 +73,7 @@ pub async fn scan_cmd(
 /// `unclip suggest-o2m <path>` — suggest o2m values mentioned in a branch's
 /// text that it does not already carry.
 pub async fn suggest_o2m_cmd(
-    branches: &SeaOrmBranchRepository,
+    branches: &impl BranchRepository,
     patterns: &SeaOrmPatternRepository,
     path: &str,
 ) -> anyhow::Result<()> {

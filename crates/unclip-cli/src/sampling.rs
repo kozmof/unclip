@@ -1,6 +1,6 @@
 //! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use unclip_core::{Branch, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
@@ -27,11 +27,7 @@ impl FilterInput {
             avoid_recent,
             ..Default::default()
         };
-        for (name, value) in self.require_o2o {
-            if q.require_o2o.insert(name.clone(), value).is_some() {
-                bail!("duplicate required o2o name `{name}` (o2o values are one-to-one)");
-            }
-        }
+        crate::commands::merge_o2o(&mut q.require_o2o, self.require_o2o)?;
         for (name, value) in self.avoid_o2o {
             q.avoid_o2o.insert(name, value);
         }
@@ -113,13 +109,26 @@ pub fn parse_format(s: &str) -> anyhow::Result<Format> {
 }
 
 /// A `--under` override for compose: a slot-specific or global scope.
-pub type UnderOverride = (Option<String>, String);
+///
+/// `slot: None` is a global override applied to any slot without a more
+/// specific one.
+#[derive(Debug, Clone)]
+pub struct UnderOverride {
+    pub slot: Option<String>,
+    pub path: String,
+}
 
 /// Parse `slot:/path` (slot-specific) or `/path` (global) overrides.
 pub fn parse_under_override(raw: &str) -> anyhow::Result<UnderOverride> {
     match raw.split_once(':') {
-        Some((slot, path)) if !slot.is_empty() => Ok((Some(slot.to_string()), path.to_string())),
-        _ => Ok((None, raw.to_string())),
+        Some((slot, path)) if !slot.is_empty() => Ok(UnderOverride {
+            slot: Some(slot.to_string()),
+            path: path.to_string(),
+        }),
+        _ => Ok(UnderOverride {
+            slot: None,
+            path: raw.to_string(),
+        }),
     }
 }
 
@@ -203,9 +212,9 @@ fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> 
     // Slot-specific override wins; otherwise the first global override.
     overrides
         .iter()
-        .find(|(slot, _)| slot.as_deref() == Some(slot_name))
-        .or_else(|| overrides.iter().find(|(slot, _)| slot.is_none()))
-        .map(|(_, path)| path.clone())
+        .find(|o| o.slot.as_deref() == Some(slot_name))
+        .or_else(|| overrides.iter().find(|o| o.slot.is_none()))
+        .map(|o| o.path.clone())
 }
 
 /// `unclip export` — find branches by filter and render them.

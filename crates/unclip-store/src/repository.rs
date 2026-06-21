@@ -38,6 +38,24 @@ pub trait BranchRepository {
 
     async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>>;
 
+    /// Distinct o2o `name=value` pairs with branch counts, optionally for a
+    /// single name. Ordered by name then value.
+    async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>>;
+    /// Distinct o2m `name=value` pairs with branch counts, optionally for a
+    /// single name. Ordered by name then value.
+    async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>>;
+
+    /// Branches carrying a specific o2o value.
+    async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>>;
+    /// Branches carrying a specific o2m value.
+    async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>>;
+
+    /// `(path, title)` for every branch that has a title.
+    async fn titles(&self) -> anyhow::Result<Vec<(String, String)>>;
+
+    /// Attach a single reference to an existing branch.
+    async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()>;
+
     /// Insert or replace many branches (upsert by path), returning the
     /// `(added, updated)` counts.
     ///
@@ -194,18 +212,6 @@ impl SeaOrmBranchRepository {
         self.hydrate_all(models).await
     }
 
-    /// Distinct o2o `name=value` pairs with branch counts, optionally for a
-    /// single name. Ordered by name then value.
-    pub async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog("branch_o2o_values", name).await
-    }
-
-    /// Distinct o2m `name=value` pairs with branch counts, optionally for a
-    /// single name. Ordered by name then value.
-    pub async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog("branch_o2m_values", name).await
-    }
-
     async fn index_catalog(
         &self,
         table: &str,
@@ -230,75 +236,6 @@ impl SeaOrmBranchRepository {
         Ok(rows)
     }
 
-    /// Branches carrying a specific o2o value.
-    pub async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
-        let ids = branch_o2o_values::Entity::find()
-            .filter(branch_o2o_values::Column::Name.eq(name))
-            .filter(branch_o2o_values::Column::Value.eq(value))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|r| r.branch_id)
-            .collect();
-        self.load_branches_by_ids(ids).await
-    }
-
-    /// Attach a single reference to an existing branch.
-    pub async fn attach_reference(
-        &self,
-        path: &str,
-        reference: &Reference,
-    ) -> anyhow::Result<()> {
-        let model = self
-            .model_by_path(path)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("branch not found: {path}"))?;
-        let am = branch_references::ActiveModel {
-            id: NotSet,
-            branch_id: Set(model.id),
-            r#type: Set(reference.kind.clone()),
-            value: Set(reference.value.clone()),
-            note: Set(reference.note.clone()),
-        };
-        branch_references::Entity::insert(am).exec(&self.db).await?;
-        Ok(())
-    }
-
-    /// `(path, title)` for every branch that has a title.
-    ///
-    /// A projection — it loads only the two columns the matcher needs, avoiding
-    /// the full o2o/o2m/reference hydration of `find`.
-    pub async fn titles(&self) -> anyhow::Result<Vec<(String, String)>> {
-        #[derive(FromQueryResult)]
-        struct TitleRow {
-            path: String,
-            title: Option<String>,
-        }
-        let rows = branches::Entity::find()
-            .select_only()
-            .column(branches::Column::Path)
-            .column(branches::Column::Title)
-            .into_model::<TitleRow>()
-            .all(&self.db)
-            .await?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|r| r.title.map(|t| (r.path, t)))
-            .collect())
-    }
-
-    /// Branches carrying a specific o2m value.
-    pub async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
-        let ids = branch_o2m_values::Entity::find()
-            .filter(branch_o2m_values::Column::Name.eq(name))
-            .filter(branch_o2m_values::Column::Value.eq(value))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|r| r.branch_id)
-            .collect();
-        self.load_branches_by_ids(ids).await
-    }
 }
 
 #[async_trait]
@@ -430,6 +367,76 @@ impl BranchRepository for SeaOrmBranchRepository {
         }
         let models = select.all(&self.db).await?;
         self.hydrate_all(models).await
+    }
+
+    async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
+        self.index_catalog("branch_o2o_values", name).await
+    }
+
+    async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
+        self.index_catalog("branch_o2m_values", name).await
+    }
+
+    async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+        // Project only the branch ids rather than hydrating whole value rows.
+        let ids = branch_o2o_values::Entity::find()
+            .select_only()
+            .column(branch_o2o_values::Column::BranchId)
+            .filter(branch_o2o_values::Column::Name.eq(name))
+            .filter(branch_o2o_values::Column::Value.eq(value))
+            .into_tuple::<i32>()
+            .all(&self.db)
+            .await?;
+        self.load_branches_by_ids(ids).await
+    }
+
+    async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+        let ids = branch_o2m_values::Entity::find()
+            .select_only()
+            .column(branch_o2m_values::Column::BranchId)
+            .filter(branch_o2m_values::Column::Name.eq(name))
+            .filter(branch_o2m_values::Column::Value.eq(value))
+            .into_tuple::<i32>()
+            .all(&self.db)
+            .await?;
+        self.load_branches_by_ids(ids).await
+    }
+
+    /// A projection — it loads only the two columns the matcher needs, avoiding
+    /// the full o2o/o2m/reference hydration of `find`.
+    async fn titles(&self) -> anyhow::Result<Vec<(String, String)>> {
+        #[derive(FromQueryResult)]
+        struct TitleRow {
+            path: String,
+            title: Option<String>,
+        }
+        let rows = branches::Entity::find()
+            .select_only()
+            .column(branches::Column::Path)
+            .column(branches::Column::Title)
+            .into_model::<TitleRow>()
+            .all(&self.db)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.title.map(|t| (r.path, t)))
+            .collect())
+    }
+
+    async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()> {
+        let model = self
+            .model_by_path(path)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("branch not found: {path}"))?;
+        let am = branch_references::ActiveModel {
+            id: NotSet,
+            branch_id: Set(model.id),
+            r#type: Set(reference.kind.clone()),
+            value: Set(reference.value.clone()),
+            note: Set(reference.note.clone()),
+        };
+        branch_references::Entity::insert(am).exec(&self.db).await?;
+        Ok(())
     }
 
     /// Atomic batch upsert: the whole set is applied in one transaction, so a

@@ -8,9 +8,7 @@ use unclip_core::{
     SelectionPacket, Slot,
 };
 use unclip_io::split_frame_selector;
-use unclip_store::{
-    BranchRepository, FrameRepository, IndexedValue, SeaOrmBranchRepository,
-};
+use unclip_store::{BranchRepository, FrameRepository, IndexedValue};
 
 /// Parse a `name=value` pair, used for `--o2o` / `--o2m` flags.
 pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
@@ -21,6 +19,22 @@ pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
         bail!("empty name in `{raw}`");
     }
     Ok((name.to_string(), value.to_string()))
+}
+
+/// Merge `name=value` pairs into a one-to-one o2o map, rejecting any name that
+/// is already present. o2o values are one-to-one (DRAFT §5), so a repeated name
+/// — whether across flags or colliding with a frame slot's base value — is a
+/// usage error.
+pub fn merge_o2o(
+    map: &mut BTreeMap<String, String>,
+    pairs: Vec<(String, String)>,
+) -> anyhow::Result<()> {
+    for (name, value) in pairs {
+        if map.insert(name.clone(), value).is_some() {
+            bail!("duplicate o2o name `{name}` (o2o values are one-to-one)");
+        }
+    }
+    Ok(())
 }
 
 /// Arguments for `add`, assembled by clap in `main`.
@@ -44,12 +58,7 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
     branch.description = input.description;
     branch.weight = input.weight;
 
-    for (name, value) in input.o2o {
-        // o2o is one-to-one: a repeated name is a usage error (DRAFT §5).
-        if branch.o2o.insert(name.clone(), value).is_some() {
-            bail!("duplicate o2o name `{name}` (o2o values are one-to-one)");
-        }
-    }
+    merge_o2o(&mut branch.o2o, input.o2o)?;
 
     // o2m is a set, but the store layer enforces that (dedup + canonical order)
     // on the way to SQL, so we just group the flag values by name here.
@@ -134,11 +143,7 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
             ..Default::default()
         },
     };
-    for (name, value) in input.require_o2o {
-        if q.require_o2o.insert(name.clone(), value).is_some() {
-            bail!("duplicate required o2o name `{name}` (o2o values are one-to-one)");
-        }
-    }
+    merge_o2o(&mut q.require_o2o, input.require_o2o)?;
     for (name, value) in input.avoid_o2o {
         q.avoid_o2o.insert(name, value);
     }
@@ -159,7 +164,7 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
 }
 
 /// `unclip o2o [name | name=value]` — catalog or branch lookup over o2o.
-pub async fn o2o(repo: &SeaOrmBranchRepository, selector: Option<String>) -> anyhow::Result<()> {
+pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2o_catalog(None).await?),
         Selector::Name(name) => print_catalog(repo.o2o_catalog(Some(&name)).await?),
@@ -171,7 +176,7 @@ pub async fn o2o(repo: &SeaOrmBranchRepository, selector: Option<String>) -> any
 }
 
 /// `unclip o2m [name | name=value]` — catalog or branch lookup over o2m.
-pub async fn o2m(repo: &SeaOrmBranchRepository, selector: Option<String>) -> anyhow::Result<()> {
+pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2m_catalog(None).await?),
         Selector::Name(name) => print_catalog(repo.o2m_catalog(Some(&name)).await?),
@@ -203,7 +208,7 @@ pub async fn import(
 
 /// `unclip attach <path> <value>` — attach a reference to a branch.
 pub async fn attach(
-    repo: &SeaOrmBranchRepository,
+    repo: &impl BranchRepository,
     path: &str,
     value: String,
     kind: Option<String>,
@@ -305,6 +310,7 @@ pub async fn create(
     path: String,
     selector: &str,
 ) -> anyhow::Result<()> {
+    validate_path(&path)?;
     let (frame_name, slot_name) = split_frame_selector(selector);
     let Some(slot_name) = slot_name else {
         bail!("create requires a frame.slot selector, e.g. story.place");
