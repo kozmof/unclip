@@ -114,17 +114,43 @@ impl SeaOrmFrameRepository {
         Ok(())
     }
 
-    async fn load_slot(&self, model: frame_slots::Model) -> anyhow::Result<Slot> {
-        let id = model.id;
+    /// Hydrate many slots with a fixed number of queries (no N+1): load all
+    /// o2o/o2m value rows for the whole slot-id set at once, then group them per
+    /// slot. Slot order is preserved from `models`.
+    async fn hydrate_slots(&self, models: Vec<frame_slots::Model>) -> anyhow::Result<Vec<Slot>> {
+        if models.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<i32> = models.iter().map(|m| m.id).collect();
+
         let o2o = frame_slot_o2o_values::Entity::find()
-            .filter(frame_slot_o2o_values::Column::SlotId.eq(id))
+            .filter(frame_slot_o2o_values::Column::SlotId.is_in(ids.clone()))
             .all(&self.db)
             .await?;
         let o2m = frame_slot_o2m_values::Entity::find()
-            .filter(frame_slot_o2m_values::Column::SlotId.eq(id))
+            .filter(frame_slot_o2m_values::Column::SlotId.is_in(ids))
             .all(&self.db)
             .await?;
-        frame_mapper::assemble_slot(model, o2o, o2m)
+
+        let mut o2o_by_id: HashMap<i32, Vec<frame_slot_o2o_values::Model>> = HashMap::new();
+        for row in o2o {
+            o2o_by_id.entry(row.slot_id).or_default().push(row);
+        }
+        let mut o2m_by_id: HashMap<i32, Vec<frame_slot_o2m_values::Model>> = HashMap::new();
+        for row in o2m {
+            o2m_by_id.entry(row.slot_id).or_default().push(row);
+        }
+
+        let mut slots = Vec::with_capacity(models.len());
+        for model in models {
+            let id = model.id;
+            slots.push(frame_mapper::assemble_slot(
+                model,
+                o2o_by_id.remove(&id).unwrap_or_default(),
+                o2m_by_id.remove(&id).unwrap_or_default(),
+            )?);
+        }
+        Ok(slots)
     }
 }
 
@@ -169,10 +195,7 @@ impl FrameRepository for SeaOrmFrameRepository {
             .filter(frame_slots::Column::FrameId.eq(frame.id))
             .all(&self.db)
             .await?;
-        let mut slots = Vec::with_capacity(slot_models.len());
-        for model in slot_models {
-            slots.push(self.load_slot(model).await?);
-        }
+        let slots = self.hydrate_slots(slot_models).await?;
 
         Ok(Some(frame_mapper::assemble_frame(
             frame.name,
