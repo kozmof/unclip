@@ -38,8 +38,9 @@ pub struct PacketRecord<'a> {
 /// Fixed millisecond precision and a literal `Z` make these timestamps
 /// lexically sortable, which `recent_branch_ids` and the `MAX(used_at)`
 /// aggregate rely on for correct ordering. Shared so every timestamp written
-/// to the database uses one canonical format.
-pub(crate) fn now() -> String {
+/// to the database — and every packet `created_at` produced by the CLI — uses
+/// one canonical format.
+pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 

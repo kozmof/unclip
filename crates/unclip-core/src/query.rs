@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
 
+use serde::Serialize;
+
 use crate::frame::Slot;
 
 /// An independent set of filters used by sampling and composition.
-#[derive(Debug, Clone, Default)]
+///
+/// `Serialize` is derived so a query can be embedded verbatim in a packet's
+/// `query` field; new fields are then carried automatically (no hand-written
+/// JSON projection to keep in sync).
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SampleQuery {
     pub under: Option<String>,
 

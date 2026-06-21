@@ -3,7 +3,7 @@
 //! Keeping this in one place is what lets application logic depend only on
 //! `unclip_core` types and never touch SeaORM directly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use sea_orm::ActiveValue::{NotSet, Set};
 use unclip_core::{parent_of, Branch, Reference};
@@ -49,18 +49,25 @@ pub fn o2o_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2o_valu
 }
 
 /// o2m active-model rows for a branch.
+///
+/// o2m is a set: duplicate values under one name are dropped here so an
+/// imported branch carrying e.g. `topic: [locker, locker]` cannot violate the
+/// `(branch_id, name, value)` primary key.
 pub fn o2m_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2m_values::ActiveModel> {
-    branch
-        .o2m
-        .iter()
-        .flat_map(|(name, values)| {
-            values.iter().map(move |value| branch_o2m_values::ActiveModel {
-                branch_id: Set(branch_id),
-                name: Set(name.clone()),
-                value: Set(value.clone()),
-            })
-        })
-        .collect()
+    let mut rows = Vec::new();
+    for (name, values) in &branch.o2m {
+        let mut seen = HashSet::new();
+        for value in values {
+            if seen.insert(value) {
+                rows.push(branch_o2m_values::ActiveModel {
+                    branch_id: Set(branch_id),
+                    name: Set(name.clone()),
+                    value: Set(value.clone()),
+                });
+            }
+        }
+    }
+    rows
 }
 
 /// Reference active-model rows for a branch.

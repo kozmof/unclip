@@ -3,8 +3,8 @@
 use anyhow::{bail, Context};
 use unclip_core::{Branch, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
-use unclip_sample::{new_packet_id, random_seed, rng_from_seed, sample};
-use unclip_store::{BranchRepository, PacketRecord, SeaOrmHistoryRepository};
+use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
+use unclip_store::{now, BranchRepository, PacketRecord, SeaOrmHistoryRepository};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
@@ -89,7 +89,7 @@ pub async fn sample_cmd(
 
     let mut packet = SelectionPacket::new(None, Some(seed));
     packet.created_at = Some(now());
-    packet.query = Some(query_json(&query));
+    packet.query = Some(serde_json::to_value(&query)?);
     packet.selections = chosen
         .iter()
         .map(|b| Selection {
@@ -101,7 +101,7 @@ pub async fn sample_cmd(
     print!("{}", unclip_io::render_packet(&packet, format)?);
 
     if !dry_run {
-        let id = new_packet_id(&mut rng);
+        let id = random_packet_id();
         save_packet(history, &id, None, &packet).await?;
         record_usages(history, "sample", &id, &chosen).await?;
     }
@@ -185,8 +185,8 @@ pub async fn compose_cmd(
 
     if !input.dry_run {
         for packet in &packets {
-            // Derive a deterministic packet id from its seed.
-            let id = new_packet_id(&mut rng_from_seed(packet.seed.unwrap_or(0)));
+            // Packet id is random (seed-independent) so re-runs do not collide.
+            let id = random_packet_id();
             save_packet(history, &id, Some(&frame.name), packet).await?;
             for selection in &packet.selections {
                 if let Some(branch_id) = selection.branch.id {
@@ -337,21 +337,3 @@ async fn save_packet(
     Ok(())
 }
 
-/// Millisecond-precision, `Z`-suffixed UTC timestamp, matching the canonical
-/// format the store writes (so packet `created_at` values sort consistently).
-fn now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-fn query_json(query: &SampleQuery) -> serde_json::Value {
-    serde_json::json!({
-        "under": query.under,
-        "require_o2o": query.require_o2o,
-        "avoid_o2o": query.avoid_o2o,
-        "prefer_o2m": query.prefer_o2m,
-        "avoid_o2m": query.avoid_o2m,
-        "count": query.count,
-        "weighted": query.weighted,
-        "avoid_recent": query.avoid_recent,
-    })
-}

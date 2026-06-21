@@ -34,9 +34,14 @@ pub fn random_seed() -> u64 {
     rand::thread_rng().gen()
 }
 
-/// Generate a random packet id (128-bit, hex).
-pub fn new_packet_id(rng: &mut StdRng) -> String {
-    format!("{:032x}", rng.gen::<u128>())
+/// Generate a random packet id (128-bit, hex) from system entropy.
+///
+/// The id is deliberately independent of the sampling seed: re-running a
+/// `sample`/`compose` with a fixed `--seed` reproduces the *selections*, but
+/// each run draws a fresh packet id so persisting it cannot collide on the
+/// `selection_packets` primary key.
+pub fn random_packet_id() -> String {
+    format!("{:032x}", rand::thread_rng().gen::<u128>())
 }
 
 /// Score a single candidate against the query and recency set.

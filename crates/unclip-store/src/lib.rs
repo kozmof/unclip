@@ -9,7 +9,7 @@ pub mod repository;
 pub mod seaorm;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
-pub use history::{PacketRecord, SeaOrmHistoryRepository, UsageSummary};
+pub use history::{now, PacketRecord, SeaOrmHistoryRepository, UsageSummary};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
@@ -72,6 +72,25 @@ mod tests {
         // delete removes the branch and its child rows.
         repo.delete(&branch.path).await.unwrap();
         assert!(repo.get(&branch.path).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn duplicate_o2m_values_do_not_violate_pk() {
+        // A branch built with repeated o2m values (e.g. from an import file)
+        // must not collide on the (branch_id, name, value) primary key.
+        let repo = repo().await;
+        let mut b = Branch::new("/dup");
+        b.o2m.insert(
+            "topic".into(),
+            vec!["locker".into(), "locker".into(), "transit".into()],
+        );
+        repo.add(b).await.unwrap();
+
+        let got = repo.get("/dup").await.unwrap().unwrap();
+        assert_eq!(
+            got.o2m.get("topic").unwrap(),
+            &vec!["locker".to_string(), "transit".to_string()]
+        );
     }
 
     #[tokio::test]
