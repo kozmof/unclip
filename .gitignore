@@ -7,3 +7,6 @@
 *.db-wal
 
 .claude/
+
+DRAFT.md
+STATUS.md
