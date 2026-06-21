@@ -33,7 +33,7 @@ struct FrameBody {
 
 /// Parse a frames file from a YAML string into domain `Frame`s, ordered by name.
 pub fn parse_frames(yaml: &str) -> anyhow::Result<Vec<Frame>> {
-    let file: FramesFile = serde_yaml::from_str(yaml)?;
+    let file: FramesFile = serde_norway::from_str(yaml)?;
     Ok(file
         .frames
         .into_iter()

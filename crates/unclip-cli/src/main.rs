@@ -274,7 +274,7 @@ enum PatternAction {
     Disable { id: i64 },
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     // Only `init` may create the database; other commands require it to exist.

@@ -25,7 +25,7 @@ struct BranchesOut<'a> {
 
 /// Parse a YAML/JSON branches document (list or `branches:`-wrapped).
 pub fn parse_branches(text: &str) -> anyhow::Result<Vec<Branch>> {
-    let parsed: BranchesIn = serde_yaml::from_str(text)?;
+    let parsed: BranchesIn = serde_norway::from_str(text)?;
     Ok(match parsed {
         BranchesIn::Wrapped { branches } => branches,
         BranchesIn::List(branches) => branches,
@@ -57,7 +57,7 @@ pub fn load_branches_file(path: &Path) -> anyhow::Result<Vec<Branch>> {
 /// - JSONL: one branch per line.
 pub fn render_branches(branches: &[Branch], format: Format) -> anyhow::Result<String> {
     Ok(match format {
-        Format::Yaml => serde_yaml::to_string(&BranchesOut { branches })?,
+        Format::Yaml => serde_norway::to_string(&BranchesOut { branches })?,
         Format::Json => format!(
             "{}\n",
             serde_json::to_string_pretty(&BranchesOut { branches })?

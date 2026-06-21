@@ -30,7 +30,10 @@ unclip-match = { path = "crates/unclip-match" }
 
 # CLI / async
 clap = { version = "4", features = ["derive"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# A current-thread runtime is sufficient: all DB work is sequential (no
+# tokio::spawn / concurrent tasks), and it avoids spawning a worker-thread pool
+# per CLI invocation.
+tokio = { version = "1", features = ["macros", "rt"] }
 
 # Persistence
 sea-orm = { version = "1.1", features = [
@@ -45,7 +48,7 @@ sea-orm-migration = { version = "1.1", features = [
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_norway = "0.9"
 serde_json = "1"
 
 # Errors

@@ -81,7 +81,7 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
 pub async fn show(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
     match repo.get(path).await? {
         Some(branch) => {
-            print!("{}", serde_yaml::to_string(&branch)?);
+            print!("{}", serde_norway::to_string(&branch)?);
             Ok(())
         }
         None => bail!("branch not found: {path}"),
@@ -300,12 +300,12 @@ pub async fn frame_show(repo: &impl FrameRepository, selector: &str) -> anyhow::
         .await?
         .with_context(|| format!("frame not found: {frame_name}"))?;
     match slot_name {
-        None => print!("{}", serde_yaml::to_string(&frame)?),
+        None => print!("{}", serde_norway::to_string(&frame)?),
         Some(slot_name) => {
             let slot = frame
                 .slot(slot_name)
                 .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
-            print!("{}", serde_yaml::to_string(slot)?);
+            print!("{}", serde_norway::to_string(slot)?);
         }
     }
     Ok(())
@@ -337,7 +337,7 @@ pub async fn create(
     let branch = slot.skeleton(&path);
     branch_repo.add(branch.clone()).await?;
     println!("created {path} from {selector}");
-    print!("{}", serde_yaml::to_string(&branch)?);
+    print!("{}", serde_norway::to_string(&branch)?);
     Ok(())
 }
 
@@ -371,7 +371,7 @@ pub async fn validate(
         None => {
             let text = std::fs::read_to_string(target)
                 .with_context(|| format!("cannot read packet file: {target}"))?;
-            let packet: SelectionPacket = serde_yaml::from_str(&text)?;
+            let packet: SelectionPacket = serde_norway::from_str(&text)?;
             validate_packet(&frame, &packet)
         }
     };

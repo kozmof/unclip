@@ -34,6 +34,13 @@ impl TempDb {
     fn path(&self) -> PathBuf {
         self.dir.join("unclip.db")
     }
+
+    /// Write `contents` to a file in the temp dir and return its path.
+    fn write(&self, name: &str, contents: &str) -> PathBuf {
+        let p = self.dir.join(name);
+        std::fs::write(&p, contents).expect("write temp file");
+        p
+    }
 }
 
 impl Drop for TempDb {
@@ -227,4 +234,178 @@ fn export_returns_all_matches() {
     let out = unclip(&path, &["export", "--format", "jsonl"]);
     assert!(out.status.success());
     assert_eq!(stdout(&out).lines().count(), 3);
+}
+
+/// Frame lifecycle: import a frame file, list/show it, `create` a skeleton
+/// branch from a slot, and `validate` both a conforming and a non-conforming
+/// branch against that slot.
+#[test]
+fn frame_import_create_validate_flow() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+
+    let frames = db.write(
+        "frames.yaml",
+        "\
+frames:
+  story:
+    description: narrative scaffolding
+    slots:
+      - name: place
+        require_o2o:
+          domain: story
+          axis: place
+        default_o2o:
+          use: scene-anchor
+",
+    );
+
+    let imported = unclip(&path, &["import-frames", frames.to_str().unwrap()]);
+    assert!(
+        imported.status.success(),
+        "import-frames failed: {}",
+        stderr(&imported)
+    );
+
+    // The frame is listed and shows its slot.
+    assert!(stdout(&unclip(&path, &["frames"])).contains("story"));
+    let frame_yaml = stdout(&unclip(&path, &["frame", "story"]));
+    assert!(frame_yaml.contains("name: place"));
+
+    // `create` builds a skeleton branch carrying the slot's required o2o.
+    let created = unclip(&path, &["create", "/scene/alley", "--frame", "story.place"]);
+    assert!(
+        created.status.success(),
+        "create failed: {}",
+        stderr(&created)
+    );
+    let shown = stdout(&unclip(&path, &["show", "/scene/alley"]));
+    assert!(shown.contains("axis: place"));
+    assert!(shown.contains("domain: story"));
+
+    // The skeleton satisfies the slot it was created from.
+    let ok = unclip(
+        &path,
+        &["validate", "/scene/alley", "--frame", "story.place"],
+    );
+    assert!(ok.status.success(), "validate should pass: {}", stderr(&ok));
+    assert!(stdout(&ok).contains("OK"));
+
+    // A plain branch missing the required o2o fails validation.
+    unclip(&path, &["add", "/plain"]);
+    let bad = unclip(&path, &["validate", "/plain", "--frame", "story.place"]);
+    assert!(!bad.status.success());
+    assert!(stderr(&bad).contains("violation"));
+}
+
+/// `pattern add` requires exactly one target, and a stored pattern is then
+/// surfaced by `scan` over a text file.
+#[test]
+fn pattern_add_and_scan() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+    unclip(&path, &["add", "/ikebukuro/coin-locker"]);
+
+    // Zero targets is rejected.
+    let none = unclip(&path, &["pattern", "add", "coin locker"]);
+    assert!(!none.status.success());
+    assert!(stderr(&none).contains("exactly one"));
+
+    // Two targets is rejected.
+    let two = unclip(
+        &path,
+        &[
+            "pattern",
+            "add",
+            "coin locker",
+            "--o2m",
+            "object=locker",
+            "--branch",
+            "/ikebukuro/coin-locker",
+        ],
+    );
+    assert!(!two.status.success());
+
+    // Exactly one target is accepted and listed.
+    let add = unclip(
+        &path,
+        &[
+            "pattern",
+            "add",
+            "coin locker",
+            "--branch",
+            "/ikebukuro/coin-locker",
+        ],
+    );
+    assert!(add.status.success(), "pattern add failed: {}", stderr(&add));
+    assert!(stdout(&unclip(&path, &["patterns"])).contains("coin locker"));
+
+    // `scan` finds the pattern in a text file.
+    let text = db.write("scene.txt", "I found a coin locker by the exit.");
+    let scan = unclip(&path, &["scan", text.to_str().unwrap()]);
+    assert!(scan.status.success());
+    assert!(stdout(&scan).contains("coin locker"));
+}
+
+/// `suggest-o2m` proposes a catalog o2m value present in a branch's text but
+/// not yet set on it.
+#[test]
+fn suggest_o2m_proposes_missing_value() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+
+    // Seed the o2m catalog with `density=crowded` via one branch.
+    unclip(&path, &["add", "/seed", "--o2m", "density=crowded"]);
+    // A second branch mentions "crowded" in its title but carries no o2m.
+    unclip(&path, &["add", "/room", "--title", "a crowded back room"]);
+
+    let out = unclip(&path, &["suggest-o2m", "/room"]);
+    assert!(out.status.success(), "suggest-o2m failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("density=crowded"));
+}
+
+/// `attach` adds references (type inferred from the value) and `refs` lists them.
+#[test]
+fn attach_and_list_refs() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+    unclip(&path, &["add", "/branch"]);
+
+    assert!(unclip(&path, &["attach", "/branch", "https://example.com"])
+        .status
+        .success());
+    assert!(unclip(&path, &["attach", "/branch", "notes/local.md"])
+        .status
+        .success());
+
+    let refs = stdout(&unclip(&path, &["refs", "/branch"]));
+    // Inferred kinds: url for http(s), file otherwise.
+    assert!(refs.contains("url\thttps://example.com"));
+    assert!(refs.contains("file\tnotes/local.md"));
+}
+
+/// `import` upserts branches from a JSONL file (path-keyed), reported as
+/// added vs. updated.
+#[test]
+fn import_upserts_from_file() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+    unclip(&path, &["add", "/a"]); // pre-existing → will be updated
+
+    let file = db.write(
+        "branches.jsonl",
+        "{\"path\":\"/a\",\"o2o\":{},\"o2m\":{}}\n{\"path\":\"/b\",\"o2o\":{},\"o2m\":{}}\n",
+    );
+    let out = unclip(&path, &["import", file.to_str().unwrap()]);
+    assert!(out.status.success(), "import failed: {}", stderr(&out));
+    let report = stdout(&out);
+    assert!(report.contains("1 added"));
+    assert!(report.contains("1 updated"));
+    // Both paths are now present.
+    assert!(unclip(&path, &["show", "/b"]).status.success());
 }

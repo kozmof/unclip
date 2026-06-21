@@ -70,14 +70,14 @@ references:
     #[test]
     fn minimal_branch_roundtrips() {
         let yaml = "path: /ikebukuro/station/exit\n";
-        let branch: Branch = serde_yaml::from_str(yaml).unwrap();
+        let branch: Branch = serde_norway::from_str(yaml).unwrap();
         assert_eq!(branch.path, "/ikebukuro/station/exit");
         assert_eq!(branch.weight, 1.0);
         assert!(branch.o2o.is_empty());
         assert!(branch.metadata.is_null());
 
         // Re-serializing a minimal branch keeps it minimal (no empty noise).
-        let out = serde_yaml::to_string(&branch).unwrap();
+        let out = serde_norway::to_string(&branch).unwrap();
         assert!(out.contains("path: /ikebukuro/station/exit"));
         assert!(!out.contains("o2o"));
         assert!(!out.contains("metadata"));
@@ -85,7 +85,7 @@ references:
 
     #[test]
     fn recommended_branch_roundtrips_stably() {
-        let branch: Branch = serde_yaml::from_str(RECOMMENDED_BRANCH).unwrap();
+        let branch: Branch = serde_norway::from_str(RECOMMENDED_BRANCH).unwrap();
 
         // Structural spot-checks.
         assert_eq!(branch.o2o.get("axis").unwrap(), "place");
@@ -94,8 +94,8 @@ references:
         assert_eq!(branch.references[0].kind, "file");
 
         // Round-trip equality: serialize -> deserialize yields the same value.
-        let yaml = serde_yaml::to_string(&branch).unwrap();
-        let again: Branch = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_norway::to_string(&branch).unwrap();
+        let again: Branch = serde_norway::from_str(&yaml).unwrap();
         assert_eq!(branch, again);
     }
 
@@ -120,8 +120,8 @@ references:
         assert_eq!(packet.version, PACKET_VERSION);
         assert_eq!(packet.kind, PACKET_KIND);
 
-        let yaml = serde_yaml::to_string(&packet).unwrap();
-        let again: SelectionPacket = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_norway::to_string(&packet).unwrap();
+        let again: SelectionPacket = serde_norway::from_str(&yaml).unwrap();
         assert_eq!(packet, again);
     }
 
@@ -143,7 +143,7 @@ metadata_suggest:
 
     #[test]
     fn validate_branch_reports_violations() {
-        let slot: Slot = serde_yaml::from_str(STORY_PLACE_SLOT).unwrap();
+        let slot: Slot = serde_norway::from_str(STORY_PLACE_SLOT).unwrap();
 
         // A conforming branch.
         let mut ok = Branch::new("/ikebukuro/station/coin-locker");
@@ -161,9 +161,10 @@ metadata_suggest:
 
     #[test]
     fn validate_branch_checks_require_o2m() {
-        let slot: Slot =
-            serde_yaml::from_str("name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n")
-                .unwrap();
+        let slot: Slot = serde_norway::from_str(
+            "name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n",
+        )
+        .unwrap();
 
         // Carries both required values -> no violations.
         let mut ok = Branch::new("/a");
@@ -181,7 +182,7 @@ metadata_suggest:
 
     #[test]
     fn skeleton_seeds_o2o_and_metadata() {
-        let slot: Slot = serde_yaml::from_str(STORY_PLACE_SLOT).unwrap();
+        let slot: Slot = serde_norway::from_str(STORY_PLACE_SLOT).unwrap();
         let skel = slot.skeleton("/ikebukuro/station/coin-locker");
         assert_eq!(skel.o2o.get("domain").unwrap(), "story");
         assert_eq!(skel.o2o.get("axis").unwrap(), "place");
@@ -195,7 +196,7 @@ metadata_suggest:
         let frame = Frame {
             name: "story".into(),
             description: None,
-            slots: vec![serde_yaml::from_str::<Slot>(STORY_PLACE_SLOT).unwrap()],
+            slots: vec![serde_norway::from_str::<Slot>(STORY_PLACE_SLOT).unwrap()],
         };
 
         // Packet missing the required `place` selection.
@@ -253,7 +254,7 @@ avoid_o2m:
 count: 1
 avoid_recent: true
 "#;
-        let slot: Slot = serde_yaml::from_str(yaml).unwrap();
+        let slot: Slot = serde_norway::from_str(yaml).unwrap();
         let q = SampleQuery::from_slot(&slot, Some("/ikebukuro".into()));
         assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
         assert_eq!(q.require_o2o.get("axis").unwrap(), "place");

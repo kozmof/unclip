@@ -29,7 +29,7 @@ impl FromStr for Format {
 /// Render a single packet (no trailing newline beyond the format's own).
 pub fn render_packet(packet: &SelectionPacket, format: Format) -> anyhow::Result<String> {
     Ok(match format {
-        Format::Yaml => serde_yaml::to_string(packet)?,
+        Format::Yaml => serde_norway::to_string(packet)?,
         Format::Json => format!("{}\n", serde_json::to_string_pretty(packet)?),
         Format::Jsonl => format!("{}\n", serde_json::to_string(packet)?),
     })
@@ -43,7 +43,7 @@ pub fn render_packet(packet: &SelectionPacket, format: Format) -> anyhow::Result
 pub fn render_packets(packets: &[SelectionPacket], format: Format) -> anyhow::Result<String> {
     match format {
         Format::Yaml => {
-            let docs: Result<Vec<_>, _> = packets.iter().map(serde_yaml::to_string).collect();
+            let docs: Result<Vec<_>, _> = packets.iter().map(serde_norway::to_string).collect();
             Ok(docs?.join("---\n"))
         }
         Format::Json => {
@@ -109,7 +109,7 @@ mod tests {
     fn yaml_roundtrips_single() {
         let p = packet(123);
         let rendered = render_packet(&p, Format::Yaml).unwrap();
-        let back: SelectionPacket = serde_yaml::from_str(&rendered).unwrap();
+        let back: SelectionPacket = serde_norway::from_str(&rendered).unwrap();
         assert_eq!(back, p);
     }
 }
