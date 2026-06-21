@@ -19,14 +19,16 @@ authors = ["kozmof"]
 repository = "https://github.com/kozmof/unclip"
 
 [workspace.dependencies]
-# Internal crates
-unclip-core = { path = "crates/unclip-core" }
-unclip-entity = { path = "crates/unclip-entity" }
-unclip-migration = { path = "crates/unclip-migration" }
-unclip-store = { path = "crates/unclip-store" }
-unclip-sample = { path = "crates/unclip-sample" }
-unclip-io = { path = "crates/unclip-io" }
-unclip-match = { path = "crates/unclip-match" }
+# Internal crates. An explicit `version` (matching workspace.package.version)
+# keeps these path deps publishable to crates.io and avoids an implicit `*`
+# version, which the cargo-deny `wildcards = "deny"` supply-chain gate rejects.
+unclip-core = { path = "crates/unclip-core", version = "0.1.0" }
+unclip-entity = { path = "crates/unclip-entity", version = "0.1.0" }
+unclip-migration = { path = "crates/unclip-migration", version = "0.1.0" }
+unclip-store = { path = "crates/unclip-store", version = "0.1.0" }
+unclip-sample = { path = "crates/unclip-sample", version = "0.1.0" }
+unclip-io = { path = "crates/unclip-io", version = "0.1.0" }
+unclip-match = { path = "crates/unclip-match", version = "0.1.0" }
 
 # CLI / async
 clap = { version = "4", features = ["derive"] }

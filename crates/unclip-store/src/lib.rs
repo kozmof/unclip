@@ -1,5 +1,7 @@
 //! unclip-store — repository traits and SeaORM-backed persistence.
 
+#![forbid(unsafe_code)]
+
 pub mod frame_mapper;
 pub mod frame_repository;
 pub mod history;

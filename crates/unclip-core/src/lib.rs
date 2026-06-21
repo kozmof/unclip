@@ -4,6 +4,8 @@
 //! frame, packet. These types stay independent from any SeaORM entity so the
 //! store layer can map to/from them freely.
 
+#![forbid(unsafe_code)]
+
 pub mod branch;
 pub mod error;
 pub mod frame;

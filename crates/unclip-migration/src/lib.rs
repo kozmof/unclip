@@ -1,5 +1,7 @@
 //! unclip-migration — SeaORM migrations defining the SQLite schema.
 
+#![forbid(unsafe_code)]
+
 pub use sea_orm_migration::prelude::*;
 
 mod m20260620_000001_create_core_tables;

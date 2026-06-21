@@ -1,5 +1,7 @@
 //! unclip-io — YAML/JSON/JSONL import and export.
 
+#![forbid(unsafe_code)]
+
 pub mod branch_io;
 pub mod frames;
 pub mod packet;

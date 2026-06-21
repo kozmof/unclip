@@ -16,6 +16,8 @@
 //! - `frame_slot_o2o_values` / `frame_slot_o2m_values` have no DB primary key;
 //!   declare a composite `primary_key` over all four columns.
 
+#![forbid(unsafe_code)]
+
 mod entities;
 
 pub use entities::*;

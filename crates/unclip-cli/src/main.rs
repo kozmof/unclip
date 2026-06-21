@@ -1,5 +1,7 @@
 //! unclip — outside-of-LLM possibility engine (CLI entry point).
 
+#![forbid(unsafe_code)]
+
 mod commands;
 mod db;
 mod matching;

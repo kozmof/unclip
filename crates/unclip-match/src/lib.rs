@@ -3,6 +3,8 @@
 //! SQLite is the structured truth; daachorse is an in-memory matcher built
 //! from database state.
 
+#![forbid(unsafe_code)]
+
 pub mod dictionary;
 pub mod matcher;
 pub mod suggest;

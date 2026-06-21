@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
     sea_query::{LikeExpr, Query, SelectStatement},
@@ -145,11 +146,10 @@ impl SeaOrmBranchRepository {
     /// Delegates to `hydrate_all` so single- and multi-branch loads share one
     /// grouping/assembly path.
     async fn hydrate(&self, model: branches::Model) -> anyhow::Result<Branch> {
-        Ok(self
-            .hydrate_all(vec![model])
+        self.hydrate_all(vec![model])
             .await?
             .pop()
-            .expect("hydrate_all yields one branch for one model"))
+            .context("hydrate_all returned no branch for a single model")
     }
 
     /// Hydrate many branches with a fixed number of queries (no N+1): load all

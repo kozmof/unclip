@@ -126,10 +126,12 @@ pub async fn pattern_add_cmd(
         PatternTarget::O2o { name, value }
     } else if let Some(path) = input.branch {
         PatternTarget::Branch { path }
+    } else if let Some(path) = input.collapse {
+        PatternTarget::CollapsePattern { path }
     } else {
-        PatternTarget::CollapsePattern {
-            path: input.collapse.unwrap(),
-        }
+        // Unreachable: the `targets != 1` guard above ensures exactly one is
+        // Some. Return an error rather than panic if that invariant ever breaks.
+        bail!("provide exactly one of --o2m, --o2o, --branch, --collapse");
     };
 
     let entry = PatternEntry::new(input.pattern.clone(), target);

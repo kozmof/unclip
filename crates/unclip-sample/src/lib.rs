@@ -11,6 +11,8 @@
 //!
 //! `novelty_bonus` (embedding-based) is intentionally out of MVP scope.
 
+#![forbid(unsafe_code)]
+
 use std::collections::HashSet;
 
 use rand::rngs::StdRng;
