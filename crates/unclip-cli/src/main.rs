@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use unclip_io::{split_frame_selector, Format};
 use unclip_store::FrameRepository;
 
-use commands::{parse_kv, AddInput, QueryInput};
+use commands::{parse_kv, AddInput, EditInput, QueryInput};
 use sampling::{
     parse_format, parse_under_override, ComposeInput, FilterInput, SampleInput, UnderOverride,
 };
@@ -51,6 +51,36 @@ enum Command {
         /// One-to-many indexed value, name=value (repeatable).
         #[arg(long = "o2m", value_parser = parse_kv)]
         o2m: Vec<(String, String)>,
+    },
+
+    /// Edit fields, o2o, and o2m on an existing branch.
+    Edit {
+        /// Branch path to edit.
+        path: String,
+        #[arg(long)]
+        title: Option<String>,
+        /// Remove the title.
+        #[arg(long = "clear-title")]
+        clear_title: bool,
+        #[arg(long)]
+        description: Option<String>,
+        /// Remove the description.
+        #[arg(long = "clear-description")]
+        clear_description: bool,
+        #[arg(long)]
+        weight: Option<f64>,
+        /// Set (overwrite) a one-to-one value, name=value (repeatable).
+        #[arg(long = "o2o", value_parser = parse_kv)]
+        o2o: Vec<(String, String)>,
+        /// Remove a one-to-one value by name (repeatable).
+        #[arg(long = "remove-o2o")]
+        remove_o2o: Vec<String>,
+        /// Add a one-to-many value, name=value (repeatable).
+        #[arg(long = "add-o2m", value_parser = parse_kv)]
+        add_o2m: Vec<(String, String)>,
+        /// Remove a one-to-many value, name=value (repeatable).
+        #[arg(long = "remove-o2m", value_parser = parse_kv)]
+        remove_o2m: Vec<(String, String)>,
     },
 
     /// Show a branch as YAML.
@@ -305,6 +335,35 @@ async fn main() -> anyhow::Result<()> {
                     weight,
                     o2o,
                     o2m,
+                },
+            )
+            .await?;
+        }
+        Command::Edit {
+            path,
+            title,
+            clear_title,
+            description,
+            clear_description,
+            weight,
+            o2o,
+            remove_o2o,
+            add_o2m,
+            remove_o2m,
+        } => {
+            commands::edit(
+                &repos.branches,
+                EditInput {
+                    path,
+                    title,
+                    clear_title,
+                    description,
+                    clear_description,
+                    weight,
+                    o2o,
+                    remove_o2o,
+                    add_o2m,
+                    remove_o2m,
                 },
             )
             .await?;

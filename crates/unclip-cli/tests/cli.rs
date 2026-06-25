@@ -103,6 +103,92 @@ fn init_add_show_roundtrip() {
     assert!(yaml.contains("- tense"));
 }
 
+/// `edit` patches an existing branch: set/overwrite o2o, add/remove o2m,
+/// change scalar fields, and clear the title.
+#[test]
+fn edit_patches_existing_branch() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+
+    let add = unclip(
+        &path,
+        &[
+            "add",
+            "/a",
+            "--title",
+            "Original",
+            "--o2o",
+            "axis=place",
+            "--o2m",
+            "mood=tense",
+            "--o2m",
+            "mood=hidden",
+        ],
+    );
+    assert!(add.status.success(), "add failed: {}", stderr(&add));
+
+    // A reference must survive an edit (update() replaces child rows, so this
+    // guards against edit silently dropping references it did not touch).
+    assert!(unclip(&path, &["attach", "/a", "https://example.com"])
+        .status
+        .success());
+
+    let edit = unclip(
+        &path,
+        &[
+            "edit",
+            "/a",
+            "--clear-title",
+            "--description",
+            "now described",
+            "--weight",
+            "2.5",
+            // Overwrite an existing o2o name (rejected by `add`, allowed here).
+            "--o2o",
+            "axis=time",
+            "--add-o2m",
+            "mood=calm",
+            "--remove-o2m",
+            "mood=hidden",
+        ],
+    );
+    assert!(edit.status.success(), "edit failed: {}", stderr(&edit));
+
+    let yaml = stdout(&unclip(&path, &["show", "/a"]));
+    assert!(!yaml.contains("title:"), "title should be cleared: {yaml}");
+    assert!(yaml.contains("description: now described"));
+    assert!(yaml.contains("weight: 2.5"));
+    // o2o overwritten in place.
+    assert!(yaml.contains("axis: time"));
+    assert!(!yaml.contains("place"));
+    // o2m set: calm added, hidden removed, tense kept (sorted output).
+    assert!(yaml.contains("- calm"));
+    assert!(yaml.contains("- tense"));
+    assert!(!yaml.contains("- hidden"));
+
+    // The reference attached before the edit is still present afterwards.
+    let refs = stdout(&unclip(&path, &["refs", "/a"]));
+    assert!(refs.contains("https://example.com"), "ref dropped: {refs}");
+}
+
+/// `edit` on a missing branch fails, and an empty edit is a usage error.
+#[test]
+fn edit_rejects_missing_branch_and_empty_patch() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+
+    let missing = unclip(&path, &["edit", "/nope", "--weight", "1.0"]);
+    assert!(!missing.status.success());
+    assert!(stderr(&missing).contains("branch not found"));
+
+    assert!(unclip(&path, &["add", "/a"]).status.success());
+    let empty = unclip(&path, &["edit", "/a"]);
+    assert!(!empty.status.success());
+    assert!(stderr(&empty).contains("no changes requested"));
+}
+
 /// A command other than `init` must refuse to silently create a fresh database.
 #[test]
 fn non_init_requires_existing_db() {

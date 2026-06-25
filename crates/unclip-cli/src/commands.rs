@@ -78,6 +78,106 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
     Ok(())
 }
 
+/// Arguments for `edit`, assembled by clap in `main`.
+///
+/// Every field is an additive/overwriting patch over an existing branch; a
+/// `None`/empty value leaves the corresponding part untouched. `metadata` is
+/// intentionally not editable here — it is free-form JSON and is better managed
+/// by re-`import`.
+pub struct EditInput {
+    pub path: String,
+    pub title: Option<String>,
+    pub clear_title: bool,
+    pub description: Option<String>,
+    pub clear_description: bool,
+    pub weight: Option<f64>,
+    pub o2o: Vec<(String, String)>,
+    pub remove_o2o: Vec<String>,
+    pub add_o2m: Vec<(String, String)>,
+    pub remove_o2m: Vec<(String, String)>,
+}
+
+pub async fn edit(repo: &impl BranchRepository, input: EditInput) -> anyhow::Result<()> {
+    if input.title.is_some() && input.clear_title {
+        bail!("--title and --clear-title are mutually exclusive");
+    }
+    if input.description.is_some() && input.clear_description {
+        bail!("--description and --clear-description are mutually exclusive");
+    }
+
+    let mut branch = repo
+        .get(&input.path)
+        .await?
+        .with_context(|| format!("branch not found: {}", input.path))?;
+
+    let mut changed = false;
+
+    if let Some(title) = input.title {
+        branch.title = Some(title);
+        changed = true;
+    } else if input.clear_title {
+        branch.title = None;
+        changed = true;
+    }
+
+    if let Some(description) = input.description {
+        branch.description = Some(description);
+        changed = true;
+    } else if input.clear_description {
+        branch.description = None;
+        changed = true;
+    }
+
+    if let Some(weight) = input.weight {
+        // Same guard as `add`: a non-finite weight poisons the sampler.
+        if !weight.is_finite() {
+            bail!("weight must be a finite number, got {weight}");
+        }
+        branch.weight = weight;
+        changed = true;
+    }
+
+    // o2o is one-to-one, so editing *overwrites* a present name rather than
+    // rejecting it (unlike `add`, where a repeated name is a usage error).
+    for (name, value) in input.o2o {
+        branch.o2o.insert(name, value);
+        changed = true;
+    }
+    // Removing an absent o2o name is treated as a mistake (it is exact and
+    // explicit), so report it rather than silently succeeding.
+    for name in input.remove_o2o {
+        if branch.o2o.remove(&name).is_none() {
+            bail!("branch {} has no o2o name `{name}`", input.path);
+        }
+        changed = true;
+    }
+
+    // o2m is a set: add inserts (the store dedups on write) and remove drops a
+    // single value, pruning the name once its last value is gone. Removing an
+    // absent value is a harmless no-op, matching set semantics.
+    for (name, value) in input.add_o2m {
+        branch.o2m.entry(name).or_default().push(value);
+        changed = true;
+    }
+    for (name, value) in input.remove_o2m {
+        if let Some(values) = branch.o2m.get_mut(&name) {
+            values.retain(|v| v != &value);
+            if values.is_empty() {
+                branch.o2m.remove(&name);
+            }
+        }
+        changed = true;
+    }
+
+    if !changed {
+        bail!("no changes requested (see `unclip edit --help`)");
+    }
+
+    repo.update(branch).await?;
+    println!("edited {}", input.path);
+    Ok(())
+}
+
 pub async fn show(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
     match repo.get(path).await? {
         Some(branch) => {
