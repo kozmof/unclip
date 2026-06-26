@@ -90,33 +90,40 @@ impl SeaOrmHistoryRepository {
         Ok(rows.into_iter().map(|r| r.branch_id as i64).collect())
     }
 
-    /// Usage count and last-used timestamp for many branches in one query.
+    /// Usage count and last-used timestamp for many branches.
     ///
     /// Branches with no usage are simply absent from the returned map; callers
     /// treat a missing entry as `UsageSummary::default()` (zero uses).
+    ///
+    /// The ids are queried in chunks of bound parameters. `stats`/`stale` can
+    /// pass every matched branch, so a single `IN (...)` would otherwise grow
+    /// past SQLite's bound-variable limit as an archive grows.
     pub async fn usage_summaries(
         &self,
         branch_ids: &[i64],
     ) -> anyhow::Result<HashMap<i64, UsageSummary>> {
-        if branch_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        // `branch_ids` are integers from the store, never user text.
-        let id_list = branch_ids
-            .iter()
-            .map(i64::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "SELECT branch_id, COUNT(*) AS count, MAX(used_at) AS last_used \
-             FROM usage_history WHERE branch_id IN ({id_list}) GROUP BY branch_id"
-        );
-        let rows = UsageRow::find_by_statement(Statement::from_string(DbBackend::Sqlite, sql))
+        // Stay well under SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` (999 on
+        // older builds) with margin to spare.
+        const CHUNK: usize = 500;
+
+        let mut summaries = HashMap::new();
+        for chunk in branch_ids.chunks(CHUNK) {
+            // Bind the ids as parameters rather than interpolating them: one `?`
+            // placeholder per id keeps the values out of the SQL text entirely.
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT branch_id, COUNT(*) AS count, MAX(used_at) AS last_used \
+                 FROM usage_history WHERE branch_id IN ({placeholders}) GROUP BY branch_id"
+            );
+            let values = chunk.iter().map(|&id| id.into());
+            let rows = UsageRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                sql,
+                values,
+            ))
             .all(&self.db)
             .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| {
+            summaries.extend(rows.into_iter().map(|r| {
                 (
                     r.branch_id,
                     UsageSummary {
@@ -124,8 +131,9 @@ impl SeaOrmHistoryRepository {
                         last_used: r.last_used,
                     },
                 )
-            })
-            .collect())
+            }));
+        }
+        Ok(summaries)
     }
 
     /// Usage count and last-used timestamp for a branch.

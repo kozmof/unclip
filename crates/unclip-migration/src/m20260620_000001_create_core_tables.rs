@@ -57,16 +57,17 @@ CREATE TABLE frame_slots (
   frame_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   under_path TEXT,
-  count INTEGER NOT NULL DEFAULT 1,
-  avoid_recent INTEGER NOT NULL DEFAULT 0,
-  weighted INTEGER NOT NULL DEFAULT 0,
+  count INTEGER NOT NULL DEFAULT 1 CHECK (count > 0),
+  avoid_recent INTEGER NOT NULL DEFAULT 0 CHECK (avoid_recent IN (0, 1)),
+  weighted INTEGER NOT NULL DEFAULT 0 CHECK (weighted IN (0, 1)),
   metadata_suggest_json TEXT,
+  UNIQUE (frame_id, name),
   FOREIGN KEY (frame_id) REFERENCES frames(id) ON DELETE CASCADE
 );
 
 CREATE TABLE frame_slot_o2o_values (
   slot_id INTEGER NOT NULL,
-  mode TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('require', 'default', 'avoid')),
   name TEXT NOT NULL,
   value TEXT NOT NULL,
   FOREIGN KEY (slot_id) REFERENCES frame_slots(id) ON DELETE CASCADE
@@ -74,7 +75,7 @@ CREATE TABLE frame_slot_o2o_values (
 
 CREATE TABLE frame_slot_o2m_values (
   slot_id INTEGER NOT NULL,
-  mode TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('require', 'prefer', 'avoid')),
   name TEXT NOT NULL,
   value TEXT NOT NULL,
   FOREIGN KEY (slot_id) REFERENCES frame_slots(id) ON DELETE CASCADE

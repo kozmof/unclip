@@ -367,10 +367,14 @@ pub async fn import_frames(repo: &impl FrameRepository, frames: Vec<Frame>) -> a
         eprintln!("(no frames in file)");
         return Ok(());
     }
-    for frame in frames {
-        let name = frame.name.clone();
-        let slots = frame.slots.len();
-        repo.save_frame(frame).await?;
+    // Capture summaries before the batch consumes the frames, so the per-frame
+    // output can be printed only after the whole import commits atomically.
+    let summaries: Vec<(String, usize)> = frames
+        .iter()
+        .map(|frame| (frame.name.clone(), frame.slots.len()))
+        .collect();
+    repo.save_frames(frames).await?;
+    for (name, slots) in summaries {
         println!("imported frame {name} ({slots} slot(s))");
     }
     Ok(())

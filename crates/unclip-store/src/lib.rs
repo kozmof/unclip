@@ -381,6 +381,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_frames_is_atomic() {
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+
+        let bare = |name: &str, count: usize| Frame {
+            name: name.into(),
+            description: None,
+            slots: vec![Slot {
+                name: "s".into(),
+                under: None,
+                require_o2o: Default::default(),
+                default_o2o: Default::default(),
+                avoid_o2o: Default::default(),
+                require_o2m: Default::default(),
+                prefer_o2m: Default::default(),
+                avoid_o2m: Default::default(),
+                count,
+                avoid_recent: false,
+                weighted: false,
+                metadata_suggest: Vec::new(),
+            }],
+        };
+
+        // The second frame is invalid; the whole batch must roll back so the
+        // earlier, valid frame is never committed.
+        let err = frames
+            .save_frames(vec![bare("good", 1), bare("bad", 0)])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid count"), "got: {err}");
+        assert!(frames.get_frame("good").await.unwrap().is_none());
+        assert!(frames.list_frames().await.unwrap().is_empty());
+
+        // A valid batch commits every frame.
+        frames
+            .save_frames(vec![bare("a", 1), bare("b", 2)])
+            .await
+            .unwrap();
+        assert_eq!(frames.list_frames().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
     async fn upsert_many_inserts_and_replaces() {
         let repo = repo().await;
 

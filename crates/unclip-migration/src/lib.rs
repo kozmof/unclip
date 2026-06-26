@@ -71,4 +71,59 @@ mod tests {
             .unwrap();
         assert!(rows.is_empty(), "branches table should be dropped");
     }
+
+    #[tokio::test]
+    async fn frame_slot_constraints_reject_invalid_rows() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+
+        let exec = |sql: &'static str| {
+            db.execute(Statement::from_string(DbBackend::Sqlite, sql))
+        };
+
+        // A frame and a valid slot to hang value rows off of.
+        exec("INSERT INTO frames (id, name) VALUES (1, 'f')")
+            .await
+            .unwrap();
+        exec("INSERT INTO frame_slots (id, frame_id, name, count) VALUES (1, 1, 's', 1)")
+            .await
+            .unwrap();
+
+        // count must be positive.
+        assert!(
+            exec("INSERT INTO frame_slots (frame_id, name, count) VALUES (1, 's0', 0)")
+                .await
+                .is_err(),
+            "non-positive count must be rejected"
+        );
+        // booleans are constrained to 0/1.
+        assert!(
+            exec("INSERT INTO frame_slots (frame_id, name, avoid_recent) VALUES (1, 's2', 2)")
+                .await
+                .is_err(),
+            "out-of-range avoid_recent must be rejected"
+        );
+        // slot names are unique within a frame.
+        assert!(
+            exec("INSERT INTO frame_slots (frame_id, name) VALUES (1, 's')")
+                .await
+                .is_err(),
+            "duplicate slot name within a frame must be rejected"
+        );
+        // value modes are constrained to the known discriminators.
+        assert!(
+            exec("INSERT INTO frame_slot_o2o_values (slot_id, mode, name, value) \
+                  VALUES (1, 'bogus', 'k', 'v')")
+                .await
+                .is_err(),
+            "unknown o2o mode must be rejected"
+        );
+        assert!(
+            exec("INSERT INTO frame_slot_o2m_values (slot_id, mode, name, value) \
+                  VALUES (1, 'default', 'k', 'v')")
+                .await
+                .is_err(),
+            "o2m mode 'default' is not valid and must be rejected"
+        );
+    }
 }

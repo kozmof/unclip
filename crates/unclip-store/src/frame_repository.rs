@@ -27,6 +27,9 @@ pub struct FrameInfo {
 pub trait FrameRepository {
     /// Insert or replace a frame and all of its slots.
     async fn save_frame(&self, frame: Frame) -> anyhow::Result<()>;
+    /// Insert or replace many frames atomically: a failure on any frame rolls
+    /// the entire batch back, so an import never half-applies.
+    async fn save_frames(&self, frames: Vec<Frame>) -> anyhow::Result<()>;
     async fn get_frame(&self, name: &str) -> anyhow::Result<Option<Frame>>;
     async fn list_frames(&self) -> anyhow::Result<Vec<FrameInfo>>;
     async fn delete_frame(&self, name: &str) -> anyhow::Result<()>;
@@ -67,6 +70,35 @@ impl SeaOrmFrameRepository {
             .exec(txn)
             .await?;
         frames::Entity::delete_by_id(frame_id).exec(txn).await?;
+        Ok(())
+    }
+
+    /// Validate and persist one frame within an existing transaction.
+    ///
+    /// Shared by `save_frame` (single-frame transaction) and `save_frames`
+    /// (one transaction spanning the whole batch), so both paths apply the same
+    /// validation and replace-then-insert behavior.
+    async fn save_frame_in_txn(txn: &DatabaseTransaction, frame: Frame) -> anyhow::Result<()> {
+        validate_frame(&frame)?;
+
+        if let Some(existing) = frames::Entity::find()
+            .filter(frames::Column::Name.eq(&frame.name))
+            .one(txn)
+            .await?
+        {
+            Self::delete_in_txn(txn, existing.id).await?;
+        }
+
+        let am = frames::ActiveModel {
+            id: NotSet,
+            name: Set(frame.name.clone()),
+            description: Set(frame.description.clone()),
+        };
+        let frame_id = frames::Entity::insert(am).exec(txn).await?.last_insert_id;
+
+        for slot in &frame.slots {
+            Self::insert_slot(txn, frame_id, slot).await?;
+        }
         Ok(())
     }
 
@@ -256,28 +288,17 @@ fn checked_slot_count(slot: &Slot) -> anyhow::Result<i32> {
 #[async_trait]
 impl FrameRepository for SeaOrmFrameRepository {
     async fn save_frame(&self, frame: Frame) -> anyhow::Result<()> {
-        validate_frame(&frame)?;
         let txn = self.db.begin().await?;
+        Self::save_frame_in_txn(&txn, frame).await?;
+        txn.commit().await?;
+        Ok(())
+    }
 
-        if let Some(existing) = frames::Entity::find()
-            .filter(frames::Column::Name.eq(&frame.name))
-            .one(&txn)
-            .await?
-        {
-            Self::delete_in_txn(&txn, existing.id).await?;
+    async fn save_frames(&self, frames: Vec<Frame>) -> anyhow::Result<()> {
+        let txn = self.db.begin().await?;
+        for frame in frames {
+            Self::save_frame_in_txn(&txn, frame).await?;
         }
-
-        let am = frames::ActiveModel {
-            id: NotSet,
-            name: Set(frame.name.clone()),
-            description: Set(frame.description.clone()),
-        };
-        let frame_id = frames::Entity::insert(am).exec(&txn).await?.last_insert_id;
-
-        for slot in &frame.slots {
-            Self::insert_slot(&txn, frame_id, slot).await?;
-        }
-
         txn.commit().await?;
         Ok(())
     }
