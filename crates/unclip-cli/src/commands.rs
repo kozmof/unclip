@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
 use unclip_core::{
-    validate_branch, validate_packet, validate_path, Branch, Frame, Reference, SampleQuery,
-    SelectionPacket, Slot,
+    validate_branch, validate_branch_record, validate_packet, validate_path, Branch, Frame,
+    Reference, SampleQuery, SelectionPacket, Slot,
 };
 use unclip_io::split_frame_selector;
 use unclip_store::{BranchRepository, FrameRepository, IndexedValue};
@@ -303,7 +303,7 @@ pub async fn import(
     }
     // Reject a malformed file before any write, rather than partially importing.
     for branch in &branches {
-        validate_path(&branch.path)
+        validate_branch_record(branch)
             .with_context(|| format!("invalid branch in import: {}", branch.path))?;
     }
     let (added, updated) = repo.upsert_many(branches).await?;

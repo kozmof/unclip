@@ -10,7 +10,7 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
-use unclip_core::{parent_of, Branch, Reference, SampleQuery};
+use unclip_core::{parent_of, validate_branch_record, Branch, Reference, SampleQuery};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
 
 use crate::mapper;
@@ -248,6 +248,7 @@ impl SeaOrmBranchRepository {
 #[async_trait]
 impl BranchRepository for SeaOrmBranchRepository {
     async fn add(&self, branch: Branch) -> anyhow::Result<()> {
+        validate_branch_record(&branch)?;
         let now = crate::history::now();
         let txn = self.db.begin().await?;
 
@@ -268,6 +269,7 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn update(&self, branch: Branch) -> anyhow::Result<()> {
+        validate_branch_record(&branch)?;
         let existing = self
             .model_by_path(&branch.path)
             .await?
@@ -466,6 +468,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         let (mut added, mut updated) = (0usize, 0usize);
 
         for mut branch in branches {
+            validate_branch_record(&branch)?;
             let existing = branches::Entity::find()
                 .filter(branches::Column::Path.eq(&branch.path))
                 .one(&txn)

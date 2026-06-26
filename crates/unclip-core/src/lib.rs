@@ -22,7 +22,7 @@ pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use pattern::{PatternEntry, PatternTarget};
 pub use query::{SampleParams, SampleQuery};
 pub use reference::Reference;
-pub use validate::{validate_branch, validate_packet, validate_path};
+pub use validate::{validate_branch, validate_branch_record, validate_packet, validate_path};
 
 #[cfg(test)]
 mod tests {
@@ -207,6 +207,15 @@ metadata_suggest:
         assert_eq!(v.len(), 1);
         assert!(v[0].contains("expects 1"));
 
+        // Un-slotted selections are not valid for a frame packet.
+        let mut unslotted = SelectionPacket::new(Some("story".into()), None);
+        unslotted.selections.push(Selection {
+            slot: None,
+            branch: Branch::new("/ikebukuro/station/coin-locker"),
+        });
+        let v = validate_packet(&frame, &unslotted);
+        assert!(v.iter().any(|reason| reason.contains("has no slot")));
+
         // Packet with a conforming selection.
         let mut packet = SelectionPacket::new(Some("story".into()), None);
         let mut branch = Branch::new("/ikebukuro/station/coin-locker");
@@ -217,6 +226,17 @@ metadata_suggest:
             branch,
         });
         assert!(validate_packet(&frame, &packet).is_empty());
+    }
+
+    #[test]
+    fn validate_branch_record_rejects_invalid_state() {
+        let mut branch = Branch::new("/bad");
+        branch.weight = f64::NAN;
+        assert!(validate_branch_record(&branch).is_err());
+
+        let mut branch = Branch::new("/bad");
+        branch.o2o.insert("axis".into(), "".into());
+        assert!(validate_branch_record(&branch).is_err());
     }
 
     #[test]

@@ -1,14 +1,15 @@
 //! Repository for frames (reusable constraint sets).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use anyhow::{ensure, Context};
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter,
     TransactionTrait,
 };
-use unclip_core::{Frame, Slot};
+use unclip_core::{validate_path, Frame, Slot};
 use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, frames};
 
 use crate::frame_mapper;
@@ -74,12 +75,13 @@ impl SeaOrmFrameRepository {
         frame_id: i32,
         slot: &Slot,
     ) -> anyhow::Result<()> {
+        let count = checked_slot_count(slot)?;
         let am = frame_slots::ActiveModel {
             id: NotSet,
             frame_id: Set(frame_id),
             name: Set(slot.name.clone()),
             under_path: Set(slot.under.clone()),
-            count: Set(slot.count as i32),
+            count: Set(count),
             avoid_recent: Set(slot.avoid_recent as i32),
             weighted: Set(slot.weighted as i32),
             metadata_suggest_json: Set(frame_mapper::metadata_suggest_json(slot)?),
@@ -161,9 +163,46 @@ impl SeaOrmFrameRepository {
     }
 }
 
+fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
+    ensure!(!frame.name.is_empty(), "frame name must not be empty");
+
+    let mut slot_names = HashSet::new();
+    for slot in &frame.slots {
+        ensure!(!slot.name.is_empty(), "slot name must not be empty");
+        ensure!(
+            slot_names.insert(&slot.name),
+            "duplicate slot name `{}` in frame `{}`",
+            slot.name,
+            frame.name
+        );
+        if let Some(under) = &slot.under {
+            validate_path(under).with_context(|| {
+                format!(
+                    "invalid under path `{under}` for slot `{}` in frame `{}`",
+                    slot.name, frame.name
+                )
+            })?;
+        }
+        checked_slot_count(slot).with_context(|| {
+            format!(
+                "invalid count for slot `{}` in frame `{}`",
+                slot.name, frame.name
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn checked_slot_count(slot: &Slot) -> anyhow::Result<i32> {
+    ensure!(slot.count > 0, "slot count must be greater than zero");
+    i32::try_from(slot.count).context("slot count exceeds SQLite INTEGER range")
+}
+
 #[async_trait]
 impl FrameRepository for SeaOrmFrameRepository {
     async fn save_frame(&self, frame: Frame) -> anyhow::Result<()> {
+        validate_frame(&frame)?;
         let txn = self.db.begin().await?;
 
         if let Some(existing) = frames::Entity::find()

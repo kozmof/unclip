@@ -30,6 +30,54 @@ pub fn validate_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate branch invariants that must hold before persistence or sampling.
+pub fn validate_branch_record(branch: &Branch) -> Result<()> {
+    validate_path(&branch.path)?;
+
+    let invalid = |reason: String| CoreError::InvalidBranch {
+        path: branch.path.clone(),
+        reason,
+    };
+
+    if !branch.weight.is_finite() {
+        return Err(invalid(format!(
+            "weight must be finite, got {}",
+            branch.weight
+        )));
+    }
+
+    for (name, value) in &branch.o2o {
+        if name.is_empty() {
+            return Err(invalid("o2o name must not be empty".to_string()));
+        }
+        if value.is_empty() {
+            return Err(invalid(format!("o2o `{name}` value must not be empty")));
+        }
+    }
+
+    for (name, values) in &branch.o2m {
+        if name.is_empty() {
+            return Err(invalid("o2m name must not be empty".to_string()));
+        }
+        for value in values {
+            if value.is_empty() {
+                return Err(invalid(format!("o2m `{name}` value must not be empty")));
+            }
+        }
+    }
+
+    for reference in &branch.references {
+        if reference.kind.is_empty() {
+            return Err(invalid("reference type must not be empty".to_string()));
+        }
+        if reference.value.is_empty() {
+            return Err(invalid("reference value must not be empty".to_string()));
+        }
+    }
+
+    Ok(())
+}
+
 /// Check a single branch against a slot's hard constraints.
 pub fn validate_branch(slot: &Slot, branch: &Branch) -> Vec<String> {
     let mut violations = Vec::new();
@@ -85,6 +133,10 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
 
     for selection in &packet.selections {
         let Some(slot_name) = &selection.slot else {
+            violations.push(format!(
+                "selection `{}` has no slot for frame `{}`",
+                selection.branch.path, frame.name
+            ));
             continue;
         };
         match frame.slot(slot_name) {

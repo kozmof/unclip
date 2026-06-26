@@ -20,7 +20,7 @@ pub use seaorm::{connect, connect_and_migrate};
 mod tests {
     use super::*;
     use serde_json::json;
-    use unclip_core::{Branch, Reference, SampleQuery};
+    use unclip_core::{Branch, Frame, Reference, SampleQuery, Slot};
 
     async fn repo() -> SeaOrmBranchRepository {
         let db = connect_and_migrate("sqlite::memory:").await.unwrap();
@@ -47,6 +47,16 @@ mod tests {
             note: None,
         }];
         b
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_branch_state_at_repository_boundary() {
+        let repo = repo().await;
+        let mut branch = Branch::new("/bad");
+        branch.weight = f64::NAN;
+
+        let err = repo.add(branch).await.unwrap_err().to_string();
+        assert!(err.contains("weight must be finite"), "got: {err}");
     }
 
     #[tokio::test]
@@ -341,6 +351,33 @@ mod tests {
 
         frames.delete_frame("story").await.unwrap();
         assert!(frames.get_frame("story").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn frame_save_rejects_invalid_slot_count() {
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+        let frame = Frame {
+            name: "bad".into(),
+            description: None,
+            slots: vec![Slot {
+                name: "empty".into(),
+                under: None,
+                require_o2o: Default::default(),
+                default_o2o: Default::default(),
+                avoid_o2o: Default::default(),
+                require_o2m: Default::default(),
+                prefer_o2m: Default::default(),
+                avoid_o2m: Default::default(),
+                count: 0,
+                avoid_recent: false,
+                weighted: false,
+                metadata_suggest: Vec::new(),
+            }],
+        };
+
+        let err = frames.save_frame(frame).await.unwrap_err().to_string();
+        assert!(err.contains("invalid count"), "got: {err}");
     }
 
     #[tokio::test]
