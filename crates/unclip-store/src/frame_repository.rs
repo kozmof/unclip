@@ -189,8 +189,62 @@ fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
                 slot.name, frame.name
             )
         })?;
+        validate_o2o_map("require_o2o", &slot.require_o2o, slot, frame)?;
+        validate_o2o_map("default_o2o", &slot.default_o2o, slot, frame)?;
+        validate_o2o_map("avoid_o2o", &slot.avoid_o2o, slot, frame)?;
+        validate_o2m_map("require_o2m", &slot.require_o2m, slot, frame)?;
+        validate_o2m_map("prefer_o2m", &slot.prefer_o2m, slot, frame)?;
+        validate_o2m_map("avoid_o2m", &slot.avoid_o2m, slot, frame)?;
     }
 
+    Ok(())
+}
+
+fn validate_o2o_map(
+    field: &str,
+    values: &std::collections::BTreeMap<String, String>,
+    slot: &Slot,
+    frame: &Frame,
+) -> anyhow::Result<()> {
+    for (name, value) in values {
+        ensure!(
+            !name.is_empty(),
+            "{field} contains an empty name in slot `{}` of frame `{}`",
+            slot.name,
+            frame.name
+        );
+        ensure!(
+            !value.is_empty(),
+            "{field} `{name}` contains an empty value in slot `{}` of frame `{}`",
+            slot.name,
+            frame.name
+        );
+    }
+    Ok(())
+}
+
+fn validate_o2m_map(
+    field: &str,
+    values: &std::collections::BTreeMap<String, Vec<String>>,
+    slot: &Slot,
+    frame: &Frame,
+) -> anyhow::Result<()> {
+    for (name, entries) in values {
+        ensure!(
+            !name.is_empty(),
+            "{field} contains an empty name in slot `{}` of frame `{}`",
+            slot.name,
+            frame.name
+        );
+        for value in entries {
+            ensure!(
+                !value.is_empty(),
+                "{field} `{name}` contains an empty value in slot `{}` of frame `{}`",
+                slot.name,
+                frame.name
+            );
+        }
+    }
     Ok(())
 }
 

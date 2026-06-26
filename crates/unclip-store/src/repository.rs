@@ -10,7 +10,9 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
-use unclip_core::{parent_of, validate_branch_record, Branch, Reference, SampleQuery};
+use unclip_core::{
+    parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
+};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
 
 use crate::mapper;
@@ -252,7 +254,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         let now = crate::history::now();
         let txn = self.db.begin().await?;
 
-        let am = mapper::branch_active_model(&branch, &now, &now);
+        let am = mapper::branch_active_model(&branch, &now, &now)?;
         let res = branches::Entity::insert(am).exec(&txn).await?;
         let branch_id = res.last_insert_id;
 
@@ -283,7 +285,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         // Replace the row, preserving created_at and the existing id.
         let mut branch = branch;
         branch.id = Some(branch_id as i64);
-        let am = mapper::branch_active_model(&branch, &created_at, &now);
+        let am = mapper::branch_active_model(&branch, &created_at, &now)?;
         branches::Entity::update(am).exec(&txn).await?;
 
         Self::replace_children(&txn, branch_id, &branch).await?;
@@ -445,6 +447,7 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()> {
+        validate_reference(reference)?;
         let model = self
             .model_by_path(path)
             .await?
@@ -477,14 +480,14 @@ impl BranchRepository for SeaOrmBranchRepository {
                 Some(model) => {
                     let branch_id = model.id;
                     branch.id = Some(branch_id as i64);
-                    let am = mapper::branch_active_model(&branch, &model.created_at, &now);
+                    let am = mapper::branch_active_model(&branch, &model.created_at, &now)?;
                     branches::Entity::update(am).exec(&txn).await?;
                     Self::replace_children(&txn, branch_id, &branch).await?;
                     updated += 1;
                 }
                 None => {
                     branch.id = None;
-                    let am = mapper::branch_active_model(&branch, &now, &now);
+                    let am = mapper::branch_active_model(&branch, &now, &now)?;
                     let branch_id = branches::Entity::insert(am)
                         .exec(&txn)
                         .await?

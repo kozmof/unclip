@@ -22,7 +22,9 @@ pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use pattern::{PatternEntry, PatternTarget};
 pub use query::{SampleParams, SampleQuery};
 pub use reference::Reference;
-pub use validate::{validate_branch, validate_branch_record, validate_packet, validate_path};
+pub use validate::{
+    validate_branch, validate_branch_record, validate_packet, validate_path, validate_reference,
+};
 
 #[cfg(test)]
 mod tests {

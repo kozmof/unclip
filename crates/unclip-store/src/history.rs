@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect,
@@ -62,9 +63,11 @@ impl SeaOrmHistoryRepository {
         context: Option<&str>,
         packet_id: Option<&str>,
     ) -> anyhow::Result<()> {
+        let branch_id =
+            i32::try_from(branch_id).context("branch id exceeds SQLite INTEGER range")?;
         let am = usage_history::ActiveModel {
             id: NotSet,
-            branch_id: Set(branch_id as i32),
+            branch_id: Set(branch_id),
             used_at: Set(now()),
             command: Set(Some(command.to_string())),
             context: Set(context.map(str::to_string)),
@@ -139,10 +142,14 @@ impl SeaOrmHistoryRepository {
 
     /// Persist a selection packet.
     pub async fn save_packet(&self, record: PacketRecord<'_>) -> anyhow::Result<()> {
+        let seed = record
+            .seed
+            .map(|s| i64::try_from(s).context("packet seed exceeds SQLite INTEGER range"))
+            .transpose()?;
         let am = selection_packets::ActiveModel {
             id: Set(record.id.to_string()),
             frame_name: Set(record.frame_name.map(str::to_string)),
-            seed: Set(record.seed.map(|s| s as i64)),
+            seed: Set(seed),
             created_at: Set(now()),
             query_json: Set(record.query_json.map(str::to_string)),
             packet_json: Set(record.packet_json.to_string()),
@@ -165,11 +172,15 @@ impl SeaOrmHistoryRepository {
     ) -> anyhow::Result<()> {
         let ts = now();
         let txn = self.db.begin().await?;
+        let seed = record
+            .seed
+            .map(|s| i64::try_from(s).context("packet seed exceeds SQLite INTEGER range"))
+            .transpose()?;
 
         let packet = selection_packets::ActiveModel {
             id: Set(record.id.to_string()),
             frame_name: Set(record.frame_name.map(str::to_string)),
-            seed: Set(record.seed.map(|s| s as i64)),
+            seed: Set(seed),
             created_at: Set(ts.clone()),
             query_json: Set(record.query_json.map(str::to_string)),
             packet_json: Set(record.packet_json.to_string()),
@@ -179,15 +190,19 @@ impl SeaOrmHistoryRepository {
         if !branch_ids.is_empty() {
             let usages: Vec<usage_history::ActiveModel> = branch_ids
                 .iter()
-                .map(|&id| usage_history::ActiveModel {
-                    id: NotSet,
-                    branch_id: Set(id as i32),
-                    used_at: Set(ts.clone()),
-                    command: Set(Some(command.to_string())),
-                    context: Set(None),
-                    packet_id: Set(Some(record.id.to_string())),
+                .map(|&id| {
+                    Ok(usage_history::ActiveModel {
+                        id: NotSet,
+                        branch_id: Set(
+                            i32::try_from(id).context("branch id exceeds SQLite INTEGER range")?
+                        ),
+                        used_at: Set(ts.clone()),
+                        command: Set(Some(command.to_string())),
+                        context: Set(None),
+                        packet_id: Set(Some(record.id.to_string())),
+                    })
                 })
-                .collect();
+                .collect::<anyhow::Result<_>>()?;
             usage_history::Entity::insert_many(usages)
                 .exec(&txn)
                 .await?;

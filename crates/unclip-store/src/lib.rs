@@ -559,4 +559,138 @@ mod tests {
         assert!(!patterns.remove(id).await.unwrap());
         assert!(!patterns.set_enabled(id, true).await.unwrap());
     }
+
+    #[tokio::test]
+    async fn attach_reference_rejects_invalid_reference() {
+        let repo = repo().await;
+        repo.add(Branch::new("/ueno/cafe")).await.unwrap();
+
+        let err = repo
+            .attach_reference(
+                "/ueno/cafe",
+                &Reference {
+                    kind: String::new(),
+                    value: "refs/cafe.jpg".into(),
+                    note: None,
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("reference type must not be empty"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn frame_save_rejects_empty_constraint_names_and_values() {
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+
+        let mut slot = Slot {
+            name: "bad".into(),
+            under: None,
+            require_o2o: Default::default(),
+            default_o2o: Default::default(),
+            avoid_o2o: Default::default(),
+            require_o2m: Default::default(),
+            prefer_o2m: Default::default(),
+            avoid_o2m: Default::default(),
+            count: 1,
+            avoid_recent: false,
+            weighted: false,
+            metadata_suggest: Vec::new(),
+        };
+        slot.require_o2o.insert(String::new(), "story".into());
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![slot],
+        };
+
+        let err = frames.save_frame(frame).await.unwrap_err().to_string();
+        assert!(err.contains("empty name"), "got: {err}");
+
+        let mut slot = Slot {
+            name: "bad".into(),
+            under: None,
+            require_o2o: Default::default(),
+            default_o2o: Default::default(),
+            avoid_o2o: Default::default(),
+            require_o2m: Default::default(),
+            prefer_o2m: Default::default(),
+            avoid_o2m: Default::default(),
+            count: 1,
+            avoid_recent: false,
+            weighted: false,
+            metadata_suggest: Vec::new(),
+        };
+        slot.require_o2m.insert("mood".into(), vec![String::new()]);
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![slot],
+        };
+
+        let err = frames.save_frame(frame).await.unwrap_err().to_string();
+        assert!(err.contains("empty value"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn history_rejects_ids_and_seeds_outside_sqlite_range() {
+        use history::{PacketRecord, SeaOrmHistoryRepository};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let history = SeaOrmHistoryRepository::new(db);
+
+        let err = history
+            .record_usage(i64::MAX, "sample", None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("branch id exceeds"), "got: {err}");
+
+        let record = PacketRecord {
+            id: "pkt-big-seed",
+            frame_name: None,
+            seed: Some(u64::MAX),
+            query_json: None,
+            packet_json: "{}",
+        };
+        let err = history.save_packet(record).await.unwrap_err().to_string();
+        assert!(err.contains("packet seed exceeds"), "got: {err}");
+
+        let record = PacketRecord {
+            id: "pkt-big-branch",
+            frame_name: None,
+            seed: None,
+            query_json: None,
+            packet_json: "{}",
+        };
+        let err = history
+            .save_packet_with_usages(record, "sample", &[i64::MAX])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("branch id exceeds"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn pattern_mutations_reject_ids_outside_sqlite_range() {
+        use pattern_repository::SeaOrmPatternRepository;
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let patterns = SeaOrmPatternRepository::new(db);
+
+        let err = patterns.remove(i64::MAX).await.unwrap_err().to_string();
+        assert!(err.contains("pattern id exceeds"), "got: {err}");
+
+        let err = patterns
+            .set_enabled(i64::MAX, true)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pattern id exceeds"), "got: {err}");
+    }
 }

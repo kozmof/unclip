@@ -9,7 +9,7 @@ use crate::branch::is_under;
 use crate::error::{CoreError, Result};
 use crate::frame::{Frame, Slot};
 use crate::packet::SelectionPacket;
-use crate::Branch;
+use crate::{Branch, Reference};
 
 /// Validate a branch path address.
 ///
@@ -67,14 +67,26 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
     }
 
     for reference in &branch.references {
-        if reference.kind.is_empty() {
-            return Err(invalid("reference type must not be empty".to_string()));
-        }
-        if reference.value.is_empty() {
-            return Err(invalid("reference value must not be empty".to_string()));
-        }
+        validate_reference(reference).map_err(|err| invalid(err.to_string()))?;
     }
 
+    Ok(())
+}
+
+/// Validate a reference before storing it independently of a full branch.
+pub fn validate_reference(reference: &Reference) -> Result<()> {
+    if reference.kind.is_empty() {
+        return Err(CoreError::InvalidBranch {
+            path: "<reference>".to_string(),
+            reason: "reference type must not be empty".to_string(),
+        });
+    }
+    if reference.value.is_empty() {
+        return Err(CoreError::InvalidBranch {
+            path: "<reference>".to_string(),
+            reason: "reference value must not be empty".to_string(),
+        });
+    }
     Ok(())
 }
 

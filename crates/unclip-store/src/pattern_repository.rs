@@ -1,5 +1,6 @@
 //! Repository for the pattern dictionary.
 
+use anyhow::Context;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
@@ -52,7 +53,8 @@ impl SeaOrmPatternRepository {
 
     /// Remove a pattern entry by id. Returns whether a row was deleted.
     pub async fn remove(&self, id: i64) -> anyhow::Result<bool> {
-        let res = pattern_entries::Entity::delete_by_id(id as i32)
+        let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
+        let res = pattern_entries::Entity::delete_by_id(id)
             .exec(&self.db)
             .await?;
         Ok(res.rows_affected > 0)
@@ -60,13 +62,14 @@ impl SeaOrmPatternRepository {
 
     /// Enable or disable a pattern entry by id. Returns whether a row matched.
     pub async fn set_enabled(&self, id: i64, enabled: bool) -> anyhow::Result<bool> {
+        let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
         let am = pattern_entries::ActiveModel {
             enabled: Set(enabled as i32),
             ..Default::default()
         };
         let res = pattern_entries::Entity::update_many()
             .set(am)
-            .filter(pattern_entries::Column::Id.eq(id as i32))
+            .filter(pattern_entries::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
         Ok(res.rows_affected > 0)

@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use anyhow::Context;
 use sea_orm::ActiveValue::{NotSet, Set};
 use unclip_core::{parent_of, Branch, Reference};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
@@ -16,16 +17,16 @@ pub fn branch_active_model(
     branch: &Branch,
     created_at: &str,
     updated_at: &str,
-) -> branches::ActiveModel {
+) -> anyhow::Result<branches::ActiveModel> {
     let metadata_json = if branch.metadata.is_null() {
         None
     } else {
         Some(branch.metadata.to_string())
     };
 
-    branches::ActiveModel {
+    Ok(branches::ActiveModel {
         id: match branch.id {
-            Some(id) => Set(id as i32),
+            Some(id) => Set(i32::try_from(id).context("branch id exceeds SQLite INTEGER range")?),
             None => NotSet,
         },
         path: Set(branch.path.clone()),
@@ -36,7 +37,7 @@ pub fn branch_active_model(
         metadata_json: Set(metadata_json),
         created_at: Set(created_at.to_string()),
         updated_at: Set(updated_at.to_string()),
-    }
+    })
 }
 
 /// o2o active-model rows for a branch.
