@@ -77,9 +77,7 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         Migrator::up(&db, None).await.unwrap();
 
-        let exec = |sql: &'static str| {
-            db.execute(Statement::from_string(DbBackend::Sqlite, sql))
-        };
+        let exec = |sql: &'static str| db.execute(Statement::from_string(DbBackend::Sqlite, sql));
 
         // A frame and a valid slot to hang value rows off of.
         exec("INSERT INTO frames (id, name) VALUES (1, 'f')")
@@ -112,17 +110,21 @@ mod tests {
         );
         // value modes are constrained to the known discriminators.
         assert!(
-            exec("INSERT INTO frame_slot_o2o_values (slot_id, mode, name, value) \
-                  VALUES (1, 'bogus', 'k', 'v')")
-                .await
-                .is_err(),
+            exec(
+                "INSERT INTO frame_slot_o2o_values (slot_id, mode, name, value) \
+                  VALUES (1, 'bogus', 'k', 'v')"
+            )
+            .await
+            .is_err(),
             "unknown o2o mode must be rejected"
         );
         assert!(
-            exec("INSERT INTO frame_slot_o2m_values (slot_id, mode, name, value) \
-                  VALUES (1, 'default', 'k', 'v')")
-                .await
-                .is_err(),
+            exec(
+                "INSERT INTO frame_slot_o2m_values (slot_id, mode, name, value) \
+                  VALUES (1, 'default', 'k', 'v')"
+            )
+            .await
+            .is_err(),
             "o2m mode 'default' is not valid and must be rejected"
         );
     }

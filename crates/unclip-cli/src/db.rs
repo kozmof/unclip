@@ -101,10 +101,7 @@ mod tests {
     #[test]
     fn db_url_percent_encodes_significant_characters() {
         let url = db_url(&PathBuf::from("/tmp/od d?x#y%z/db.sqlite"));
-        assert_eq!(
-            url,
-            "sqlite:///tmp/od%20d%3Fx%23y%25z/db.sqlite?mode=rwc"
-        );
+        assert_eq!(url, "sqlite:///tmp/od%20d%3Fx%23y%25z/db.sqlite?mode=rwc");
         // Separators survive and the mode query is still distinguishable.
         assert!(url.starts_with("sqlite:///tmp/"));
         assert!(url.ends_with("?mode=rwc"));
