@@ -3,8 +3,6 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-/// Core MVP schema.
-///
 /// Written as raw SQL so the composite primary keys, `ON DELETE CASCADE`
 /// behavior, and index shapes match the specification exactly. SQLite is the
 /// only target, so portability to other backends is not a concern here.

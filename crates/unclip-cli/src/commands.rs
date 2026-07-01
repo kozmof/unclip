@@ -553,3 +553,115 @@ fn last_segment(path: &str) -> &str {
         .next()
         .unwrap_or(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_kv_splits_on_first_equals() {
+        assert_eq!(
+            parse_kv("place=cafe").unwrap(),
+            ("place".to_string(), "cafe".to_string())
+        );
+        // Only the first `=` is a separator; later ones belong to the value.
+        assert_eq!(
+            parse_kv("expr=a=b").unwrap(),
+            ("expr".to_string(), "a=b".to_string())
+        );
+        // An empty value is allowed (e.g. clearing a marker), an empty name is not.
+        assert_eq!(parse_kv("k=").unwrap(), ("k".to_string(), String::new()));
+    }
+
+    #[test]
+    fn parse_kv_rejects_missing_separator_or_empty_name() {
+        assert!(parse_kv("nope").is_err());
+        assert!(parse_kv("=value").is_err());
+    }
+
+    #[test]
+    fn merge_o2o_inserts_distinct_names() {
+        let mut map = BTreeMap::new();
+        merge_o2o(
+            &mut map,
+            vec![
+                ("place".into(), "cafe".into()),
+                ("mood".into(), "calm".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(map.get("place").map(String::as_str), Some("cafe"));
+        assert_eq!(map.get("mood").map(String::as_str), Some("calm"));
+    }
+
+    #[test]
+    fn merge_o2o_rejects_duplicate_name() {
+        let mut map = BTreeMap::new();
+        map.insert("place".to_string(), "cafe".to_string());
+        // Colliding with an existing entry (e.g. a frame slot's base value) is a
+        // usage error because o2o is one-to-one.
+        let err = merge_o2o(&mut map, vec![("place".into(), "park".into())]).unwrap_err();
+        assert!(err.to_string().contains("duplicate o2o name `place`"));
+        // The map is left partially mutated on error (the collision is detected
+        // after the overwrite); callers discard the query on error, so this is
+        // harmless — the test pins the behavior rather than asserting a rollback.
+        assert_eq!(map.get("place").map(String::as_str), Some("park"));
+    }
+
+    #[test]
+    fn merge_o2o_rejects_duplicate_within_same_batch() {
+        let mut map = BTreeMap::new();
+        let err = merge_o2o(
+            &mut map,
+            vec![("k".into(), "1".into()), ("k".into(), "2".into())],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate o2o name `k`"));
+    }
+
+    #[test]
+    fn parse_selector_maps_each_form() {
+        assert!(matches!(parse_selector(None).unwrap(), Selector::All));
+        assert!(matches!(
+            parse_selector(Some("place".to_string())).unwrap(),
+            Selector::Name(n) if n == "place"
+        ));
+        match parse_selector(Some("place=cafe".to_string())).unwrap() {
+            Selector::Pair(name, value) => {
+                assert_eq!(name, "place");
+                assert_eq!(value, "cafe");
+            }
+            _ => panic!("expected a name=value pair"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_rejects_empty_name() {
+        assert!(parse_selector(Some("=cafe".to_string())).is_err());
+    }
+
+    #[test]
+    fn infer_reference_kind_distinguishes_urls_from_files() {
+        assert_eq!(infer_reference_kind("https://example.com"), "url");
+        assert_eq!(infer_reference_kind("http://example.com"), "url");
+        assert_eq!(infer_reference_kind("./notes/plan.md"), "file");
+        assert_eq!(infer_reference_kind("ftp://host/x"), "file");
+    }
+
+    #[test]
+    fn segment_count_counts_non_empty_segments() {
+        assert_eq!(segment_count("/a/b/c"), 3);
+        assert_eq!(segment_count("/a"), 1);
+        // Trailing slash and the bare root contribute no segments.
+        assert_eq!(segment_count("/a/b/"), 2);
+        assert_eq!(segment_count("/"), 0);
+    }
+
+    #[test]
+    fn last_segment_returns_final_component() {
+        assert_eq!(last_segment("/a/b/c"), "c");
+        assert_eq!(last_segment("/a"), "a");
+        // A trailing slash is ignored before taking the final component.
+        assert_eq!(last_segment("/a/b/"), "b");
+    }
+}

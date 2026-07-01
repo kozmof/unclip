@@ -369,3 +369,128 @@ async fn persist_packet(
         )
         .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn filter() -> FilterInput {
+        FilterInput {
+            under: None,
+            require_o2o: Vec::new(),
+            avoid_o2o: Vec::new(),
+            require_o2m: Vec::new(),
+            prefer_o2m: Vec::new(),
+            avoid_o2m: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn into_query_groups_flags_by_kind() {
+        let q = FilterInput {
+            under: Some("/ikebukuro".into()),
+            require_o2o: vec![("place".into(), "cafe".into())],
+            avoid_o2o: vec![("mood".into(), "tense".into())],
+            require_o2m: vec![
+                ("tag".into(), "rain".into()),
+                ("tag".into(), "night".into()),
+            ],
+            prefer_o2m: vec![("density".into(), "crowded".into())],
+            avoid_o2m: vec![("tag".into(), "sunny".into())],
+        }
+        .into_query()
+        .unwrap();
+
+        assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
+        assert_eq!(q.require_o2o.get("place").map(String::as_str), Some("cafe"));
+        assert_eq!(q.avoid_o2o.get("mood").map(String::as_str), Some("tense"));
+        // Repeated o2m names accumulate into a set of values under one name.
+        assert_eq!(
+            q.require_o2m.get("tag"),
+            Some(&vec!["rain".to_string(), "night".to_string()])
+        );
+        assert_eq!(
+            q.prefer_o2m.get("density"),
+            Some(&vec!["crowded".to_string()])
+        );
+        assert_eq!(q.avoid_o2m.get("tag"), Some(&vec!["sunny".to_string()]));
+    }
+
+    #[test]
+    fn into_query_rejects_duplicate_o2o_name() {
+        let mut f = filter();
+        f.require_o2o = vec![
+            ("place".into(), "cafe".into()),
+            ("place".into(), "park".into()),
+        ];
+        assert!(f.into_query().is_err());
+
+        let mut f = filter();
+        f.avoid_o2o = vec![("m".into(), "a".into()), ("m".into(), "b".into())];
+        assert!(f.into_query().is_err());
+    }
+
+    #[test]
+    fn parse_under_override_distinguishes_slot_specific_and_global() {
+        let scoped = parse_under_override("place:/ikebukuro/station").unwrap();
+        assert_eq!(scoped.slot.as_deref(), Some("place"));
+        assert_eq!(scoped.path, "/ikebukuro/station");
+
+        let global = parse_under_override("/ikebukuro").unwrap();
+        assert_eq!(global.slot, None);
+        assert_eq!(global.path, "/ikebukuro");
+
+        // A leading colon has an empty slot, so it is treated as global and the
+        // colon is kept as part of the path rather than a separator.
+        let empty_slot = parse_under_override(":/x").unwrap();
+        assert_eq!(empty_slot.slot, None);
+        assert_eq!(empty_slot.path, ":/x");
+    }
+
+    #[test]
+    fn override_for_prefers_slot_specific_then_global() {
+        let overrides = vec![
+            UnderOverride {
+                slot: None,
+                path: "/global".into(),
+            },
+            UnderOverride {
+                slot: Some("place".into()),
+                path: "/place-scope".into(),
+            },
+        ];
+        // A slot-specific override wins over the global one.
+        assert_eq!(
+            override_for("place", &overrides).as_deref(),
+            Some("/place-scope")
+        );
+        // A slot with no specific override falls back to the global.
+        assert_eq!(override_for("mood", &overrides).as_deref(), Some("/global"));
+        // No overrides at all yields None.
+        assert_eq!(override_for("place", &[]), None);
+    }
+
+    #[test]
+    fn query_provenance_flattens_sampling_controls() {
+        let query = SampleQuery {
+            under: Some("/x".into()),
+            ..Default::default()
+        };
+        let params = SampleParams {
+            count: 3,
+            weighted: true,
+            avoid_recent: true,
+        };
+        let value = query_provenance(&query, &params).unwrap();
+        let obj = value.as_object().expect("provenance is a JSON object");
+        // The filter is carried verbatim...
+        assert_eq!(obj.get("under").and_then(|v| v.as_str()), Some("/x"));
+        // ...alongside the sampling controls flattened onto the same object.
+        assert_eq!(obj.get("count").and_then(|v| v.as_u64()), Some(3));
+        assert_eq!(obj.get("weighted").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            obj.get("avoid_recent").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+}

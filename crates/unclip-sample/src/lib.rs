@@ -9,7 +9,6 @@
 //! score = weight × prefer_o2m_bonus × recent_usage_penalty
 //! ```
 //!
-//! `novelty_bonus` (embedding-based) is intentionally out of MVP scope.
 
 #![forbid(unsafe_code)]
 
