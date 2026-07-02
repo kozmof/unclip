@@ -23,7 +23,11 @@ pub fn validate_path(path: &str) -> Result<()> {
         return Err(invalid(path));
     }
     for segment in path.split('/').skip(1) {
-        if segment.is_empty() || segment.chars().any(char::is_whitespace) {
+        if segment.is_empty()
+            || segment
+                .chars()
+                .any(|ch| ch.is_whitespace() || ch.is_control())
+        {
             return Err(invalid(path));
         }
     }
@@ -53,21 +57,29 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
     }
 
     for (name, value) in &branch.o2o {
-        if name.is_empty() {
-            return Err(invalid("o2o name must not be empty".to_string()));
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(invalid(
+                "o2o name must not be empty or contain control characters".to_string(),
+            ));
         }
-        if value.is_empty() {
-            return Err(invalid(format!("o2o `{name}` value must not be empty")));
+        if value.is_empty() || value.chars().any(char::is_control) {
+            return Err(invalid(format!(
+                "o2o `{name}` value must not be empty or contain control characters"
+            )));
         }
     }
 
     for (name, values) in &branch.o2m {
-        if name.is_empty() {
-            return Err(invalid("o2m name must not be empty".to_string()));
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(invalid(
+                "o2m name must not be empty or contain control characters".to_string(),
+            ));
         }
         for value in values {
-            if value.is_empty() {
-                return Err(invalid(format!("o2m `{name}` value must not be empty")));
+            if value.is_empty() || value.chars().any(char::is_control) {
+                return Err(invalid(format!(
+                    "o2m `{name}` value must not be empty or contain control characters"
+                )));
             }
         }
     }
@@ -81,16 +93,16 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
 
 /// Validate a reference before storing it independently of a full branch.
 pub fn validate_reference(reference: &Reference) -> Result<()> {
-    if reference.kind.is_empty() {
+    if reference.kind.is_empty() || reference.kind.chars().any(char::is_control) {
         return Err(CoreError::InvalidBranch {
             path: "<reference>".to_string(),
-            reason: "reference type must not be empty".to_string(),
+            reason: "reference type must not be empty or contain control characters".to_string(),
         });
     }
-    if reference.value.is_empty() {
+    if reference.value.is_empty() || reference.value.chars().any(char::is_control) {
         return Err(CoreError::InvalidBranch {
             path: "<reference>".to_string(),
-            reason: "reference value must not be empty".to_string(),
+            reason: "reference value must not be empty or contain control characters".to_string(),
         });
     }
     Ok(())

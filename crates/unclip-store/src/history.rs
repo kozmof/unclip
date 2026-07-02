@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
+use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect,
@@ -42,6 +43,28 @@ pub struct PacketUsageRecord {
     pub query_json: Option<String>,
     pub packet_json: String,
     pub branch_ids: Vec<i64>,
+}
+
+/// Persistence boundary used by sampling and usage-reporting commands.
+#[async_trait]
+pub trait HistoryRepository: Sync {
+    async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>>;
+    async fn usage_summaries(
+        &self,
+        branch_ids: &[i64],
+    ) -> anyhow::Result<HashMap<i64, UsageSummary>>;
+    async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary>;
+    async fn save_packet_with_usages(
+        &self,
+        record: PacketRecord<'_>,
+        command: &str,
+        branch_ids: &[i64],
+    ) -> anyhow::Result<()>;
+    async fn save_packets_with_usages(
+        &self,
+        records: &[PacketUsageRecord],
+        command: &str,
+    ) -> anyhow::Result<()>;
 }
 
 /// Store all 64 bits of an RNG seed in SQLite's signed 64-bit INTEGER.
@@ -280,5 +303,40 @@ impl SeaOrmHistoryRepository {
 
         txn.commit().await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl HistoryRepository for SeaOrmHistoryRepository {
+    async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>> {
+        SeaOrmHistoryRepository::recent_branch_ids(self, limit).await
+    }
+
+    async fn usage_summaries(
+        &self,
+        branch_ids: &[i64],
+    ) -> anyhow::Result<HashMap<i64, UsageSummary>> {
+        SeaOrmHistoryRepository::usage_summaries(self, branch_ids).await
+    }
+
+    async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary> {
+        SeaOrmHistoryRepository::usage_for(self, branch_id).await
+    }
+
+    async fn save_packet_with_usages(
+        &self,
+        record: PacketRecord<'_>,
+        command: &str,
+        branch_ids: &[i64],
+    ) -> anyhow::Result<()> {
+        SeaOrmHistoryRepository::save_packet_with_usages(self, record, command, branch_ids).await
+    }
+
+    async fn save_packets_with_usages(
+        &self,
+        records: &[PacketUsageRecord],
+        command: &str,
+    ) -> anyhow::Result<()> {
+        SeaOrmHistoryRepository::save_packets_with_usages(self, records, command).await
     }
 }

@@ -8,9 +8,7 @@ use unclip_core::{
 };
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
-use unclip_store::{
-    now, BranchRepository, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository,
-};
+use unclip_store::{now, BranchRepository, HistoryRepository, PacketRecord, PacketUsageRecord};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
@@ -71,7 +69,7 @@ pub struct SampleInput {
 
 pub async fn sample_cmd(
     branches: &impl BranchRepository,
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     input: SampleInput,
 ) -> anyhow::Result<()> {
     let SampleInput {
@@ -172,7 +170,7 @@ pub struct ComposeInput {
 pub async fn compose_cmd(
     branches: &impl BranchRepository,
     frames: &impl unclip_store::FrameRepository,
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     input: ComposeInput,
 ) -> anyhow::Result<()> {
     let frame = frames
@@ -309,7 +307,7 @@ pub async fn export_cmd(
 /// `unclip used <path>`.
 pub async fn used_cmd(
     branches: &impl BranchRepository,
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     path: &str,
 ) -> anyhow::Result<()> {
     let branch = branches
@@ -328,7 +326,7 @@ pub async fn used_cmd(
 /// `unclip stats` — aggregate usage over a filter.
 pub async fn stats_cmd(
     branches: &impl BranchRepository,
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
@@ -355,7 +353,7 @@ pub async fn stats_cmd(
 /// `unclip stale` — branches matching a filter, least-used first.
 pub async fn stale_cmd(
     branches: &impl BranchRepository,
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
@@ -404,7 +402,7 @@ fn query_provenance(
 /// Persist a packet and the usage rows for its selected branches in one
 /// transaction, so history can never record a packet without its usages.
 async fn persist_packet(
-    history: &SeaOrmHistoryRepository,
+    history: &impl HistoryRepository,
     id: &str,
     frame_name: Option<&str>,
     command: &str,

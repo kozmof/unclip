@@ -4,12 +4,21 @@
 //! `branches:` key. JSONL files (one branch per line) are detected by the
 //! `.jsonl` extension. Export mirrors these shapes so a scope round-trips.
 
+use std::io::Read;
 use std::path::Path;
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use unclip_core::Branch;
 
 use crate::packet::Format;
+
+/// Maximum serialized import size.
+///
+/// Imports are parsed and validated in full before their atomic database
+/// transaction starts. This cap prevents an accidentally huge input from
+/// exhausting process memory while preserving all-or-nothing imports.
+pub const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,7 +58,20 @@ pub fn parse_branches_jsonl(text: &str) -> anyhow::Result<Vec<Branch>> {
 
 /// Load branches from a file, choosing JSONL when the extension says so.
 pub fn load_branches_file(path: &Path) -> anyhow::Result<Vec<Branch>> {
-    let text = std::fs::read_to_string(path)?;
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("failed to open import file {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_IMPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read import file {}", path.display()))?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_IMPORT_BYTES,
+        "import file {} exceeds the {} MiB limit",
+        path.display(),
+        MAX_IMPORT_BYTES / 1024 / 1024
+    );
+    let text = String::from_utf8(bytes)
+        .with_context(|| format!("import file {} is not valid UTF-8", path.display()))?;
     if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
         parse_branches_jsonl(&text)
     } else {
@@ -124,5 +146,19 @@ mod tests {
         assert_eq!(text.lines().count(), 2);
         let back = parse_branches_jsonl(&text).unwrap();
         assert_eq!(back, branches);
+    }
+
+    #[test]
+    fn rejects_imports_over_the_size_limit_before_parsing() {
+        let path = std::env::temp_dir().join(format!(
+            "unclip-oversized-import-{}.jsonl",
+            std::process::id()
+        ));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_IMPORT_BYTES + 1).unwrap();
+
+        let error = load_branches_file(&path).unwrap_err().to_string();
+        std::fs::remove_file(path).unwrap();
+        assert!(error.contains("exceeds the 64 MiB limit"), "got: {error}");
     }
 }

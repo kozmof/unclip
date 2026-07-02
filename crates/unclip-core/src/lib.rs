@@ -246,6 +246,12 @@ metadata_suggest:
         let mut branch = Branch::new("/bad");
         branch.o2o.insert("axis".into(), "".into());
         assert!(validate_branch_record(&branch).is_err());
+
+        let mut branch = Branch::new("/bad");
+        branch
+            .o2m
+            .insert("topic".into(), vec!["line\nbreak".into()]);
+        assert!(validate_branch_record(&branch).is_err());
     }
 
     #[test]
@@ -253,7 +259,7 @@ metadata_suggest:
         assert!(validate_path("/ikebukuro/station/exit").is_ok());
         assert!(validate_path("/a").is_ok());
 
-        for bad in ["/", "", "ikebukuro", "/a/", "/a//b", "/a/ b"] {
+        for bad in ["/", "", "ikebukuro", "/a/", "/a//b", "/a/ b", "/a/\0b"] {
             assert!(
                 validate_path(bad).is_err(),
                 "expected `{bad}` to be invalid"

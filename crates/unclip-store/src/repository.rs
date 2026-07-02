@@ -25,6 +25,8 @@ use crate::mapper;
 /// builds often allow more variables, but the limit is a build-time setting and
 /// older/system SQLite libraries may retain the lower value.
 const SQLITE_ID_CHUNK: usize = 500;
+/// Fail broad queries before hydrating an unbounded archive into memory.
+const MAX_FIND_RESULTS: u64 = 100_000;
 
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
@@ -408,8 +410,13 @@ impl BranchRepository for SeaOrmBranchRepository {
         // with SQLite versions, indexes, or query plans.
         let models = select
             .order_by_asc(branches::Column::Path)
+            .limit(MAX_FIND_RESULTS + 1)
             .all(&self.db)
             .await?;
+        anyhow::ensure!(
+            models.len() as u64 <= MAX_FIND_RESULTS,
+            "query matched more than {MAX_FIND_RESULTS} branches; narrow the filters"
+        );
         self.hydrate_all(models).await
     }
 

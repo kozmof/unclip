@@ -11,7 +11,9 @@ pub mod repository;
 pub mod seaorm;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
-pub use history::{now, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary};
+pub use history::{
+    now, HistoryRepository, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,
+};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
