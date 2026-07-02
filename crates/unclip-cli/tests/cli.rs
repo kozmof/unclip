@@ -394,6 +394,30 @@ frames:
     assert!(stderr(&bad).contains("violation"));
 }
 
+/// `compose` must never emit or persist a packet that violates slot counts.
+#[test]
+fn compose_rejects_insufficient_candidates() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+
+    let frames = db.write(
+        "frames.yaml",
+        "frames:\n  story:\n    slots:\n      - name: place\n        count: 2\n        require_o2o:\n          axis: place\n",
+    );
+    assert!(unclip(&path, &["import-frames", frames.to_str().unwrap()])
+        .status
+        .success());
+    assert!(unclip(&path, &["add", "/only", "--o2o", "axis=place"])
+        .status
+        .success());
+
+    let out = unclip(&path, &["compose", "--frame", "story"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("requires 2 selection(s), but only 1 candidate(s) match"));
+    assert!(stdout(&unclip(&path, &["stats"])).contains("total uses: 0"));
+}
+
 /// `pattern add` requires exactly one target, and a stored pattern is then
 /// surfaced by `scan` over a text file.
 #[test]

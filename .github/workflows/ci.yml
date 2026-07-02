@@ -11,7 +11,10 @@ env:
 jobs:
   check:
     name: fmt + clippy + test
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,10 +29,10 @@ jobs:
       - name: Clippy
         # Deny warnings on workspace crates only; --no-deps avoids treating
         # dependency build-script warnings as hard errors.
-        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
   audit:
     name: cargo-deny (advisories + bans + sources + licenses)

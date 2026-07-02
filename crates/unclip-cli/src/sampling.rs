@@ -1,7 +1,11 @@
 //! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
 
-use anyhow::Context;
-use unclip_core::{Branch, SampleParams, SampleQuery, Selection, SelectionPacket};
+use std::collections::HashSet;
+
+use anyhow::{ensure, Context};
+use unclip_core::{
+    validate_path, Branch, Frame, SampleParams, SampleQuery, Selection, SelectionPacket,
+};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
 use unclip_store::{
@@ -26,6 +30,9 @@ impl FilterInput {
     /// (count/weighted/avoid_recent) are not part of the filter — callers that
     /// draw build a [`SampleParams`] separately.
     pub fn into_query(self) -> anyhow::Result<SampleQuery> {
+        if let Some(under) = &self.under {
+            validate_path(under).with_context(|| format!("invalid --under scope `{under}`"))?;
+        }
         let mut q = SampleQuery {
             under: self.under,
             ..Default::default()
@@ -132,16 +139,19 @@ pub struct UnderOverride {
 
 /// Parse `slot:/path` (slot-specific) or `/path` (global) overrides.
 pub fn parse_under_override(raw: &str) -> anyhow::Result<UnderOverride> {
-    match raw.split_once(':') {
-        Some((slot, path)) if !slot.is_empty() => Ok(UnderOverride {
+    let parsed = match raw.split_once(':') {
+        Some((slot, path)) if !slot.is_empty() => UnderOverride {
             slot: Some(slot.to_string()),
             path: path.to_string(),
-        }),
-        _ => Ok(UnderOverride {
+        },
+        _ => UnderOverride {
             slot: None,
             path: raw.to_string(),
-        }),
-    }
+        },
+    };
+    validate_path(&parsed.path)
+        .with_context(|| format!("invalid --under scope `{}`", parsed.path))?;
+    Ok(parsed)
 }
 
 /// Arguments for `compose`.
@@ -164,6 +174,8 @@ pub async fn compose_cmd(
         .get_frame(&input.frame)
         .await?
         .with_context(|| format!("frame not found: {}", input.frame))?;
+    validate_under_overrides(&frame, &input.under)?;
+    ensure!(input.count > 0, "compose count must be greater than zero");
 
     let base_seed = input.seed.unwrap_or_else(random_seed);
     let mut packets = Vec::with_capacity(input.count);
@@ -185,6 +197,13 @@ pub async fn compose_cmd(
         let query = SampleQuery::from_slot(slot, under);
         let params = SampleParams::from_slot(slot);
         let candidates = branches.find(query.clone()).await?;
+        ensure!(
+            candidates.len() >= params.count,
+            "slot `{}` requires {} selection(s), but only {} candidate(s) match",
+            slot.name,
+            params.count,
+            candidates.len()
+        );
         slot_plans.push((slot, query, params, candidates));
     }
 
@@ -235,6 +254,32 @@ fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> 
         .find(|o| o.slot.as_deref() == Some(slot_name))
         .or_else(|| overrides.iter().find(|o| o.slot.is_none()))
         .map(|o| o.path.clone())
+}
+
+fn validate_under_overrides(frame: &Frame, overrides: &[UnderOverride]) -> anyhow::Result<()> {
+    let mut seen_slots = HashSet::new();
+    let mut saw_global = false;
+
+    for override_ in overrides {
+        match &override_.slot {
+            Some(slot) => {
+                ensure!(
+                    frame.slot(slot).is_some(),
+                    "frame `{}` has no slot `{slot}`",
+                    frame.name
+                );
+                ensure!(
+                    seen_slots.insert(slot),
+                    "duplicate --under override for slot `{slot}`"
+                );
+            }
+            None => {
+                ensure!(!saw_global, "duplicate global --under override");
+                saw_global = true;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `unclip export` — find branches by filter and render them.
@@ -455,6 +500,13 @@ mod tests {
     }
 
     #[test]
+    fn into_query_rejects_invalid_scope() {
+        let mut f = filter();
+        f.under = Some("relative/path".into());
+        assert!(f.into_query().is_err());
+    }
+
+    #[test]
     fn parse_under_override_distinguishes_slot_specific_and_global() {
         let scoped = parse_under_override("place:/ikebukuro/station").unwrap();
         assert_eq!(scoped.slot.as_deref(), Some("place"));
@@ -464,11 +516,8 @@ mod tests {
         assert_eq!(global.slot, None);
         assert_eq!(global.path, "/ikebukuro");
 
-        // A leading colon has an empty slot, so it is treated as global and the
-        // colon is kept as part of the path rather than a separator.
-        let empty_slot = parse_under_override(":/x").unwrap();
-        assert_eq!(empty_slot.slot, None);
-        assert_eq!(empty_slot.path, ":/x");
+        assert!(parse_under_override(":/x").is_err());
+        assert!(parse_under_override("place:relative").is_err());
     }
 
     #[test]
@@ -492,6 +541,37 @@ mod tests {
         assert_eq!(override_for("mood", &overrides).as_deref(), Some("/global"));
         // No overrides at all yields None.
         assert_eq!(override_for("place", &[]), None);
+    }
+
+    #[test]
+    fn under_overrides_reject_unknown_slots_and_duplicates() {
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: Vec::new(),
+        };
+        assert!(validate_under_overrides(
+            &frame,
+            &[UnderOverride {
+                slot: Some("missing".into()),
+                path: "/x".into(),
+            }],
+        )
+        .is_err());
+        assert!(validate_under_overrides(
+            &frame,
+            &[
+                UnderOverride {
+                    slot: None,
+                    path: "/x".into(),
+                },
+                UnderOverride {
+                    slot: None,
+                    path: "/y".into(),
+                },
+            ],
+        )
+        .is_err());
     }
 
     #[test]

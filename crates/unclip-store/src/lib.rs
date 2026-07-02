@@ -147,6 +147,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn find_returns_paths_in_stable_order() {
+        let repo = repo().await;
+        for path in ["/z", "/a", "/m"] {
+            repo.add(Branch::new(path)).await.unwrap();
+        }
+
+        let paths: Vec<_> = repo
+            .find(SampleQuery::default())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|branch| branch.path)
+            .collect();
+        assert_eq!(paths, vec!["/a", "/m", "/z"]);
+    }
+
+    #[tokio::test]
     async fn find_applies_avoid_o2o_and_o2m_in_sql() {
         let repo = repo().await;
 

@@ -380,7 +380,13 @@ impl BranchRepository for SeaOrmBranchRepository {
             select =
                 select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
         }
-        let models = select.all(&self.db).await?;
+        // Sampling is seeded, so candidate order is part of its reproducibility
+        // contract. SQL row order is undefined without ORDER BY and may change
+        // with SQLite versions, indexes, or query plans.
+        let models = select
+            .order_by_asc(branches::Column::Path)
+            .all(&self.db)
+            .await?;
         self.hydrate_all(models).await
     }
 
