@@ -15,6 +15,10 @@ use unclip_store::{
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
 
+/// Prevent a typo or hostile input from preallocating an unbounded packet
+/// batch. Larger jobs can be split across invocations with explicit seeds.
+const MAX_COMPOSE_COUNT: usize = 1_000;
+
 /// Filters shared by `sample`, `stats`, and `stale`.
 pub struct FilterInput {
     pub under: Option<String>,
@@ -114,11 +118,12 @@ pub async fn sample_cmd(
 
     let rendered = unclip_io::render_packet(&packet, format)?;
 
+    // Confirm that the packet reached stdout before recording it as used.
+    crate::output::write_stdout(&rendered)?;
     if !dry_run {
         let id = random_packet_id();
         persist_packet(history, &id, None, "sample", &packet).await?;
     }
-    print!("{rendered}");
     Ok(())
 }
 
@@ -176,6 +181,10 @@ pub async fn compose_cmd(
         .with_context(|| format!("frame not found: {}", input.frame))?;
     validate_under_overrides(&frame, &input.under)?;
     ensure!(input.count > 0, "compose count must be greater than zero");
+    ensure!(
+        input.count <= MAX_COMPOSE_COUNT,
+        "compose count must not exceed {MAX_COMPOSE_COUNT}"
+    );
 
     let base_seed = input.seed.unwrap_or_else(random_seed);
     let mut packets = Vec::with_capacity(input.count);
@@ -234,6 +243,9 @@ pub async fn compose_cmd(
 
     let rendered = unclip_io::render_packets(&packets, input.format)?;
 
+    // Confirm that every rendered packet reached stdout before recording the
+    // batch as used.
+    crate::output::write_stdout(&rendered)?;
     if !input.dry_run {
         let records = packets
             .iter()
@@ -243,7 +255,6 @@ pub async fn compose_cmd(
             .save_packets_with_usages(&records, "compose")
             .await?;
     }
-    print!("{rendered}");
     Ok(())
 }
 
@@ -291,7 +302,7 @@ pub async fn export_cmd(
     let query = filter.into_query()?;
     let mut matched = branches.find(query).await?;
     matched.sort_by(|a, b| a.path.cmp(&b.path));
-    print!("{}", unclip_io::render_branches(&matched, format)?);
+    crate::output::write_stdout(&unclip_io::render_branches(&matched, format)?)?;
     Ok(())
 }
 

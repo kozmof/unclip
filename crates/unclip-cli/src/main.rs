@@ -5,6 +5,7 @@
 mod commands;
 mod db;
 mod matching;
+mod output;
 mod sampling;
 
 use std::path::PathBuf;

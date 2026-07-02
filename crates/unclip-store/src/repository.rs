@@ -19,6 +19,13 @@ use unclip_entity::{
 
 use crate::mapper;
 
+/// Keep bound-parameter lists below SQLite's historical 999-variable limit.
+///
+/// Queries that can touch the whole archive must be chunked: current SQLite
+/// builds often allow more variables, but the limit is a build-time setting and
+/// older/system SQLite libraries may retain the lower value.
+const SQLITE_ID_CHUNK: usize = 500;
+
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -142,27 +149,38 @@ impl SeaOrmBranchRepository {
             .context("hydrate_all returned no branch for a single model")
     }
 
-    /// Hydrate many branches with a fixed number of queries (no N+1): load all
-    /// child rows for the whole id set at once, then group them per branch.
+    /// Hydrate many branches in bounded batches, then group child rows per
+    /// branch. This avoids both N+1 queries and SQLite's bound-variable limit.
     async fn hydrate_all(&self, models: Vec<branches::Model>) -> anyhow::Result<Vec<Branch>> {
         if models.is_empty() {
             return Ok(Vec::new());
         }
         let ids: Vec<i32> = models.iter().map(|m| m.id).collect();
 
-        let o2o = branch_o2o_values::Entity::find()
-            .filter(branch_o2o_values::Column::BranchId.is_in(ids.clone()))
-            .all(&self.db)
-            .await?;
-        let o2m = branch_o2m_values::Entity::find()
-            .filter(branch_o2m_values::Column::BranchId.is_in(ids.clone()))
-            .all(&self.db)
-            .await?;
-        let refs = branch_references::Entity::find()
-            .filter(branch_references::Column::BranchId.is_in(ids))
-            .order_by_asc(branch_references::Column::Id)
-            .all(&self.db)
-            .await?;
+        let mut o2o = Vec::new();
+        let mut o2m = Vec::new();
+        let mut refs = Vec::new();
+        for chunk in ids.chunks(SQLITE_ID_CHUNK) {
+            o2o.extend(
+                branch_o2o_values::Entity::find()
+                    .filter(branch_o2o_values::Column::BranchId.is_in(chunk.iter().copied()))
+                    .all(&self.db)
+                    .await?,
+            );
+            o2m.extend(
+                branch_o2m_values::Entity::find()
+                    .filter(branch_o2m_values::Column::BranchId.is_in(chunk.iter().copied()))
+                    .all(&self.db)
+                    .await?,
+            );
+            refs.extend(
+                branch_references::Entity::find()
+                    .filter(branch_references::Column::BranchId.is_in(chunk.iter().copied()))
+                    .order_by_asc(branch_references::Column::Id)
+                    .all(&self.db)
+                    .await?,
+            );
+        }
 
         let mut o2o_by_id: HashMap<i32, Vec<branch_o2o_values::Model>> = HashMap::new();
         for row in o2o {
@@ -201,10 +219,15 @@ impl SeaOrmBranchRepository {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let models = branches::Entity::find()
-            .filter(branches::Column::Id.is_in(ids))
-            .all(&self.db)
-            .await?;
+        let mut models = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(SQLITE_ID_CHUNK) {
+            models.extend(
+                branches::Entity::find()
+                    .filter(branches::Column::Id.is_in(chunk.iter().copied()))
+                    .all(&self.db)
+                    .await?,
+            );
+        }
         self.hydrate_all(models).await
     }
 

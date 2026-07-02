@@ -107,6 +107,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hydrates_archives_across_sqlite_parameter_chunks() {
+        let repo = repo().await;
+        let branches = (0..501)
+            .map(|n| {
+                let mut branch = Branch::new(format!("/bulk/{n:03}"));
+                branch.o2o.insert("axis".into(), "place".into());
+                branch.o2m.insert("tag".into(), vec![format!("tag-{n}")]);
+                branch.references.push(Reference {
+                    kind: "url".into(),
+                    value: format!("https://example.test/{n}"),
+                    note: None,
+                });
+                branch
+            })
+            .collect();
+
+        repo.upsert_many(branches).await.unwrap();
+        let loaded = repo.find(SampleQuery::default()).await.unwrap();
+
+        assert_eq!(loaded.len(), 501);
+        assert!(loaded.iter().all(|branch| {
+            branch.o2o.get("axis").map(String::as_str) == Some("place")
+                && branch.o2m.contains_key("tag")
+                && branch.references.len() == 1
+        }));
+    }
+
+    #[tokio::test]
     async fn navigation_and_find() {
         let repo = repo().await;
         for path in [

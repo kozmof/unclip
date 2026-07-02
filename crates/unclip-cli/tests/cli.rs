@@ -418,6 +418,26 @@ fn compose_rejects_insufficient_candidates() {
     assert!(stdout(&unclip(&path, &["stats"])).contains("total uses: 0"));
 }
 
+/// A user-controlled batch count must not trigger unbounded allocation/work.
+#[test]
+fn compose_rejects_oversized_batch() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+
+    let frames = db.write(
+        "frames.yaml",
+        "frames:\n  story:\n    slots:\n      - name: place\n",
+    );
+    assert!(unclip(&path, &["import-frames", frames.to_str().unwrap()])
+        .status
+        .success());
+
+    let out = unclip(&path, &["compose", "--frame", "story", "--count", "1001"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("compose count must not exceed 1000"));
+}
+
 /// `pattern add` requires exactly one target, and a stored pattern is then
 /// surfaced by `scan` over a text file.
 #[test]
