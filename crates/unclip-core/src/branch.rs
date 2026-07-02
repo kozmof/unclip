@@ -9,6 +9,7 @@ use crate::reference::Reference;
 /// `BTreeMap` is used for o2o/o2m so that YAML/JSON output is deterministically
 /// ordered, which keeps round-trips and golden tests stable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Branch {
     /// Database id. Never part of the serialized representation.
     #[serde(skip)]

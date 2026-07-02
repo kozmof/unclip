@@ -64,22 +64,8 @@ pub trait BranchRepository {
     /// Insert or replace many branches (upsert by path), returning the
     /// `(added, updated)` counts.
     ///
-    /// Implementations should run the whole batch atomically. The default
-    /// falls back to a per-branch, non-transactional upsert.
-    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)> {
-        let (mut added, mut updated) = (0usize, 0usize);
-        for mut branch in branches {
-            branch.id = None;
-            if self.get(&branch.path).await?.is_some() {
-                self.update(branch).await?;
-                updated += 1;
-            } else {
-                self.add(branch).await?;
-                added += 1;
-            }
-        }
-        Ok((added, updated))
-    }
+    /// Implementations must run the whole batch atomically.
+    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)>;
 }
 
 /// SeaORM implementation backed by SQLite.

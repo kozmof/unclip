@@ -45,6 +45,12 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
             branch.weight
         )));
     }
+    if branch.weight < 0.0 {
+        return Err(invalid(format!(
+            "weight must be non-negative, got {}",
+            branch.weight
+        )));
+    }
 
     for (name, value) in &branch.o2o {
         if name.is_empty() {

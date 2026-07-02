@@ -164,6 +164,13 @@ metadata_suggest:
     }
 
     #[test]
+    fn validate_branch_record_rejects_negative_weight() {
+        let mut branch = Branch::new("/negative");
+        branch.weight = -1.0;
+        assert!(validate_branch_record(&branch).is_err());
+    }
+
+    #[test]
     fn validate_branch_checks_require_o2m() {
         let slot: Slot = serde_norway::from_str(
             "name: place\nrequire_o2m:\n  mood:\n    - tense\n    - hidden\n",

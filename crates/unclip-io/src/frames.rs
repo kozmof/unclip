@@ -18,12 +18,14 @@ use serde::Deserialize;
 use unclip_core::{Frame, Slot};
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FramesFile {
     #[serde(default)]
     frames: BTreeMap<String, FrameBody>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FrameBody {
     #[serde(default)]
     description: Option<String>,
@@ -105,6 +107,19 @@ frames:
 
         let avoid = story.slot("avoid").unwrap();
         assert_eq!(avoid.count, 2);
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let typo = r#"
+frames:
+  story:
+    slots:
+      - name: place
+        require_020:
+          axis: place
+"#;
+        assert!(parse_frames(typo).is_err());
     }
 
     #[test]

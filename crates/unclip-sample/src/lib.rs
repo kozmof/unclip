@@ -74,7 +74,13 @@ pub fn score(
         }
     }
 
-    s.max(MIN_SCORE)
+    // Preference multiplication can overflow even when the persisted weight is
+    // finite. Saturate so every score remains a valid sampling input.
+    if s.is_finite() {
+        s.max(MIN_SCORE)
+    } else {
+        f64::MAX
+    }
 }
 
 /// Select up to `params.count` branches from `candidates` by weighted random
@@ -100,16 +106,20 @@ pub fn sample<'a>(
 
     let mut chosen = Vec::with_capacity(take);
     for _ in 0..take {
-        let total: f64 = pool.iter().map(|(_, s)| *s).sum();
-        // total >= MIN_SCORE * pool.len() > 0, so the draw is well-defined.
+        // Normalize by the largest score before summing. A collection of valid
+        // finite scores can otherwise overflow its total even though each
+        // individual score is safe.
+        let max_score = pool.iter().map(|(_, s)| *s).fold(0.0, f64::max);
+        let total: f64 = pool.iter().map(|(_, s)| *s / max_score).sum();
         let mut r = rng.gen_range(0.0..total);
         let mut picked = pool.len() - 1;
         for (idx, (_, s)) in pool.iter().enumerate() {
-            if r < *s {
+            let normalized = *s / max_score;
+            if r < normalized {
                 picked = idx;
                 break;
             }
-            r -= *s;
+            r -= normalized;
         }
         let (branch_index, _) = pool.swap_remove(picked);
         chosen.push(&candidates[branch_index]);
@@ -194,6 +204,35 @@ mod tests {
         let p = params(1);
         let recent = HashSet::new();
         assert!(score(&preferred, &q, &p, &recent) > score(&plain, &q, &p, &recent));
+    }
+
+    #[test]
+    fn extreme_finite_weights_do_not_overflow_sampling() {
+        let candidates = vec![branch("/a", 1, f64::MAX), branch("/b", 2, f64::MAX)];
+        let mut rng = rng_from_seed(1);
+        let mut weighted = params(1);
+        weighted.weighted = true;
+
+        let chosen = sample(
+            &candidates,
+            &SampleQuery::default(),
+            &weighted,
+            &HashSet::new(),
+            &mut rng,
+        );
+        assert_eq!(chosen.len(), 1);
+    }
+
+    #[test]
+    fn preference_overflow_saturates_to_a_finite_score() {
+        let mut candidate = branch("/a", 1, f64::MAX);
+        candidate.o2m.insert("tag".into(), vec!["match".into()]);
+        let mut query = SampleQuery::default();
+        query.prefer_o2m.insert("tag".into(), vec!["match".into()]);
+        let mut weighted = params(1);
+        weighted.weighted = true;
+
+        assert!(score(&candidate, &query, &weighted, &HashSet::new()).is_finite());
     }
 
     #[test]

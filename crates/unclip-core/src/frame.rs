@@ -6,6 +6,7 @@ use crate::Branch;
 
 /// A frame is a reusable constraint set composed of named slots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Frame {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -16,6 +17,7 @@ pub struct Frame {
 
 /// A single slot within a frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Slot {
     pub name: String,
 

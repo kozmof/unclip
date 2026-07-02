@@ -12,9 +12,15 @@ use unclip_core::Branch;
 use crate::packet::Format;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WrappedBranches {
+    branches: Vec<Branch>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum BranchesIn {
-    Wrapped { branches: Vec<Branch> },
+    Wrapped(WrappedBranches),
     List(Vec<Branch>),
 }
 
@@ -27,7 +33,7 @@ struct BranchesOut<'a> {
 pub fn parse_branches(text: &str) -> anyhow::Result<Vec<Branch>> {
     let parsed: BranchesIn = serde_norway::from_str(text)?;
     Ok(match parsed {
-        BranchesIn::Wrapped { branches } => branches,
+        BranchesIn::Wrapped(wrapped) => wrapped.branches,
         BranchesIn::List(branches) => branches,
     })
 }
@@ -92,6 +98,15 @@ mod tests {
         assert_eq!(parse_branches(wrapped).unwrap().len(), 2);
         let list = "- path: /a\n- path: /b\n";
         assert_eq!(parse_branches(list).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let typo = "branches:\n  - path: /a\n    wieght: 2\n";
+        assert!(parse_branches(typo).is_err());
+
+        let wrapper_typo = "branches:\n  - path: /a\nextra: true\n";
+        assert!(parse_branches(wrapper_typo).is_err());
     }
 
     #[test]

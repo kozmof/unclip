@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// In YAML the discriminator field is spelled `type`; we expose it as `kind`
 /// in Rust to avoid the reserved keyword.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Reference {
     #[serde(rename = "type")]
     pub kind: String,
