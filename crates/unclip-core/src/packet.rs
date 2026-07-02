@@ -9,6 +9,7 @@ pub const PACKET_KIND: &str = "unclip.selection";
 
 /// A sampled, structured result. Editable, transformable, not a final prompt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SelectionPacket {
     pub version: u32,
     pub kind: String,
@@ -25,6 +26,7 @@ pub struct SelectionPacket {
 
 /// A single selected branch, optionally bound to a frame slot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Selection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<String>,

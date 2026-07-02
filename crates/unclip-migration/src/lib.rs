@@ -6,6 +6,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20260620_000001_create_core_tables;
 mod m20260620_000002_create_pattern_entries;
+mod m20260702_000003_add_frame_slot_position;
 
 pub struct Migrator;
 
@@ -15,6 +16,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260620_000001_create_core_tables::Migration),
             Box::new(m20260620_000002_create_pattern_entries::Migration),
+            Box::new(m20260702_000003_add_frame_slot_position::Migration),
         ]
     }
 }
@@ -70,6 +72,32 @@ mod tests {
             .await
             .unwrap();
         assert!(rows.is_empty(), "branches table should be dropped");
+    }
+
+    #[tokio::test]
+    async fn frame_slot_position_migration_backfills_in_insert_order() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, Some(2)).await.unwrap();
+        db.execute_unprepared(
+            "INSERT INTO frames (id, name) VALUES (1, 'f'); \
+             INSERT INTO frame_slots (id, frame_id, name) VALUES \
+             (10, 1, 'first'), (20, 1, 'second')",
+        )
+        .await
+        .unwrap();
+
+        Migrator::up(&db, None).await.unwrap();
+        let rows = db
+            .query_all(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT name, position FROM frame_slots ORDER BY position",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].try_get::<String>("", "name").unwrap(), "first");
+        assert_eq!(rows[0].try_get::<i32>("", "position").unwrap(), 0);
+        assert_eq!(rows[1].try_get::<String>("", "name").unwrap(), "second");
+        assert_eq!(rows[1].try_get::<i32>("", "position").unwrap(), 1);
     }
 
     #[tokio::test]

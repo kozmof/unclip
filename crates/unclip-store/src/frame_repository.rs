@@ -6,7 +6,7 @@ use anyhow::{ensure, Context};
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait,
 };
 use unclip_core::{validate_path, Frame, Slot};
@@ -96,8 +96,9 @@ impl SeaOrmFrameRepository {
         };
         let frame_id = frames::Entity::insert(am).exec(txn).await?.last_insert_id;
 
-        for slot in &frame.slots {
-            Self::insert_slot(txn, frame_id, slot).await?;
+        for (position, slot) in frame.slots.iter().enumerate() {
+            let position = i32::try_from(position).context("frame has too many slots")?;
+            Self::insert_slot(txn, frame_id, position, slot).await?;
         }
         Ok(())
     }
@@ -105,6 +106,7 @@ impl SeaOrmFrameRepository {
     async fn insert_slot(
         txn: &DatabaseTransaction,
         frame_id: i32,
+        position: i32,
         slot: &Slot,
     ) -> anyhow::Result<()> {
         let count = checked_slot_count(slot)?;
@@ -112,6 +114,7 @@ impl SeaOrmFrameRepository {
             id: NotSet,
             frame_id: Set(frame_id),
             name: Set(slot.name.clone()),
+            position: Set(position),
             under_path: Set(slot.under.clone()),
             count: Set(count),
             avoid_recent: Set(slot.avoid_recent as i32),
@@ -196,11 +199,11 @@ impl SeaOrmFrameRepository {
 }
 
 fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
-    ensure!(!frame.name.is_empty(), "frame name must not be empty");
+    validate_label("frame name", &frame.name)?;
 
     let mut slot_names = HashSet::new();
     for slot in &frame.slots {
-        ensure!(!slot.name.is_empty(), "slot name must not be empty");
+        validate_label("slot name", &slot.name)?;
         ensure!(
             slot_names.insert(&slot.name),
             "duplicate slot name `{}` in frame `{}`",
@@ -227,8 +230,57 @@ fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
         validate_o2m_map("require_o2m", &slot.require_o2m, slot, frame)?;
         validate_o2m_map("prefer_o2m", &slot.prefer_o2m, slot, frame)?;
         validate_o2m_map("avoid_o2m", &slot.avoid_o2m, slot, frame)?;
+
+        for (name, required) in &slot.require_o2o {
+            if let Some(default) = slot.default_o2o.get(name) {
+                ensure!(
+                    default == required,
+                    "default_o2o `{name}={default}` conflicts with required `{required}` in slot `{}` of frame `{}`",
+                    slot.name,
+                    frame.name
+                );
+            }
+            ensure!(
+                slot.avoid_o2o.get(name) != Some(required),
+                "o2o `{name}={required}` is both required and avoided in slot `{}` of frame `{}`",
+                slot.name,
+                frame.name
+            );
+        }
+        for (name, default) in &slot.default_o2o {
+            ensure!(
+                slot.avoid_o2o.get(name) != Some(default),
+                "o2o `{name}={default}` is both a default and avoided in slot `{}` of frame `{}`",
+                slot.name,
+                frame.name
+            );
+        }
+        for (name, required) in &slot.require_o2m {
+            if let Some(avoided) = slot.avoid_o2m.get(name) {
+                for value in required {
+                    ensure!(
+                        !avoided.contains(value),
+                        "o2m `{name}={value}` is both required and avoided in slot `{}` of frame `{}`",
+                        slot.name,
+                        frame.name
+                    );
+                }
+            }
+        }
+        for key in &slot.metadata_suggest {
+            validate_label("metadata_suggest key", key)?;
+        }
     }
 
+    Ok(())
+}
+
+fn validate_label(field: &str, value: &str) -> anyhow::Result<()> {
+    ensure!(!value.is_empty(), "{field} must not be empty");
+    ensure!(
+        !value.chars().any(char::is_control),
+        "{field} must not contain control characters"
+    );
     Ok(())
 }
 
@@ -236,21 +288,14 @@ fn validate_o2o_map(
     field: &str,
     values: &std::collections::BTreeMap<String, String>,
     slot: &Slot,
-    frame: &Frame,
+    _frame: &Frame,
 ) -> anyhow::Result<()> {
     for (name, value) in values {
-        ensure!(
-            !name.is_empty(),
-            "{field} contains an empty name in slot `{}` of frame `{}`",
-            slot.name,
-            frame.name
-        );
-        ensure!(
-            !value.is_empty(),
-            "{field} `{name}` contains an empty value in slot `{}` of frame `{}`",
-            slot.name,
-            frame.name
-        );
+        validate_label(&format!("{field} name in slot `{}`", slot.name), name)?;
+        validate_label(
+            &format!("{field} `{name}` value in slot `{}`", slot.name),
+            value,
+        )?;
     }
     Ok(())
 }
@@ -262,16 +307,16 @@ fn validate_o2m_map(
     frame: &Frame,
 ) -> anyhow::Result<()> {
     for (name, entries) in values {
-        ensure!(
-            !name.is_empty(),
-            "{field} contains an empty name in slot `{}` of frame `{}`",
-            slot.name,
-            frame.name
-        );
+        validate_label(&format!("{field} name in slot `{}`", slot.name), name)?;
+        let mut unique = HashSet::new();
         for value in entries {
+            validate_label(
+                &format!("{field} `{name}` value in slot `{}`", slot.name),
+                value,
+            )?;
             ensure!(
-                !value.is_empty(),
-                "{field} `{name}` contains an empty value in slot `{}` of frame `{}`",
+                unique.insert(value),
+                "{field} `{name}` contains duplicate value `{value}` in slot `{}` of frame `{}`",
                 slot.name,
                 frame.name
             );
@@ -314,6 +359,8 @@ impl FrameRepository for SeaOrmFrameRepository {
 
         let slot_models = frame_slots::Entity::find()
             .filter(frame_slots::Column::FrameId.eq(frame.id))
+            .order_by_asc(frame_slots::Column::Position)
+            .order_by_asc(frame_slots::Column::Id)
             .all(&self.db)
             .await?;
         let slots = self.hydrate_slots(slot_models).await?;

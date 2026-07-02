@@ -235,6 +235,33 @@ metadata_suggest:
             branch,
         });
         assert!(validate_packet(&frame, &packet).is_empty());
+
+        let mut incompatible = packet.clone();
+        incompatible.version = PACKET_VERSION + 1;
+        incompatible.kind = "other.kind".into();
+        incompatible.frame = Some("other".into());
+        incompatible
+            .selections
+            .push(incompatible.selections[0].clone());
+        let violations = validate_packet(&frame, &incompatible);
+        assert!(violations.iter().any(|reason| reason.contains("version")));
+        assert!(violations.iter().any(|reason| reason.contains("kind")));
+        assert!(violations
+            .iter()
+            .any(|reason| reason.contains("packet frame")));
+        assert!(violations.iter().any(|reason| reason.contains("got 2")));
+    }
+
+    #[test]
+    fn packet_rejects_unknown_fields() {
+        let yaml = r#"
+version: 1
+kind: unclip.selection
+frame: story
+selections: []
+unexpected: true
+"#;
+        assert!(serde_norway::from_str::<SelectionPacket>(yaml).is_err());
     }
 
     #[test]

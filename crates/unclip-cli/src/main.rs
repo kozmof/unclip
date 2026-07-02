@@ -317,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Init => {
             // open_repos already ran migrations; just confirm.
-            println!("initialized {}", cli.db.display());
+            crate::output::outln!("initialized {}", cli.db.display());
         }
         Command::Add {
             path,

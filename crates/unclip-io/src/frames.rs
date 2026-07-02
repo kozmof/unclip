@@ -49,7 +49,7 @@ pub fn parse_frames(yaml: &str) -> anyhow::Result<Vec<Frame>> {
 
 /// Load and parse a frames file from disk.
 pub fn load_frames(path: &Path) -> anyhow::Result<Vec<Frame>> {
-    let text = std::fs::read_to_string(path)?;
+    let text = crate::read_text_file(path, "frame file")?;
     parse_frames(&text)
 }
 

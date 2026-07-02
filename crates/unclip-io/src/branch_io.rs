@@ -4,21 +4,20 @@
 //! `branches:` key. JSONL files (one branch per line) are detected by the
 //! `.jsonl` extension. Export mirrors these shapes so a scope round-trips.
 
-use std::io::Read;
 use std::path::Path;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use unclip_core::Branch;
 
 use crate::packet::Format;
+use crate::text::{read_text_file, MAX_TEXT_BYTES};
 
 /// Maximum serialized import size.
 ///
 /// Imports are parsed and validated in full before their atomic database
 /// transaction starts. This cap prevents an accidentally huge input from
 /// exhausting process memory while preserving all-or-nothing imports.
-pub const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_IMPORT_BYTES: u64 = MAX_TEXT_BYTES;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,20 +57,7 @@ pub fn parse_branches_jsonl(text: &str) -> anyhow::Result<Vec<Branch>> {
 
 /// Load branches from a file, choosing JSONL when the extension says so.
 pub fn load_branches_file(path: &Path) -> anyhow::Result<Vec<Branch>> {
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("failed to open import file {}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_IMPORT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .with_context(|| format!("failed to read import file {}", path.display()))?;
-    anyhow::ensure!(
-        bytes.len() as u64 <= MAX_IMPORT_BYTES,
-        "import file {} exceeds the {} MiB limit",
-        path.display(),
-        MAX_IMPORT_BYTES / 1024 / 1024
-    );
-    let text = String::from_utf8(bytes)
-        .with_context(|| format!("import file {} is not valid UTF-8", path.display()))?;
+    let text = read_text_file(path, "import file")?;
     if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
         parse_branches_jsonl(&text)
     } else {

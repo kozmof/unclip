@@ -11,6 +11,7 @@ pub struct Model {
     pub frame_id: i32,
     #[sea_orm(column_type = "Text")]
     pub name: String,
+    pub position: i32,
     #[sea_orm(column_type = "Text", nullable)]
     pub under_path: Option<String>,
     pub count: i32,

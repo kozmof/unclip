@@ -48,8 +48,7 @@ pub async fn scan_cmd(
     patterns: &SeaOrmPatternRepository,
     file: &Path,
 ) -> anyhow::Result<()> {
-    let text = std::fs::read_to_string(file)
-        .with_context(|| format!("cannot read file: {}", file.display()))?;
+    let text = unclip_io::read_text_file(file, "scan file")?;
     let matcher = build_matcher(branches, patterns).await?;
 
     // Aggregate identical (pattern → target) hits with a count.
@@ -61,11 +60,11 @@ pub async fn scan_cmd(
     }
 
     if counts.is_empty() {
-        eprintln!("(no pattern hits)");
+        crate::output::errln!("(no pattern hits)");
         return Ok(());
     }
     for ((pattern, target), n) in counts {
-        println!("{pattern}\t→ {target}\t({n})");
+        crate::output::outln!("{pattern}\t→ {target}\t({n})");
     }
     Ok(())
 }
@@ -85,11 +84,11 @@ pub async fn suggest_o2m_cmd(
 
     let suggestions = suggest_o2m(&matcher, &branch_text(&branch), &branch.o2m);
     if suggestions.is_empty() {
-        eprintln!("(no o2m suggestions for {path})");
+        crate::output::errln!("(no o2m suggestions for {path})");
         return Ok(());
     }
     for (name, value) in suggestions {
-        println!("{name}={value}");
+        crate::output::outln!("{name}={value}");
     }
     Ok(())
 }
@@ -136,7 +135,7 @@ pub async fn pattern_add_cmd(
 
     let entry = PatternEntry::new(input.pattern.clone(), target);
     let id = patterns.add(&entry).await?;
-    println!(
+    crate::output::outln!(
         "added pattern #{id}: {} → {}",
         input.pattern,
         entry.target.describe()
@@ -147,7 +146,7 @@ pub async fn pattern_add_cmd(
 /// `unclip pattern remove <id>` — delete a pattern entry.
 pub async fn pattern_remove_cmd(patterns: &SeaOrmPatternRepository, id: i64) -> anyhow::Result<()> {
     if patterns.remove(id).await? {
-        println!("removed pattern #{id}");
+        crate::output::outln!("removed pattern #{id}");
         Ok(())
     } else {
         bail!("no pattern entry with id {id}")
@@ -162,7 +161,7 @@ pub async fn pattern_set_enabled_cmd(
 ) -> anyhow::Result<()> {
     if patterns.set_enabled(id, enabled).await? {
         let state = if enabled { "enabled" } else { "disabled" };
-        println!("{state} pattern #{id}");
+        crate::output::outln!("{state} pattern #{id}");
         Ok(())
     } else {
         bail!("no pattern entry with id {id}")
@@ -173,12 +172,12 @@ pub async fn pattern_set_enabled_cmd(
 pub async fn patterns_cmd(patterns: &SeaOrmPatternRepository) -> anyhow::Result<()> {
     let stored = patterns.list().await?;
     if stored.is_empty() {
-        eprintln!("(no pattern entries)");
+        crate::output::errln!("(no pattern entries)");
         return Ok(());
     }
     for p in stored {
         let flag = if p.enabled { "" } else { "\t[disabled]" };
-        println!(
+        crate::output::outln!(
             "{}\t{}\t→ {}{flag}",
             p.id,
             p.entry.pattern,

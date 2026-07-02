@@ -9,7 +9,7 @@ use crate::branch::is_under;
 use crate::error::{CoreError, Result};
 use crate::frame::{Frame, Slot};
 use crate::packet::SelectionPacket;
-use crate::{Branch, Reference};
+use crate::{Branch, Reference, PACKET_KIND, PACKET_VERSION};
 
 /// Validate a branch path address.
 ///
@@ -156,10 +156,31 @@ pub fn validate_branch(slot: &Slot, branch: &Branch) -> Vec<String> {
     violations
 }
 
-/// Check a packet against a frame: every selection must satisfy its slot, and
-/// each slot must receive at least its required `count` of selections.
+/// Check a packet against a frame: its schema identity and frame binding must
+/// match, every selection must satisfy its slot, and each slot must receive
+/// exactly its configured `count` of selections.
 pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
     let mut violations = Vec::new();
+
+    if packet.version != PACKET_VERSION {
+        violations.push(format!(
+            "packet version {} is unsupported; expected {PACKET_VERSION}",
+            packet.version
+        ));
+    }
+    if packet.kind != PACKET_KIND {
+        violations.push(format!(
+            "packet kind `{}` is invalid; expected `{PACKET_KIND}`",
+            packet.kind
+        ));
+    }
+    if packet.frame.as_deref() != Some(frame.name.as_str()) {
+        violations.push(format!(
+            "packet frame is `{}`, expected `{}`",
+            packet.frame.as_deref().unwrap_or("<none>"),
+            frame.name
+        ));
+    }
 
     for selection in &packet.selections {
         let Some(slot_name) = &selection.slot else {
@@ -185,7 +206,7 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
             .iter()
             .filter(|s| s.slot.as_deref() == Some(slot.name.as_str()))
             .count();
-        if got < slot.count {
+        if got != slot.count {
             violations.push(format!(
                 "slot `{}` expects {} selection(s), got {got}",
                 slot.name, slot.count

@@ -74,7 +74,7 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
     branch.o2m = o2m;
 
     repo.add(branch).await?;
-    println!("added {}", input.path);
+    crate::output::outln!("added {}", input.path);
     Ok(())
 }
 
@@ -174,14 +174,14 @@ pub async fn edit(repo: &impl BranchRepository, input: EditInput) -> anyhow::Res
     }
 
     repo.update(branch).await?;
-    println!("edited {}", input.path);
+    crate::output::outln!("edited {}", input.path);
     Ok(())
 }
 
 pub async fn show(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
     match repo.get(path).await? {
         Some(branch) => {
-            print!("{}", serde_norway::to_string(&branch)?);
+            crate::output::out!("{}", serde_norway::to_string(&branch)?);
             Ok(())
         }
         None => bail!("branch not found: {path}"),
@@ -192,13 +192,13 @@ pub async fn ls(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> 
     let mut children = repo.children(path).await?;
     children.sort_by(|a, b| a.path.cmp(&b.path));
     if children.is_empty() {
-        eprintln!("(no children under {path})");
+        crate::output::errln!("(no children under {path})");
         return Ok(());
     }
     for child in children {
         match &child.title {
-            Some(title) => println!("{}\t{}", child.path, title),
-            None => println!("{}", child.path),
+            Some(title) => crate::output::outln!("{}\t{}", child.path, title),
+            None => crate::output::outln!("{}", child.path),
         }
     }
     Ok(())
@@ -211,7 +211,7 @@ pub async fn tree(repo: &impl BranchRepository, root: &str) -> anyhow::Result<()
         nodes.push(node);
     }
     if nodes.is_empty() {
-        eprintln!("(no branches under {root})");
+        crate::output::errln!("(no branches under {root})");
         return Ok(());
     }
     nodes.sort_by(|a, b| a.path.cmp(&b.path));
@@ -222,8 +222,8 @@ pub async fn tree(repo: &impl BranchRepository, root: &str) -> anyhow::Result<()
         let indent = "  ".repeat(depth);
         let label = last_segment(&node.path);
         match &node.title {
-            Some(title) => println!("{indent}{label}\t{title}"),
-            None => println!("{indent}{label}"),
+            Some(title) => crate::output::outln!("{indent}{label}\t{title}"),
+            None => crate::output::outln!("{indent}{label}"),
         }
     }
     Ok(())
@@ -263,11 +263,11 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
     let mut found = repo.find(q).await?;
     found.sort_by(|a, b| a.path.cmp(&b.path));
     if found.is_empty() {
-        eprintln!("(no matching branches)");
+        crate::output::errln!("(no matching branches)");
         return Ok(());
     }
     for branch in found {
-        print_path_line(&branch);
+        print_path_line(&branch)?;
     }
     Ok(())
 }
@@ -275,9 +275,11 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
 /// `unclip o2o [name | name=value]` — catalog or branch lookup over o2o.
 pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
-        Selector::All => print_catalog(repo.o2o_catalog(None).await?),
-        Selector::Name(name) => print_catalog(repo.o2o_catalog(Some(&name)).await?),
-        Selector::Pair(name, value) => print_branches(repo.branches_with_o2o(&name, &value).await?),
+        Selector::All => print_catalog(repo.o2o_catalog(None).await?)?,
+        Selector::Name(name) => print_catalog(repo.o2o_catalog(Some(&name)).await?)?,
+        Selector::Pair(name, value) => {
+            print_branches(repo.branches_with_o2o(&name, &value).await?)?
+        }
     }
     Ok(())
 }
@@ -285,9 +287,11 @@ pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyh
 /// `unclip o2m [name | name=value]` — catalog or branch lookup over o2m.
 pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
-        Selector::All => print_catalog(repo.o2m_catalog(None).await?),
-        Selector::Name(name) => print_catalog(repo.o2m_catalog(Some(&name)).await?),
-        Selector::Pair(name, value) => print_branches(repo.branches_with_o2m(&name, &value).await?),
+        Selector::All => print_catalog(repo.o2m_catalog(None).await?)?,
+        Selector::Name(name) => print_catalog(repo.o2m_catalog(Some(&name)).await?)?,
+        Selector::Pair(name, value) => {
+            print_branches(repo.branches_with_o2m(&name, &value).await?)?
+        }
     }
     Ok(())
 }
@@ -298,7 +302,7 @@ pub async fn import(
     branches: Vec<Branch>,
 ) -> anyhow::Result<()> {
     if branches.is_empty() {
-        eprintln!("(no branches in file)");
+        crate::output::errln!("(no branches in file)");
         return Ok(());
     }
     // Reject a malformed file before any write, rather than partially importing.
@@ -307,7 +311,7 @@ pub async fn import(
             .with_context(|| format!("invalid branch in import: {}", branch.path))?;
     }
     let (added, updated) = repo.upsert_many(branches).await?;
-    println!(
+    crate::output::outln!(
         "imported {} branch(es): {added} added, {updated} updated",
         added + updated
     );
@@ -329,7 +333,7 @@ pub async fn attach(
         note,
     };
     repo.attach_reference(path, &reference).await?;
-    println!("attached {kind} `{value}` to {path}");
+    crate::output::outln!("attached {kind} `{value}` to {path}");
     Ok(())
 }
 
@@ -340,13 +344,13 @@ pub async fn refs(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()
         .await?
         .with_context(|| format!("branch not found: {path}"))?;
     if branch.references.is_empty() {
-        eprintln!("(no references on {path})");
+        crate::output::errln!("(no references on {path})");
         return Ok(());
     }
     for r in branch.references {
         match &r.note {
-            Some(note) => println!("{}\t{}\t{}", r.kind, r.value, note),
-            None => println!("{}\t{}", r.kind, r.value),
+            Some(note) => crate::output::outln!("{}\t{}\t{}", r.kind, r.value, note),
+            None => crate::output::outln!("{}\t{}", r.kind, r.value),
         }
     }
     Ok(())
@@ -364,7 +368,7 @@ fn infer_reference_kind(value: &str) -> String {
 /// Import frames parsed from a frames file.
 pub async fn import_frames(repo: &impl FrameRepository, frames: Vec<Frame>) -> anyhow::Result<()> {
     if frames.is_empty() {
-        eprintln!("(no frames in file)");
+        crate::output::errln!("(no frames in file)");
         return Ok(());
     }
     // Capture summaries before the batch consumes the frames, so the per-frame
@@ -375,7 +379,7 @@ pub async fn import_frames(repo: &impl FrameRepository, frames: Vec<Frame>) -> a
         .collect();
     repo.save_frames(frames).await?;
     for (name, slots) in summaries {
-        println!("imported frame {name} ({slots} slot(s))");
+        crate::output::outln!("imported frame {name} ({slots} slot(s))");
     }
     Ok(())
 }
@@ -384,13 +388,15 @@ pub async fn import_frames(repo: &impl FrameRepository, frames: Vec<Frame>) -> a
 pub async fn frames_list(repo: &impl FrameRepository) -> anyhow::Result<()> {
     let frames = repo.list_frames().await?;
     if frames.is_empty() {
-        eprintln!("(no frames)");
+        crate::output::errln!("(no frames)");
         return Ok(());
     }
     for info in frames {
         match &info.description {
-            Some(desc) => println!("{}\t{} slot(s)\t{}", info.name, info.slot_count, desc),
-            None => println!("{}\t{} slot(s)", info.name, info.slot_count),
+            Some(desc) => {
+                crate::output::outln!("{}\t{} slot(s)\t{}", info.name, info.slot_count, desc)
+            }
+            None => crate::output::outln!("{}\t{} slot(s)", info.name, info.slot_count),
         }
     }
     Ok(())
@@ -404,12 +410,12 @@ pub async fn frame_show(repo: &impl FrameRepository, selector: &str) -> anyhow::
         .await?
         .with_context(|| format!("frame not found: {frame_name}"))?;
     match slot_name {
-        None => print!("{}", serde_norway::to_string(&frame)?),
+        None => crate::output::out!("{}", serde_norway::to_string(&frame)?),
         Some(slot_name) => {
             let slot = frame
                 .slot(slot_name)
                 .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
-            print!("{}", serde_norway::to_string(slot)?);
+            crate::output::out!("{}", serde_norway::to_string(slot)?);
         }
     }
     Ok(())
@@ -440,8 +446,8 @@ pub async fn create(
     }
     let branch = slot.skeleton(&path);
     branch_repo.add(branch.clone()).await?;
-    println!("created {path} from {selector}");
-    print!("{}", serde_norway::to_string(&branch)?);
+    crate::output::outln!("created {path} from {selector}");
+    crate::output::out!("{}", serde_norway::to_string(&branch)?);
     Ok(())
 }
 
@@ -473,19 +479,18 @@ pub async fn validate(
             validate_branch(slot, &branch)
         }
         None => {
-            let text = std::fs::read_to_string(target)
-                .with_context(|| format!("cannot read packet file: {target}"))?;
+            let text = unclip_io::read_text_file(std::path::Path::new(target), "packet file")?;
             let packet: SelectionPacket = serde_norway::from_str(&text)?;
             validate_packet(&frame, &packet)
         }
     };
 
     if violations.is_empty() {
-        println!("OK: {target} satisfies {selector}");
+        crate::output::outln!("OK: {target} satisfies {selector}");
         Ok(())
     } else {
         for reason in &violations {
-            eprintln!("- {reason}");
+            crate::output::errln!("- {reason}");
         }
         bail!("{} violation(s)", violations.len());
     }
@@ -512,32 +517,35 @@ fn parse_selector(selector: Option<String>) -> anyhow::Result<Selector> {
     }
 }
 
-fn print_catalog(rows: Vec<IndexedValue>) {
+fn print_catalog(rows: Vec<IndexedValue>) -> anyhow::Result<()> {
     if rows.is_empty() {
-        eprintln!("(no indexed values)");
-        return;
+        crate::output::errln!("(no indexed values)");
+        return Ok(());
     }
     for row in rows {
-        println!("{}={}\t{}", row.name, row.value, row.count);
+        crate::output::outln!("{}={}\t{}", row.name, row.value, row.count);
     }
+    Ok(())
 }
 
-fn print_branches(mut branches: Vec<Branch>) {
+fn print_branches(mut branches: Vec<Branch>) -> anyhow::Result<()> {
     branches.sort_by(|a, b| a.path.cmp(&b.path));
     if branches.is_empty() {
-        eprintln!("(no matching branches)");
-        return;
+        crate::output::errln!("(no matching branches)");
+        return Ok(());
     }
     for branch in branches {
-        print_path_line(&branch);
+        print_path_line(&branch)?;
     }
+    Ok(())
 }
 
-fn print_path_line(branch: &Branch) {
+fn print_path_line(branch: &Branch) -> anyhow::Result<()> {
     match &branch.title {
-        Some(title) => println!("{}\t{}", branch.path, title),
-        None => println!("{}", branch.path),
+        Some(title) => crate::output::outln!("{}\t{}", branch.path, title),
+        None => crate::output::outln!("{}", branch.path),
     }
+    Ok(())
 }
 
 fn segment_count(path: &str) -> usize {

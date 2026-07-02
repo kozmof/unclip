@@ -377,10 +377,12 @@ mod tests {
             weighted: false,
             metadata_suggest: vec!["sensory".into(), "affordances".into()],
         };
+        let mut mood = place.clone();
+        mood.name = "mood".into();
         let frame = Frame {
             name: "story".into(),
             description: Some("Story frame".into()),
-            slots: vec![place],
+            slots: vec![place, mood],
         };
 
         frames.save_frame(frame.clone()).await.unwrap();
@@ -390,7 +392,7 @@ mod tests {
 
         let list = frames.list_frames().await.unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].slot_count, 1);
+        assert_eq!(list[0].slot_count, 2);
 
         // save_frame replaces (upsert), not duplicates.
         frames.save_frame(frame.clone()).await.unwrap();
@@ -775,7 +777,7 @@ mod tests {
         };
 
         let err = frames.save_frame(frame).await.unwrap_err().to_string();
-        assert!(err.contains("empty name"), "got: {err}");
+        assert!(err.contains("must not be empty"), "got: {err}");
 
         let mut slot = Slot {
             name: "bad".into(),
@@ -799,7 +801,37 @@ mod tests {
         };
 
         let err = frames.save_frame(frame).await.unwrap_err().to_string();
-        assert!(err.contains("empty value"), "got: {err}");
+        assert!(err.contains("must not be empty"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn frame_save_rejects_contradictory_constraints() {
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+        let mut slot = Slot {
+            name: "bad".into(),
+            under: None,
+            require_o2o: Default::default(),
+            default_o2o: Default::default(),
+            avoid_o2o: Default::default(),
+            require_o2m: Default::default(),
+            prefer_o2m: Default::default(),
+            avoid_o2m: Default::default(),
+            count: 1,
+            avoid_recent: false,
+            weighted: false,
+            metadata_suggest: Vec::new(),
+        };
+        slot.require_o2o.insert("axis".into(), "place".into());
+        slot.avoid_o2o.insert("axis".into(), "place".into());
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![slot],
+        };
+
+        let err = frames.save_frame(frame).await.unwrap_err().to_string();
+        assert!(err.contains("both required and avoided"), "got: {err}");
     }
 
     #[tokio::test]

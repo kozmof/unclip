@@ -316,9 +316,9 @@ pub async fn used_cmd(
         .with_context(|| format!("branch not found: {path}"))?;
     let id = branch.id.context("branch has no id")?;
     let summary = history.usage_for(id).await?;
-    println!("{path}\tused {} time(s)", summary.count);
+    crate::output::outln!("{path}\tused {} time(s)", summary.count);
     if let Some(last) = summary.last_used {
-        println!("last used: {last}");
+        crate::output::outln!("last used: {last}");
     }
     Ok(())
 }
@@ -344,9 +344,9 @@ pub async fn stats_cmd(
             unused += 1;
         }
     }
-    println!("branches: {}", matched.len());
-    println!("total uses: {total_uses}");
-    println!("unused: {unused}");
+    crate::output::outln!("branches: {}", matched.len());
+    crate::output::outln!("total uses: {total_uses}");
+    crate::output::outln!("unused: {unused}");
     Ok(())
 }
 
@@ -374,11 +374,11 @@ pub async fn stale_cmd(
     rows.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
 
     if rows.is_empty() {
-        eprintln!("(no matching branches)");
+        crate::output::errln!("(no matching branches)");
         return Ok(());
     }
     for (path, count, _) in rows {
-        println!("{path}\tuses={count}");
+        crate::output::outln!("{path}\tuses={count}");
     }
     Ok(())
 }
