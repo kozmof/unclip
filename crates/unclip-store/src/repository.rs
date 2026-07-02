@@ -13,7 +13,9 @@ use sea_orm::{
 use unclip_core::{
     parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
 };
-use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
+use unclip_entity::{
+    branch_o2m_values, branch_o2o_values, branch_references, branches, usage_history,
+};
 
 use crate::mapper;
 
@@ -313,6 +315,10 @@ impl BranchRepository for SeaOrmBranchRepository {
             .await?;
         branch_references::Entity::delete_many()
             .filter(branch_references::Column::BranchId.eq(branch_id))
+            .exec(&txn)
+            .await?;
+        usage_history::Entity::delete_many()
+            .filter(usage_history::Column::BranchId.eq(branch_id))
             .exec(&txn)
             .await?;
         branches::Entity::delete_by_id(branch_id).exec(&txn).await?;

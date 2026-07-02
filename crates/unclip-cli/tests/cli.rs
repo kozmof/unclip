@@ -305,6 +305,15 @@ fn sample_seed_is_reproducible_and_dry_run_records_nothing() {
         .success());
     let stats = unclip(&path, &["stats"]);
     assert!(stdout(&stats).contains("total uses: 1"));
+
+    // The complete u64 seed range must survive packet persistence.
+    let high_seed = unclip(&path, &["sample", "--seed", "18446744073709551615"]);
+    assert!(
+        high_seed.status.success(),
+        "high seed failed: {}",
+        stderr(&high_seed)
+    );
+    assert!(stdout(&high_seed).contains("seed: 18446744073709551615"));
 }
 
 /// `export` returns every matching branch with no count to invent.

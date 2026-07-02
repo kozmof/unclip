@@ -4,7 +4,9 @@ use anyhow::Context;
 use unclip_core::{Branch, SampleParams, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
-use unclip_store::{now, BranchRepository, PacketRecord, SeaOrmHistoryRepository};
+use unclip_store::{
+    now, BranchRepository, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository,
+};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
@@ -103,12 +105,13 @@ pub async fn sample_cmd(
         })
         .collect();
 
-    print!("{}", unclip_io::render_packet(&packet, format)?);
+    let rendered = unclip_io::render_packet(&packet, format)?;
 
     if !dry_run {
         let id = random_packet_id();
         persist_packet(history, &id, None, "sample", &packet).await?;
     }
+    print!("{rendered}");
     Ok(())
 }
 
@@ -210,15 +213,18 @@ pub async fn compose_cmd(
         packets.push(packet);
     }
 
-    print!("{}", unclip_io::render_packets(&packets, input.format)?);
+    let rendered = unclip_io::render_packets(&packets, input.format)?;
 
     if !input.dry_run {
-        for packet in &packets {
-            // Packet id is random (seed-independent) so re-runs do not collide.
-            let id = random_packet_id();
-            persist_packet(history, &id, Some(&frame.name), "compose", packet).await?;
-        }
+        let records = packets
+            .iter()
+            .map(|packet| packet_usage_record(Some(&frame.name), packet))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        history
+            .save_packets_with_usages(&records, "compose")
+            .await?;
     }
+    print!("{rendered}");
     Ok(())
 }
 
@@ -369,11 +375,29 @@ async fn persist_packet(
         )
         .await
 }
+fn packet_usage_record(
+    frame_name: Option<&str>,
+    packet: &SelectionPacket,
+) -> anyhow::Result<PacketUsageRecord> {
+    Ok(PacketUsageRecord {
+        // Packet ids are seed-independent so repeated deterministic draws do
+        // not collide in the packet store.
+        id: random_packet_id(),
+        frame_name: frame_name.map(str::to_string),
+        seed: packet.seed,
+        query_json: packet.query.as_ref().map(serde_json::Value::to_string),
+        packet_json: serde_json::to_string(packet)?,
+        branch_ids: packet
+            .selections
+            .iter()
+            .filter_map(|selection| selection.branch.id)
+            .collect(),
+    })
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn filter() -> FilterInput {
         FilterInput {
             under: None,

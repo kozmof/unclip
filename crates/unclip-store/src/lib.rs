@@ -11,7 +11,7 @@ pub mod repository;
 pub mod seaorm;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
-pub use history::{now, PacketRecord, SeaOrmHistoryRepository, UsageSummary};
+pub use history::{now, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
 pub use seaorm::{connect, connect_and_migrate};
@@ -526,6 +526,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn packet_batch_rolls_back_every_packet_and_usage_on_failure() {
+        use history::{PacketUsageRecord, SeaOrmHistoryRepository};
+        use sea_orm::EntityTrait;
+        use unclip_entity::selection_packets;
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let branches = SeaOrmBranchRepository::new(db.clone());
+        let history = SeaOrmHistoryRepository::new(db.clone());
+
+        branches.add(Branch::new("/a")).await.unwrap();
+        let a = branches.get("/a").await.unwrap().unwrap().id.unwrap();
+        let records = vec![
+            PacketUsageRecord {
+                id: "pkt-good".into(),
+                frame_name: Some("story".into()),
+                seed: Some(1),
+                query_json: None,
+                packet_json: "{}".into(),
+                branch_ids: vec![a],
+            },
+            PacketUsageRecord {
+                id: "pkt-bad".into(),
+                frame_name: Some("story".into()),
+                seed: Some(2),
+                query_json: None,
+                packet_json: "{}".into(),
+                branch_ids: vec![i64::MAX],
+            },
+        ];
+
+        let err = history
+            .save_packets_with_usages(&records, "compose")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("branch id exceeds"), "got: {err}");
+        assert_eq!(history.usage_for(a).await.unwrap().count, 0);
+        assert!(selection_packets::Entity::find_by_id("pkt-good")
+            .one(&db)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(selection_packets::Entity::find_by_id("pkt-bad")
+            .one(&db)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn branch_delete_removes_history_without_foreign_key_cascades() {
+        use history::SeaOrmHistoryRepository;
+        use sea_orm::ConnectionTrait;
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let branches = SeaOrmBranchRepository::new(db.clone());
+        let history = SeaOrmHistoryRepository::new(db.clone());
+
+        branches.add(Branch::new("/used")).await.unwrap();
+        let id = branches.get("/used").await.unwrap().unwrap().id.unwrap();
+        history
+            .record_usage(id, "sample", None, None)
+            .await
+            .unwrap();
+        assert_eq!(history.usage_for(id).await.unwrap().count, 1);
+
+        db.execute_unprepared("PRAGMA foreign_keys = OFF;")
+            .await
+            .unwrap();
+        branches.delete("/used").await.unwrap();
+
+        assert_eq!(history.usage_for(id).await.unwrap().count, 0);
+    }
+
+    #[tokio::test]
     async fn pattern_add_list_roundtrip() {
         use pattern_repository::SeaOrmPatternRepository;
         use unclip_core::{PatternEntry, PatternTarget};
@@ -681,11 +756,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn history_rejects_ids_and_seeds_outside_sqlite_range() {
+    async fn history_rejects_oversized_ids_and_preserves_full_seed_range() {
         use history::{PacketRecord, SeaOrmHistoryRepository};
+        use sea_orm::EntityTrait;
+        use unclip_entity::selection_packets;
 
         let db = connect_and_migrate("sqlite::memory:").await.unwrap();
-        let history = SeaOrmHistoryRepository::new(db);
+        let history = SeaOrmHistoryRepository::new(db.clone());
 
         let err = history
             .record_usage(i64::MAX, "sample", None, None)
@@ -701,8 +778,13 @@ mod tests {
             query_json: None,
             packet_json: "{}",
         };
-        let err = history.save_packet(record).await.unwrap_err().to_string();
-        assert!(err.contains("packet seed exceeds"), "got: {err}");
+        history.save_packet(record).await.unwrap();
+        let stored = selection_packets::Entity::find_by_id("pkt-big-seed")
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.seed, Some(-1));
 
         let record = PacketRecord {
             id: "pkt-big-branch",

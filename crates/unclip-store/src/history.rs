@@ -34,6 +34,25 @@ pub struct PacketRecord<'a> {
     pub packet_json: &'a str,
 }
 
+/// An owned packet and its selected branch ids, used for atomic batch writes.
+pub struct PacketUsageRecord {
+    pub id: String,
+    pub frame_name: Option<String>,
+    pub seed: Option<u64>,
+    pub query_json: Option<String>,
+    pub packet_json: String,
+    pub branch_ids: Vec<i64>,
+}
+
+/// Store all 64 bits of an RNG seed in SQLite's signed 64-bit INTEGER.
+///
+/// This is a bit-preserving representation, not a numeric narrowing: seeds
+/// above `i64::MAX` appear negative in the auxiliary database column, while
+/// the packet JSON retains their ordinary unsigned representation.
+fn encode_seed(seed: u64) -> i64 {
+    i64::from_be_bytes(seed.to_be_bytes())
+}
+
 /// Current UTC time in a fixed-width, `Z`-suffixed RFC3339 form.
 ///
 /// Fixed millisecond precision and a literal `Z` make these timestamps
@@ -150,10 +169,7 @@ impl SeaOrmHistoryRepository {
 
     /// Persist a selection packet.
     pub async fn save_packet(&self, record: PacketRecord<'_>) -> anyhow::Result<()> {
-        let seed = record
-            .seed
-            .map(|s| i64::try_from(s).context("packet seed exceeds SQLite INTEGER range"))
-            .transpose()?;
+        let seed = record.seed.map(encode_seed);
         let am = selection_packets::ActiveModel {
             id: Set(record.id.to_string()),
             frame_name: Set(record.frame_name.map(str::to_string)),
@@ -180,10 +196,7 @@ impl SeaOrmHistoryRepository {
     ) -> anyhow::Result<()> {
         let ts = now();
         let txn = self.db.begin().await?;
-        let seed = record
-            .seed
-            .map(|s| i64::try_from(s).context("packet seed exceeds SQLite INTEGER range"))
-            .transpose()?;
+        let seed = record.seed.map(encode_seed);
 
         let packet = selection_packets::ActiveModel {
             id: Set(record.id.to_string()),
@@ -214,6 +227,55 @@ impl SeaOrmHistoryRepository {
             usage_history::Entity::insert_many(usages)
                 .exec(&txn)
                 .await?;
+        }
+
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Persist a batch of packets and all their usage rows atomically.
+    ///
+    /// A failure in any packet rolls back every packet and usage row in the
+    /// batch, matching the all-or-nothing behavior of branch and frame imports.
+    pub async fn save_packets_with_usages(
+        &self,
+        records: &[PacketUsageRecord],
+        command: &str,
+    ) -> anyhow::Result<()> {
+        let ts = now();
+        let txn = self.db.begin().await?;
+
+        for record in records {
+            let packet = selection_packets::ActiveModel {
+                id: Set(record.id.clone()),
+                frame_name: Set(record.frame_name.clone()),
+                seed: Set(record.seed.map(encode_seed)),
+                created_at: Set(ts.clone()),
+                query_json: Set(record.query_json.clone()),
+                packet_json: Set(record.packet_json.clone()),
+            };
+            selection_packets::Entity::insert(packet).exec(&txn).await?;
+
+            if !record.branch_ids.is_empty() {
+                let usages: Vec<usage_history::ActiveModel> = record
+                    .branch_ids
+                    .iter()
+                    .map(|&id| {
+                        Ok(usage_history::ActiveModel {
+                            id: NotSet,
+                            branch_id: Set(i32::try_from(id)
+                                .context("branch id exceeds SQLite INTEGER range")?),
+                            used_at: Set(ts.clone()),
+                            command: Set(Some(command.to_string())),
+                            context: Set(None),
+                            packet_id: Set(Some(record.id.clone())),
+                        })
+                    })
+                    .collect::<anyhow::Result<_>>()?;
+                usage_history::Entity::insert_many(usages)
+                    .exec(&txn)
+                    .await?;
+            }
         }
 
         txn.commit().await?;
