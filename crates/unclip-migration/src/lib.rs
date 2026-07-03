@@ -7,6 +7,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20260620_000001_create_core_tables;
 mod m20260620_000002_create_pattern_entries;
 mod m20260702_000003_add_frame_slot_position;
+mod m20260703_000004_harden_domain_constraints;
 
 struct Migrator;
 
@@ -17,6 +18,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260620_000001_create_core_tables::Migration),
             Box::new(m20260620_000002_create_pattern_entries::Migration),
             Box::new(m20260702_000003_add_frame_slot_position::Migration),
+            Box::new(m20260703_000004_harden_domain_constraints::Migration),
         ]
     }
 }

@@ -21,7 +21,11 @@ use crate::mapper;
 use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 
 /// Fail broad queries before hydrating an unbounded archive into memory.
-const MAX_FIND_RESULTS: u64 = 100_000;
+///
+/// `find` returns fully assembled branches, including metadata and all child
+/// rows. Ten thousand is intentionally conservative for a CLI process; larger
+/// scans need a future streaming repository API rather than a larger `Vec`.
+const MAX_FIND_RESULTS: u64 = 10_000;
 
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
