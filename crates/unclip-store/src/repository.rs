@@ -8,7 +8,7 @@ use sea_orm::{
     sea_query::{LikeExpr, Query, SelectStatement},
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
-    QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
 };
 use unclip_core::{
     parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
@@ -27,6 +27,26 @@ use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 /// scans need a future streaming repository API rather than a larger `Vec`.
 const MAX_FIND_RESULTS: u64 = 10_000;
 
+/// Page size used by bulk callers that intentionally consume every match.
+const FIND_PAGE_SIZE: u64 = 1_000;
+
+/// Repository conditions callers may need to handle programmatically.
+///
+/// Repository methods retain `anyhow::Result` for database and serialization
+/// context, while these expected conditions can be recovered with
+/// `anyhow::Error::downcast_ref`.
+#[derive(Debug, thiserror::Error)]
+pub enum BranchRepositoryError {
+    #[error("branch not found: {path}")]
+    NotFound { path: String },
+    #[error("branch was modified by another process; reload and retry: {path}")]
+    Conflict { path: String },
+    #[error(
+        "query matched more than {limit} branches; narrow the filters or use paginated access"
+    )]
+    QueryTooBroad { limit: u64 },
+}
+
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -39,7 +59,7 @@ pub struct IndexedValue {
 /// Persistence boundary for branches. Application logic depends on this trait,
 /// not on SeaORM entities directly.
 #[async_trait]
-pub trait BranchRepository {
+pub trait BranchRepository: Sync {
     async fn add(&self, branch: Branch) -> anyhow::Result<()>;
     async fn get(&self, path: &str) -> anyhow::Result<Option<Branch>>;
     async fn update(&self, branch: Branch) -> anyhow::Result<()>;
@@ -50,6 +70,30 @@ pub trait BranchRepository {
     async fn ancestors(&self, path: &str) -> anyhow::Result<Vec<Branch>>;
 
     async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>>;
+    /// Return one stable path-ordered page. `after_path` is an exclusive cursor.
+    async fn find_page(
+        &self,
+        query: &SampleQuery,
+        after_path: Option<&str>,
+        limit: u64,
+    ) -> anyhow::Result<Vec<Branch>>;
+    /// Consume every matching page. Bulk commands use this deliberately; code
+    /// that samples candidates should prefer bounded [`Self::find`].
+    async fn find_all(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>> {
+        let mut all = Vec::new();
+        let mut after_path = None;
+        loop {
+            let page = self
+                .find_page(&query, after_path.as_deref(), FIND_PAGE_SIZE)
+                .await?;
+            let done = page.len() < FIND_PAGE_SIZE as usize;
+            after_path = page.last().map(|branch| branch.path.clone());
+            all.extend(page);
+            if done {
+                return Ok(all);
+            }
+        }
+    }
 
     /// Distinct o2o `name=value` pairs with branch counts, optionally for a
     /// single name. Ordered by name then value.
@@ -257,6 +301,39 @@ impl SeaOrmBranchRepository {
         .await?;
         Ok(rows)
     }
+
+    /// Build the SQL portion shared by bounded and paginated filtered reads.
+    fn filtered_select(query: &SampleQuery) -> Select<branches::Entity> {
+        let mut select = branches::Entity::find();
+        if let Some(under) = &query.under {
+            let under = under.trim_end_matches('/').to_string();
+            select = select.filter(
+                branches::Column::Path
+                    .eq(under.clone())
+                    .or(branches::Column::Path.like(descendant_like(&under))),
+            );
+        }
+        for (name, value) in &query.require_o2o {
+            select = select.filter(branches::Column::Id.in_subquery(o2o_subquery(name, value)));
+        }
+        for (name, value) in &query.avoid_o2o {
+            select = select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, value)));
+        }
+        for (name, values) in &query.require_o2m {
+            // o2m is a set: every requested value is a separate membership test.
+            for value in values {
+                select = select.filter(
+                    branches::Column::Id
+                        .in_subquery(o2m_subquery(name, std::slice::from_ref(value))),
+                );
+            }
+        }
+        for (name, values) in &query.avoid_o2m {
+            select =
+                select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
+        }
+        select
+    }
 }
 
 #[async_trait]
@@ -294,14 +371,16 @@ impl BranchRepository for SeaOrmBranchRepository {
             .revision
             .clone()
             .context("branch has no persistence revision; reload it before updating")?;
-        let existing = self
-            .model_by_path(&branch.path)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("branch not found: {}", branch.path))?;
+        let existing = self.model_by_path(&branch.path).await?.ok_or_else(|| {
+            BranchRepositoryError::NotFound {
+                path: branch.path.clone(),
+            }
+        })?;
         ensure!(
             existing.id == expected_id,
-            "branch was replaced by another process; reload and retry: {}",
-            branch.path
+            BranchRepositoryError::Conflict {
+                path: branch.path.clone()
+            }
         );
         let branch_id = expected_id;
         let created_at = existing.created_at.clone();
@@ -325,8 +404,9 @@ impl BranchRepository for SeaOrmBranchRepository {
             .await?;
         ensure!(
             result.rows_affected == 1,
-            "branch was modified by another process; reload and retry: {}",
-            branch.path
+            BranchRepositoryError::Conflict {
+                path: branch.path.clone()
+            }
         );
 
         Self::replace_children(&txn, branch_id, &branch).await?;
@@ -400,51 +480,43 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>> {
-        // All hard filters (scope + require/avoid o2o/o2m) run in SQL against the
-        // indexed child tables, so only matching rows are hydrated. Soft scoring
-        // is the sampler's job (Phase 7).
-        let mut select = branches::Entity::find();
-        if let Some(under) = &query.under {
-            let under = under.trim_end_matches('/').to_string();
-            select = select.filter(
-                branches::Column::Path
-                    .eq(under.clone())
-                    .or(branches::Column::Path.like(descendant_like(&under))),
-            );
-        }
-        for (name, value) in &query.require_o2o {
-            select = select.filter(branches::Column::Id.in_subquery(o2o_subquery(name, value)));
-        }
-        for (name, value) in &query.avoid_o2o {
-            select = select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, value)));
-        }
-        for (name, values) in &query.require_o2m {
-            // o2m is a set: a required name may list several values, each of
-            // which the branch must carry, so every value is its own membership
-            // filter rather than one `IN (…)` (which would match *any*).
-            for value in values {
-                select = select.filter(
-                    branches::Column::Id
-                        .in_subquery(o2m_subquery(name, std::slice::from_ref(value))),
-                );
-            }
-        }
-        for (name, values) in &query.avoid_o2m {
-            select =
-                select.filter(branches::Column::Id.not_in_subquery(o2m_subquery(name, values)));
-        }
         // Sampling is seeded, so candidate order is part of its reproducibility
         // contract. SQL row order is undefined without ORDER BY and may change
         // with SQLite versions, indexes, or query plans.
-        let models = select
+        let models = Self::filtered_select(&query)
             .order_by_asc(branches::Column::Path)
             .limit(MAX_FIND_RESULTS + 1)
             .all(&self.db)
             .await?;
-        anyhow::ensure!(
-            models.len() as u64 <= MAX_FIND_RESULTS,
-            "query matched more than {MAX_FIND_RESULTS} branches; narrow the filters"
+        if models.len() as u64 > MAX_FIND_RESULTS {
+            return Err(BranchRepositoryError::QueryTooBroad {
+                limit: MAX_FIND_RESULTS,
+            }
+            .into());
+        }
+        self.hydrate_all(models).await
+    }
+
+    async fn find_page(
+        &self,
+        query: &SampleQuery,
+        after_path: Option<&str>,
+        limit: u64,
+    ) -> anyhow::Result<Vec<Branch>> {
+        ensure!(limit > 0, "page limit must be greater than zero");
+        ensure!(
+            limit <= MAX_FIND_RESULTS,
+            "page limit must not exceed {MAX_FIND_RESULTS}"
         );
+        let mut select = Self::filtered_select(query);
+        if let Some(path) = after_path {
+            select = select.filter(branches::Column::Path.gt(path));
+        }
+        let models = select
+            .order_by_asc(branches::Column::Path)
+            .limit(limit)
+            .all(&self.db)
+            .await?;
         self.hydrate_all(models).await
     }
 
@@ -504,10 +576,36 @@ impl BranchRepository for SeaOrmBranchRepository {
 
     async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()> {
         validate_reference(reference)?;
-        let model = self
-            .model_by_path(path)
+        let txn = self.db.begin().await?;
+        let model = branches::Entity::find()
+            .filter(branches::Column::Path.eq(path))
+            .one(&txn)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("branch not found: {path}"))?;
+            .ok_or_else(|| BranchRepositoryError::NotFound {
+                path: path.to_string(),
+            })?;
+
+        // Attaching a reference mutates the branch aggregate. Advance the same
+        // revision token used by full edits so an editor holding an older copy
+        // cannot later replace the child rows and silently erase this reference.
+        let next_revision = next_revision(&model.updated_at)?;
+        let revision = branches::ActiveModel {
+            updated_at: Set(next_revision),
+            ..Default::default()
+        };
+        let result = branches::Entity::update_many()
+            .set(revision)
+            .filter(branches::Column::Id.eq(model.id))
+            .filter(branches::Column::UpdatedAt.eq(&model.updated_at))
+            .exec(&txn)
+            .await?;
+        if result.rows_affected != 1 {
+            return Err(BranchRepositoryError::Conflict {
+                path: path.to_string(),
+            }
+            .into());
+        }
+
         let am = branch_references::ActiveModel {
             id: NotSet,
             branch_id: Set(model.id),
@@ -515,7 +613,8 @@ impl BranchRepository for SeaOrmBranchRepository {
             value: Set(reference.value.clone()),
             note: Set(reference.note.clone()),
         };
-        branch_references::Entity::insert(am).exec(&self.db).await?;
+        branch_references::Entity::insert(am).exec(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 

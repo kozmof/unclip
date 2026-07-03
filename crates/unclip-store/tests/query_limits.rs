@@ -1,6 +1,6 @@
 use sea_orm::ConnectionTrait;
 use unclip_core::SampleQuery;
-use unclip_store::{BranchRepository, SeaOrmBranchRepository};
+use unclip_store::{BranchRepository, BranchRepositoryError, SeaOrmBranchRepository};
 
 #[tokio::test]
 async fn broad_find_fails_before_hydrating_an_excessive_archive() {
@@ -21,13 +21,19 @@ async fn broad_find_fails_before_hydrating_an_excessive_archive() {
     .unwrap();
 
     let repo = SeaOrmBranchRepository::new(db);
-    let error = repo
-        .find(SampleQuery::default())
-        .await
-        .unwrap_err()
-        .to_string();
+    let error = repo.find(SampleQuery::default()).await.unwrap_err();
     assert!(
-        error.contains("more than 10000 branches"),
+        matches!(
+            error.downcast_ref::<BranchRepositoryError>(),
+            Some(BranchRepositoryError::QueryTooBroad { limit: 10_000 })
+        ),
         "unexpected error: {error}"
     );
+
+    // Bulk consumers can deliberately traverse the same result in bounded,
+    // stable pages rather than being blocked by the sampling safety limit.
+    let all = repo.find_all(SampleQuery::default()).await.unwrap();
+    assert_eq!(all.len(), 10_001);
+    assert_eq!(all.first().unwrap().path, "/branch-00001");
+    assert_eq!(all.last().unwrap().path, "/branch-10001");
 }

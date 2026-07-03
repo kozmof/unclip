@@ -116,7 +116,11 @@ pub async fn sample_cmd(
 
     let rendered = unclip_io::render_packet(&packet, format)?;
 
-    // Confirm that the packet reached stdout before recording it as used.
+    // Stdout and SQLite cannot share an atomic commit. Use output-first
+    // semantics deliberately: a broken pipe records no usage, while a later
+    // persistence failure returns a non-zero status even though bytes may have
+    // reached stdout. Callers that need output with no persistence use
+    // `--dry-run`.
     crate::output::write_stdout(&rendered)?;
     if !dry_run {
         let id = random_packet_id();
@@ -241,8 +245,9 @@ pub async fn compose_cmd(
 
     let rendered = unclip_io::render_packets(&packets, input.format)?;
 
-    // Confirm that every rendered packet reached stdout before recording the
-    // batch as used.
+    // Match `sample`'s explicit output-first semantics. This keeps broken pipes
+    // side-effect free; a persistence failure is still reported as a command
+    // failure after output because stdout and SQLite cannot commit atomically.
     crate::output::write_stdout(&rendered)?;
     if !input.dry_run {
         let records = packets
@@ -298,7 +303,7 @@ pub async fn export_cmd(
     format: Format,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
-    let mut matched = branches.find(query).await?;
+    let mut matched = branches.find_all(query).await?;
     matched.sort_by(|a, b| a.path.cmp(&b.path));
     crate::output::write_stdout(&unclip_io::render_branches(&matched, format)?)?;
     Ok(())
@@ -330,7 +335,7 @@ pub async fn stats_cmd(
     filter: FilterInput,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
-    let matched = branches.find(query).await?;
+    let matched = branches.find_all(query).await?;
 
     let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
     let summaries = history.usage_summaries(&ids).await?;
@@ -357,7 +362,7 @@ pub async fn stale_cmd(
     filter: FilterInput,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
-    let matched = branches.find(query).await?;
+    let matched = branches.find_all(query).await?;
 
     let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
     let summaries = history.usage_summaries(&ids).await?;

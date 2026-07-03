@@ -16,7 +16,9 @@ pub use history::{
     now, HistoryRepository, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,
 };
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
-pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
+pub use repository::{
+    BranchRepository, BranchRepositoryError, IndexedValue, SeaOrmBranchRepository,
+};
 pub use seaorm::{
     connect, connect_and_migrate, connect_and_migrate_with_options, connect_with_options,
 };
@@ -106,15 +108,74 @@ mod tests {
         repo.update(first).await.unwrap();
 
         stale.description = Some("stale writer".into());
-        let error = repo.update(stale).await.unwrap_err().to_string();
+        let error = repo.update(stale).await.unwrap_err();
         assert!(
-            error.contains("modified by another process"),
+            matches!(
+                error.downcast_ref::<BranchRepositoryError>(),
+                Some(BranchRepositoryError::Conflict { path }) if path == "/concurrent"
+            ),
             "got: {error}"
         );
 
         let stored = repo.get("/concurrent").await.unwrap().unwrap();
         assert_eq!(stored.title.as_deref(), Some("first writer"));
         assert!(stored.description.is_none());
+    }
+
+    #[tokio::test]
+    async fn reference_attachment_invalidates_stale_edits_across_connections() {
+        let path = std::env::temp_dir().join(format!(
+            "unclip-reference-concurrency-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let options = || {
+            let mut options = sea_orm::ConnectOptions::new("sqlite://unclip-placeholder?mode=rwc");
+            let filename = path.clone();
+            options.map_sqlx_sqlite_opts(move |sqlite| sqlite.filename(&filename));
+            options
+        };
+
+        let db_a = connect_and_migrate_with_options(options()).await.unwrap();
+        let db_b = connect_and_migrate_with_options(options()).await.unwrap();
+        let repo_a = SeaOrmBranchRepository::new(db_a);
+        let repo_b = SeaOrmBranchRepository::new(db_b);
+
+        repo_a.add(Branch::new("/shared")).await.unwrap();
+        let mut stale = repo_a.get("/shared").await.unwrap().unwrap();
+        let old_revision = stale.revision.clone();
+
+        repo_b
+            .attach_reference(
+                "/shared",
+                &Reference {
+                    kind: "url".into(),
+                    value: "https://example.test/reference".into(),
+                    note: None,
+                },
+            )
+            .await
+            .unwrap();
+        let attached = repo_b.get("/shared").await.unwrap().unwrap();
+        assert_ne!(attached.revision, old_revision);
+
+        stale.description = Some("stale replacement".into());
+        let error = repo_a.update(stale).await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<BranchRepositoryError>(),
+            Some(BranchRepositoryError::Conflict { path }) if path == "/shared"
+        ));
+
+        let stored = repo_a.get("/shared").await.unwrap().unwrap();
+        assert!(stored.description.is_none());
+        assert_eq!(stored.references, attached.references);
+
+        drop(repo_a);
+        drop(repo_b);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]

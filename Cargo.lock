@@ -2575,6 +2575,7 @@ dependencies = [
  "chrono",
  "sea-orm",
  "serde_json",
+ "thiserror",
  "tokio",
  "unclip-core",
  "unclip-entity",

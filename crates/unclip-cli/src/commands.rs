@@ -260,7 +260,7 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
         q.avoid_o2m.entry(name).or_default().push(value);
     }
 
-    let mut found = repo.find(q).await?;
+    let mut found = repo.find_all(q).await?;
     found.sort_by(|a, b| a.path.cmp(&b.path));
     if found.is_empty() {
         crate::output::errln!("(no matching branches)");
@@ -297,10 +297,7 @@ pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyh
 }
 
 /// `unclip import <file>` — bulk import branches (upsert by path).
-pub async fn import(
-    repo: &(impl BranchRepository + Sync),
-    branches: Vec<Branch>,
-) -> anyhow::Result<()> {
+pub async fn import(repo: &impl BranchRepository, branches: Vec<Branch>) -> anyhow::Result<()> {
     if branches.is_empty() {
         crate::output::errln!("(no branches in file)");
         return Ok(());
