@@ -13,6 +13,7 @@ use unclip_core::{validate_path, Frame, Slot};
 use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, frames};
 
 use crate::frame_mapper;
+use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 
 /// Summary of a stored frame, used for `unclip frames`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,14 +57,16 @@ impl SeaOrmFrameRepository {
             .collect();
 
         if !slot_ids.is_empty() {
-            frame_slot_o2o_values::Entity::delete_many()
-                .filter(frame_slot_o2o_values::Column::SlotId.is_in(slot_ids.clone()))
-                .exec(txn)
-                .await?;
-            frame_slot_o2m_values::Entity::delete_many()
-                .filter(frame_slot_o2m_values::Column::SlotId.is_in(slot_ids))
-                .exec(txn)
-                .await?;
+            for chunk in slot_ids.chunks(ID_CHUNK) {
+                frame_slot_o2o_values::Entity::delete_many()
+                    .filter(frame_slot_o2o_values::Column::SlotId.is_in(chunk.iter().copied()))
+                    .exec(txn)
+                    .await?;
+                frame_slot_o2m_values::Entity::delete_many()
+                    .filter(frame_slot_o2m_values::Column::SlotId.is_in(chunk.iter().copied()))
+                    .exec(txn)
+                    .await?;
+            }
         }
         frame_slots::Entity::delete_many()
             .filter(frame_slots::Column::FrameId.eq(frame_id))
@@ -135,8 +138,8 @@ impl SeaOrmFrameRepository {
                 value: Set(value),
             })
             .collect();
-        if !o2o.is_empty() {
-            frame_slot_o2o_values::Entity::insert_many(o2o)
+        for chunk in o2o.chunks(INSERT_ROW_CHUNK) {
+            frame_slot_o2o_values::Entity::insert_many(chunk.iter().cloned())
                 .exec(txn)
                 .await?;
         }
@@ -150,8 +153,8 @@ impl SeaOrmFrameRepository {
                 value: Set(value),
             })
             .collect();
-        if !o2m.is_empty() {
-            frame_slot_o2m_values::Entity::insert_many(o2m)
+        for chunk in o2m.chunks(INSERT_ROW_CHUNK) {
+            frame_slot_o2m_values::Entity::insert_many(chunk.iter().cloned())
                 .exec(txn)
                 .await?;
         }
@@ -167,14 +170,22 @@ impl SeaOrmFrameRepository {
         }
         let ids: Vec<i32> = models.iter().map(|m| m.id).collect();
 
-        let o2o = frame_slot_o2o_values::Entity::find()
-            .filter(frame_slot_o2o_values::Column::SlotId.is_in(ids.clone()))
-            .all(&self.db)
-            .await?;
-        let o2m = frame_slot_o2m_values::Entity::find()
-            .filter(frame_slot_o2m_values::Column::SlotId.is_in(ids))
-            .all(&self.db)
-            .await?;
+        let mut o2o = Vec::new();
+        let mut o2m = Vec::new();
+        for chunk in ids.chunks(ID_CHUNK) {
+            o2o.extend(
+                frame_slot_o2o_values::Entity::find()
+                    .filter(frame_slot_o2o_values::Column::SlotId.is_in(chunk.iter().copied()))
+                    .all(&self.db)
+                    .await?,
+            );
+            o2m.extend(
+                frame_slot_o2m_values::Entity::find()
+                    .filter(frame_slot_o2m_values::Column::SlotId.is_in(chunk.iter().copied()))
+                    .all(&self.db)
+                    .await?,
+            );
+        }
 
         let mut o2o_by_id: HashMap<i32, Vec<frame_slot_o2o_values::Model>> = HashMap::new();
         for row in o2o {

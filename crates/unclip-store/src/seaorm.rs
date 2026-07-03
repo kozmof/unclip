@@ -1,7 +1,6 @@
 //! Database connection helpers.
 
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
-use unclip_migration::{Migrator, MigratorTrait};
 
 /// Open a connection to the given SQLite URL and enable foreign keys.
 ///
@@ -27,6 +26,6 @@ pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
 /// Open a connection and run all pending migrations.
 pub async fn connect_and_migrate(url: &str) -> anyhow::Result<DatabaseConnection> {
     let db = connect(url).await?;
-    Migrator::up(&db, None).await?;
+    unclip_migration::up(&db, None).await?;
     Ok(db)
 }

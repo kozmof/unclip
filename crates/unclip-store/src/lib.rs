@@ -9,6 +9,7 @@ pub mod mapper;
 pub mod pattern_repository;
 pub mod repository;
 pub mod seaorm;
+mod sqlite_limits;
 
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
@@ -134,6 +135,29 @@ mod tests {
                 && branch.o2m.contains_key("tag")
                 && branch.references.len() == 1
         }));
+    }
+
+    #[tokio::test]
+    async fn persists_large_child_sets_in_sqlite_safe_batches() {
+        let repo = repo().await;
+        let mut branch = Branch::new("/many-children");
+        for n in 0..400 {
+            branch.o2o.insert(format!("o2o-{n}"), format!("value-{n}"));
+            branch
+                .o2m
+                .insert(format!("o2m-{n}"), vec![format!("value-{n}")]);
+            branch.references.push(Reference {
+                kind: "url".into(),
+                value: format!("https://example.test/{n}"),
+                note: Some(format!("reference {n}")),
+            });
+        }
+
+        repo.add(branch).await.unwrap();
+        let loaded = repo.get("/many-children").await.unwrap().unwrap();
+        assert_eq!(loaded.o2o.len(), 400);
+        assert_eq!(loaded.o2m.len(), 400);
+        assert_eq!(loaded.references.len(), 400);
     }
 
     #[tokio::test]
@@ -400,6 +424,44 @@ mod tests {
 
         frames.delete_frame("story").await.unwrap();
         assert!(frames.get_frame("story").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn large_frames_load_replace_and_delete_across_parameter_chunks() {
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let frames = SeaOrmFrameRepository::new(db);
+        let slots = (0..1001)
+            .map(|n| Slot {
+                name: format!("slot-{n:04}"),
+                under: None,
+                require_o2o: [("axis".to_string(), format!("axis-{n}"))]
+                    .into_iter()
+                    .collect(),
+                default_o2o: Default::default(),
+                avoid_o2o: Default::default(),
+                require_o2m: [("tag".to_string(), vec![format!("tag-{n}")])]
+                    .into_iter()
+                    .collect(),
+                prefer_o2m: Default::default(),
+                avoid_o2m: Default::default(),
+                count: 1,
+                avoid_recent: false,
+                weighted: false,
+                metadata_suggest: Vec::new(),
+            })
+            .collect();
+        let frame = Frame {
+            name: "large".into(),
+            description: None,
+            slots,
+        };
+
+        frames.save_frame(frame.clone()).await.unwrap();
+        assert_eq!(frames.get_frame("large").await.unwrap().unwrap(), frame);
+
+        frames.save_frame(frame).await.unwrap();
+        frames.delete_frame("large").await.unwrap();
+        assert!(frames.get_frame("large").await.unwrap().is_none());
     }
 
     #[tokio::test]

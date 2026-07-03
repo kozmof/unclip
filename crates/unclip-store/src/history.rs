@@ -11,6 +11,8 @@ use sea_orm::{
 };
 use unclip_entity::{selection_packets, usage_history};
 
+use crate::sqlite_limits::INSERT_ROW_CHUNK;
+
 /// Aggregate usage info for a single branch.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UsageSummary {
@@ -247,9 +249,11 @@ impl SeaOrmHistoryRepository {
                     })
                 })
                 .collect::<anyhow::Result<_>>()?;
-            usage_history::Entity::insert_many(usages)
-                .exec(&txn)
-                .await?;
+            for chunk in usages.chunks(INSERT_ROW_CHUNK) {
+                usage_history::Entity::insert_many(chunk.iter().cloned())
+                    .exec(&txn)
+                    .await?;
+            }
         }
 
         txn.commit().await?;
@@ -295,9 +299,11 @@ impl SeaOrmHistoryRepository {
                         })
                     })
                     .collect::<anyhow::Result<_>>()?;
-                usage_history::Entity::insert_many(usages)
-                    .exec(&txn)
-                    .await?;
+                for chunk in usages.chunks(INSERT_ROW_CHUNK) {
+                    usage_history::Entity::insert_many(chunk.iter().cloned())
+                        .exec(&txn)
+                        .await?;
+                }
             }
         }
 

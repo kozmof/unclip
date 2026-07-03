@@ -8,7 +8,7 @@ mod m20260620_000001_create_core_tables;
 mod m20260620_000002_create_pattern_entries;
 mod m20260702_000003_add_frame_slot_position;
 
-pub struct Migrator;
+struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -21,6 +21,34 @@ impl MigratorTrait for Migrator {
     }
 }
 
+/// Apply pending migrations atomically on SQLite.
+///
+/// SeaORM intentionally does not create an outer transaction for SQLite
+/// migrations. Running the migrator on a transaction here keeps every schema
+/// change and the corresponding migration-ledger row in one atomic unit.
+pub async fn up(
+    db: &sea_orm::DatabaseConnection,
+    steps: Option<u32>,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::TransactionTrait;
+
+    let txn = db.begin().await?;
+    Migrator::up(&txn, steps).await?;
+    txn.commit().await
+}
+
+/// Roll back migrations atomically on SQLite.
+pub async fn down(
+    db: &sea_orm::DatabaseConnection,
+    steps: Option<u32>,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::TransactionTrait;
+
+    let txn = db.begin().await?;
+    Migrator::down(&txn, steps).await?;
+    txn.commit().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -29,7 +57,7 @@ mod tests {
     #[tokio::test]
     async fn migration_creates_all_core_tables() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        Migrator::up(&db, None).await.unwrap();
+        up(&db, None).await.unwrap();
 
         let rows = db
             .query_all(Statement::from_string(
@@ -63,7 +91,7 @@ mod tests {
         }
 
         // Down migration cleanly removes the core tables.
-        Migrator::down(&db, None).await.unwrap();
+        down(&db, None).await.unwrap();
         let rows = db
             .query_all(Statement::from_string(
                 DbBackend::Sqlite,
@@ -77,7 +105,7 @@ mod tests {
     #[tokio::test]
     async fn frame_slot_position_migration_backfills_in_insert_order() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        Migrator::up(&db, Some(2)).await.unwrap();
+        up(&db, Some(2)).await.unwrap();
         db.execute_unprepared(
             "INSERT INTO frames (id, name) VALUES (1, 'f'); \
              INSERT INTO frame_slots (id, frame_id, name) VALUES \
@@ -86,7 +114,7 @@ mod tests {
         .await
         .unwrap();
 
-        Migrator::up(&db, None).await.unwrap();
+        up(&db, None).await.unwrap();
         let rows = db
             .query_all(Statement::from_string(
                 DbBackend::Sqlite,
@@ -101,9 +129,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_migration_rolls_back_and_can_be_retried() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, Some(2)).await.unwrap();
+
+        // Force the final statement in migration 3 to fail after its ALTER and
+        // UPDATE statements have run. SQLite index names are database-global.
+        db.execute_unprepared(
+            "CREATE TABLE migration_collision (value INTEGER); \
+             CREATE INDEX idx_frame_slots_frame_position \
+             ON migration_collision(value);",
+        )
+        .await
+        .unwrap();
+
+        assert!(up(&db, None).await.is_err());
+
+        let columns = db
+            .query_all(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA table_info(frame_slots)",
+            ))
+            .await
+            .unwrap();
+        assert!(
+            columns
+                .iter()
+                .all(|row| row.try_get::<String>("", "name").unwrap() != "position"),
+            "the earlier ALTER TABLE must roll back with the failed migration"
+        );
+
+        db.execute_unprepared("DROP INDEX idx_frame_slots_frame_position")
+            .await
+            .unwrap();
+        up(&db, None).await.unwrap();
+
+        let columns = db
+            .query_all(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA table_info(frame_slots)",
+            ))
+            .await
+            .unwrap();
+        assert!(columns
+            .iter()
+            .any(|row| row.try_get::<String>("", "name").unwrap() == "position"));
+    }
+
+    #[tokio::test]
     async fn frame_slot_constraints_reject_invalid_rows() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        Migrator::up(&db, None).await.unwrap();
+        up(&db, None).await.unwrap();
 
         let exec = |sql: &'static str| db.execute(Statement::from_string(DbBackend::Sqlite, sql));
 

@@ -18,13 +18,8 @@ use unclip_entity::{
 };
 
 use crate::mapper;
+use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 
-/// Keep bound-parameter lists below SQLite's historical 999-variable limit.
-///
-/// Queries that can touch the whole archive must be chunked: current SQLite
-/// builds often allow more variables, but the limit is a build-time setting and
-/// older/system SQLite libraries may retain the lower value.
-const SQLITE_ID_CHUNK: usize = 500;
 /// Fail broad queries before hydrating an unbounded archive into memory.
 const MAX_FIND_RESULTS: u64 = 100_000;
 
@@ -98,20 +93,20 @@ impl SeaOrmBranchRepository {
         branch: &Branch,
     ) -> anyhow::Result<()> {
         let o2o = mapper::o2o_active_models(branch_id, branch);
-        if !o2o.is_empty() {
-            branch_o2o_values::Entity::insert_many(o2o)
+        for chunk in o2o.chunks(INSERT_ROW_CHUNK) {
+            branch_o2o_values::Entity::insert_many(chunk.iter().cloned())
                 .exec(txn)
                 .await?;
         }
         let o2m = mapper::o2m_active_models(branch_id, branch);
-        if !o2m.is_empty() {
-            branch_o2m_values::Entity::insert_many(o2m)
+        for chunk in o2m.chunks(INSERT_ROW_CHUNK) {
+            branch_o2m_values::Entity::insert_many(chunk.iter().cloned())
                 .exec(txn)
                 .await?;
         }
         let refs = mapper::reference_active_models(branch_id, branch);
-        if !refs.is_empty() {
-            branch_references::Entity::insert_many(refs)
+        for chunk in refs.chunks(INSERT_ROW_CHUNK) {
+            branch_references::Entity::insert_many(chunk.iter().cloned())
                 .exec(txn)
                 .await?;
         }
@@ -162,7 +157,7 @@ impl SeaOrmBranchRepository {
         let mut o2o = Vec::new();
         let mut o2m = Vec::new();
         let mut refs = Vec::new();
-        for chunk in ids.chunks(SQLITE_ID_CHUNK) {
+        for chunk in ids.chunks(ID_CHUNK) {
             o2o.extend(
                 branch_o2o_values::Entity::find()
                     .filter(branch_o2o_values::Column::BranchId.is_in(chunk.iter().copied()))
@@ -222,7 +217,7 @@ impl SeaOrmBranchRepository {
             return Ok(Vec::new());
         }
         let mut models = Vec::with_capacity(ids.len());
-        for chunk in ids.chunks(SQLITE_ID_CHUNK) {
+        for chunk in ids.chunks(ID_CHUNK) {
             models.extend(
                 branches::Entity::find()
                     .filter(branches::Column::Id.is_in(chunk.iter().copied()))
