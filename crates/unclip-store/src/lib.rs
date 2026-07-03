@@ -646,6 +646,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_many_rejects_duplicate_paths_without_writing() {
+        let repo = repo().await;
+        let mut first = Branch::new("/duplicate");
+        first.title = Some("first".into());
+        let mut second = Branch::new("/duplicate");
+        second.title = Some("second".into());
+
+        let error = repo
+            .upsert_many(vec![first, second])
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("duplicate branch path `/duplicate`"));
+        assert!(repo.get("/duplicate").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn attach_reference_appends() {
         let repo = repo().await;
         repo.add(Branch::new("/ueno/cafe")).await.unwrap();

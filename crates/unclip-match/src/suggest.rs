@@ -33,7 +33,7 @@ pub fn suggest_o2m(
     existing: &BTreeMap<String, Vec<String>>,
 ) -> Vec<(String, String)> {
     let mut found: BTreeSet<(String, String)> = BTreeSet::new();
-    for hit in matcher.scan(text) {
+    matcher.for_each_hit(text, |hit| {
         if let PatternTarget::O2m { name, value } = hit.target {
             let already = existing
                 .get(&name)
@@ -42,7 +42,7 @@ pub fn suggest_o2m(
                 found.insert((name, value));
             }
         }
-    }
+    });
     found.into_iter().collect()
 }
 

@@ -1,6 +1,6 @@
 //! Repository trait and SeaORM-backed implementation for branches.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{ensure, Context};
 use async_trait::async_trait;
@@ -27,6 +27,13 @@ use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 /// scans need a future streaming repository API rather than a larger `Vec`.
 const MAX_FIND_RESULTS: u64 = 10_000;
 
+/// Hard ceiling for commands that deliberately traverse a complete result set.
+///
+/// Pagination keeps individual SQL queries bounded, but returning a `Vec`
+/// still retains the entire hydrated archive. Callers that need to exceed this
+/// ceiling require a streaming API.
+const MAX_BULK_RESULTS: usize = 100_000;
+
 /// Page size used by bulk callers that intentionally consume every match.
 const FIND_PAGE_SIZE: u64 = 1_000;
 
@@ -45,6 +52,10 @@ pub enum BranchRepositoryError {
         "query matched more than {limit} branches; narrow the filters or use paginated access"
     )]
     QueryTooBroad { limit: u64 },
+    #[error(
+        "bulk query matched more than {limit} branches; narrow the filters or use a streaming workflow"
+    )]
+    BulkQueryTooBroad { limit: usize },
 }
 
 /// A distinct indexed value with how many branches carry it. Used to build
@@ -88,6 +99,12 @@ pub trait BranchRepository: Sync {
                 .await?;
             let done = page.len() < FIND_PAGE_SIZE as usize;
             after_path = page.last().map(|branch| branch.path.clone());
+            if all.len() > MAX_BULK_RESULTS.saturating_sub(page.len()) {
+                return Err(BranchRepositoryError::BulkQueryTooBroad {
+                    limit: MAX_BULK_RESULTS,
+                }
+                .into());
+            }
             all.extend(page);
             if done {
                 return Ok(all);
@@ -621,12 +638,24 @@ impl BranchRepository for SeaOrmBranchRepository {
     /// Atomic batch upsert: the whole set is applied in one transaction, so a
     /// failure on any branch rolls the entire import back.
     async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)> {
+        // Reject an ambiguous import before writing anything. Otherwise two
+        // records for the same path would silently make the last one win and
+        // misleadingly report one addition plus one update.
+        let mut paths = HashSet::with_capacity(branches.len());
+        for branch in &branches {
+            validate_branch_record(branch)?;
+            ensure!(
+                paths.insert(&branch.path),
+                "duplicate branch path `{}` in import",
+                branch.path
+            );
+        }
+
         let now = crate::history::now();
         let txn = self.db.begin().await?;
         let (mut added, mut updated) = (0usize, 0usize);
 
         for mut branch in branches {
-            validate_branch_record(&branch)?;
             let existing = branches::Entity::find()
                 .filter(branches::Column::Path.eq(&branch.path))
                 .one(&txn)

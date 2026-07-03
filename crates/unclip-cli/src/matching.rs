@@ -54,11 +54,11 @@ pub async fn scan_cmd(
 
     // Aggregate identical (pattern → target) hits with a count.
     let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
-    for hit in matcher.scan(&text) {
+    matcher.for_each_hit(&text, |hit| {
         *counts
             .entry((hit.pattern, hit.target.describe()))
             .or_default() += 1;
-    }
+    });
 
     if counts.is_empty() {
         crate::output::errln!("(no pattern hits)");

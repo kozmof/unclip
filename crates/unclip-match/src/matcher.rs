@@ -3,13 +3,19 @@
 //! The matcher is built from database-derived patterns ("Build
 //! daachorse automata from database state. Do not make daachorse the
 //! database."). Matching is case-insensitive (patterns and haystack are
-//! lowercased), so reported offsets are into the lowercased text.
+//! lowercased), so reported offsets always refer to the original text.
 
 use std::collections::HashMap;
 
 use daachorse::DoubleArrayAhoCorasick;
 
 use crate::dictionary::{PatternEntry, PatternHit};
+
+/// Upper bound for entries compiled into one in-memory automaton.
+///
+/// Matcher inputs come from several database catalogs and may contain duplicate
+/// pattern strings, so this limit is applied before grouping.
+const MAX_PATTERN_ENTRIES: usize = 100_000;
 
 /// A compiled multi-pattern matcher.
 pub struct Matcher {
@@ -24,6 +30,10 @@ impl Matcher {
     /// entries that share a pattern string are grouped (daachorse rejects
     /// duplicate patterns).
     pub fn build(entries: Vec<PatternEntry>) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            entries.len() <= MAX_PATTERN_ENTRIES,
+            "matcher contains more than {MAX_PATTERN_ENTRIES} pattern entries; narrow the archive before scanning"
+        );
         let mut order: Vec<String> = Vec::new();
         let mut groups: Vec<Vec<PatternEntry>> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
@@ -64,28 +74,67 @@ impl Matcher {
     /// string edge). This stops short values from matching inside larger words
     /// (e.g. `red` inside `predator`, `tense` inside `intense`) while still
     /// allowing multi-word patterns and values separated by punctuation.
+    /// Returned byte offsets are valid boundaries in the original input, even
+    /// when Unicode lowercasing changes the haystack byte length.
     pub fn scan(&self, text: &str) -> Vec<PatternHit> {
-        let Some(automaton) = &self.automaton else {
-            return Vec::new();
-        };
-        let haystack = text.to_lowercase();
         let mut hits = Vec::new();
+        self.for_each_hit(text, |hit| hits.push(hit));
+        hits
+    }
+
+    /// Visit hits as they are found without retaining all of them in memory.
+    ///
+    /// Production consumers that aggregate results should prefer this method:
+    /// repeated or overlapping patterns can otherwise make the number of hits
+    /// much larger than the scanned text.
+    pub fn for_each_hit(&self, text: &str, mut visit: impl FnMut(PatternHit)) {
+        let Some(automaton) = &self.automaton else {
+            return;
+        };
+        let (haystack, original_boundaries) = lowercase_with_original_boundaries(text);
         for m in automaton.find_overlapping_iter(&haystack) {
             if !at_word_boundary(&haystack, m.start(), m.end()) {
                 continue;
             }
+            // A lowercase expansion can create internal byte boundaries that
+            // do not exist in the original character. Ignore such partial
+            // matches rather than returning offsets that cannot slice `text`.
+            let (Some(start), Some(end)) =
+                (original_boundaries[m.start()], original_boundaries[m.end()])
+            else {
+                continue;
+            };
             let group = &self.groups[m.value() as usize];
             for entry in group {
-                hits.push(PatternHit {
+                visit(PatternHit {
                     pattern: entry.pattern.clone(),
-                    start: m.start(),
-                    end: m.end(),
+                    start,
+                    end,
                     target: entry.target.clone(),
                 });
             }
         }
-        hits
     }
+}
+
+/// Lowercase text while mapping valid lowercase byte boundaries back to byte
+/// boundaries in the original string.
+fn lowercase_with_original_boundaries(text: &str) -> (String, Vec<Option<usize>>) {
+    let mut lowered = String::with_capacity(text.len());
+    let mut boundaries = vec![Some(0)];
+
+    for (original_start, ch) in text.char_indices() {
+        let original_end = original_start + ch.len_utf8();
+        let lowered_start = lowered.len();
+        lowered.extend(ch.to_lowercase());
+        let lowered_end = lowered.len();
+
+        boundaries.resize(lowered_end + 1, None);
+        boundaries[lowered_start] = Some(original_start);
+        boundaries[lowered_end] = Some(original_end);
+    }
+
+    (lowered, boundaries)
 }
 
 /// Whether the `[start, end)` byte range in `haystack` is delimited by word
@@ -188,5 +237,44 @@ mod tests {
         let m = Matcher::build(entries).unwrap();
         let hits = m.scan("the locker");
         assert_eq!(hits.len(), 2);
+    }
+
+    #[test]
+    fn offsets_slice_the_original_text_after_unicode_expansion() {
+        let entries = vec![PatternEntry::new(
+            "red",
+            PatternTarget::O2m {
+                name: "color".into(),
+                value: "red".into(),
+            },
+        )];
+        let matcher = Matcher::build(entries).unwrap();
+        // U+0130 lowercases to two scalar values, changing the byte layout
+        // before the match from two bytes to three.
+        let text = "İ RED";
+        let hit = &matcher.scan(text)[0];
+
+        assert_eq!(&text[hit.start..hit.end], "RED");
+        assert_eq!((hit.start, hit.end), (3, 6));
+    }
+
+    #[test]
+    fn partial_matches_inside_a_lowercase_expansion_are_ignored() {
+        let entry = PatternEntry::new("i", PatternTarget::Branch { path: "/i".into() });
+        let matcher = Matcher::build(vec![entry]).unwrap();
+
+        assert!(matcher.scan("İ").is_empty());
+    }
+
+    #[test]
+    fn rejects_an_unbounded_pattern_dictionary() {
+        let entry = PatternEntry::new("x", PatternTarget::Branch { path: "/x".into() });
+        let entries = vec![entry; MAX_PATTERN_ENTRIES + 1];
+        let error = Matcher::build(entries)
+            .err()
+            .expect("limit error")
+            .to_string();
+
+        assert!(error.contains("more than 100000 pattern entries"));
     }
 }

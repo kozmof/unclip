@@ -241,6 +241,9 @@ pub struct QueryInput {
 }
 
 pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::Result<()> {
+    if let Some(under) = &input.under {
+        validate_path(under).with_context(|| format!("invalid --under scope `{under}`"))?;
+    }
     // A frame slot supplies the base query; explicit flags merge on top.
     let mut q = match &input.frame_slot {
         Some(slot) => SampleQuery::from_slot(slot, input.under.clone()),

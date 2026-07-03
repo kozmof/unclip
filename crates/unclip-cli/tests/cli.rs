@@ -67,6 +67,22 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+#[test]
+fn query_rejects_an_invalid_scope() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+
+    let out = unclip(&path, &["query", "--under", "relative"]);
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("invalid --under scope `relative`"),
+        "unexpected stderr: {}",
+        stderr(&out)
+    );
+}
+
 /// `init` then a basic add/show round-trip through the real binary.
 #[test]
 fn init_add_show_roundtrip() {
