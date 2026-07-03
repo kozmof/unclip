@@ -19,7 +19,7 @@ pub use branch::{is_under, parent_of, Branch};
 pub use error::{CoreError, Result};
 pub use frame::{Frame, Slot};
 pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
-pub use pattern::{PatternEntry, PatternTarget};
+pub use pattern::{validate_pattern_entry, PatternEntry, PatternTarget};
 pub use query::{SampleParams, SampleQuery};
 pub use reference::Reference;
 pub use validate::{

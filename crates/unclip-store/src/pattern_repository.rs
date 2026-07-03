@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
 };
-use unclip_core::{PatternEntry, PatternTarget};
+use unclip_core::{validate_pattern_entry, PatternEntry, PatternTarget};
 use unclip_entity::pattern_entries;
 
 /// A stored pattern entry with its id and enabled flag.
@@ -28,6 +28,7 @@ impl SeaOrmPatternRepository {
 
     /// Add a pattern entry; returns its new id.
     pub async fn add(&self, entry: &PatternEntry) -> anyhow::Result<i64> {
+        validate_pattern_entry(entry)?;
         let (kind, name, value) = target_columns(&entry.target);
         let am = pattern_entries::ActiveModel {
             id: NotSet,

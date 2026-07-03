@@ -130,6 +130,7 @@ pub fn assemble_branch(
 
     Ok(Branch {
         id: Some(model.id as i64),
+        revision: Some(model.updated_at),
         path: model.path,
         title: model.title,
         description: model.description,

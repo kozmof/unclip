@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context};
+use unclip_core::validate_pattern_entry;
 use unclip_match::{branch_text, suggest_o2m, Matcher, PatternEntry, PatternTarget};
 use unclip_store::{BranchRepository, SeaOrmPatternRepository};
 
@@ -134,6 +135,7 @@ pub async fn pattern_add_cmd(
     };
 
     let entry = PatternEntry::new(input.pattern.clone(), target);
+    validate_pattern_entry(&entry)?;
     let id = patterns.add(&entry).await?;
     crate::output::outln!(
         "added pattern #{id}: {} → {}",

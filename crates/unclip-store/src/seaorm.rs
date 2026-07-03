@@ -15,7 +15,14 @@ use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 /// separate process) wait briefly for a lock instead of failing immediately
 /// with "database is locked".
 pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
-    let mut opt = ConnectOptions::new(url.to_owned());
+    connect_with_options(ConnectOptions::new(url.to_owned())).await
+}
+
+/// Open a connection from pre-built options.
+///
+/// This is used by path-based callers that need to pass a native filesystem
+/// `Path` to SQLx instead of round-tripping it through a UTF-8 connection URL.
+pub async fn connect_with_options(mut opt: ConnectOptions) -> anyhow::Result<DatabaseConnection> {
     opt.max_connections(1).min_connections(1);
     let db = Database::connect(opt).await?;
     db.execute_unprepared("PRAGMA foreign_keys = ON;").await?;
@@ -25,7 +32,14 @@ pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
 
 /// Open a connection and run all pending migrations.
 pub async fn connect_and_migrate(url: &str) -> anyhow::Result<DatabaseConnection> {
-    let db = connect(url).await?;
+    connect_and_migrate_with_options(ConnectOptions::new(url.to_owned())).await
+}
+
+/// Open configured connection options and run all pending migrations.
+pub async fn connect_and_migrate_with_options(
+    opt: ConnectOptions,
+) -> anyhow::Result<DatabaseConnection> {
+    let db = connect_with_options(opt).await?;
     unclip_migration::up(&db, None).await?;
     Ok(db)
 }

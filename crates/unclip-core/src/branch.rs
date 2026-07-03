@@ -15,6 +15,11 @@ pub struct Branch {
     #[serde(skip)]
     pub id: Option<i64>,
 
+    /// Opaque persistence revision used for optimistic concurrency control.
+    /// Never part of the serialized representation.
+    #[serde(skip)]
+    pub revision: Option<String>,
+
     pub path: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,6 +56,7 @@ impl Branch {
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             id: None,
+            revision: None,
             path: path.into(),
             title: None,
             description: None,

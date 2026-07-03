@@ -7,6 +7,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{CoreError, Result};
+use crate::validate::validate_path;
+
 /// Where a matched text pattern maps to in the structured model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -29,6 +32,38 @@ pub enum PatternTarget {
     CollapsePattern {
         path: String,
     },
+}
+
+/// Validate a pattern dictionary entry before persistence or matching.
+pub fn validate_pattern_entry(entry: &PatternEntry) -> Result<()> {
+    let invalid = |reason: &str| CoreError::InvalidPattern(reason.to_string());
+
+    if entry.pattern.trim().is_empty() {
+        return Err(invalid("pattern must not be empty or whitespace-only"));
+    }
+    if entry.pattern.chars().any(char::is_control) {
+        return Err(invalid("pattern must not contain control characters"));
+    }
+
+    match &entry.target {
+        PatternTarget::O2m { name, value } | PatternTarget::O2o { name, value } => {
+            if name.is_empty() || name.chars().any(char::is_control) {
+                return Err(invalid(
+                    "target name must not be empty or contain control characters",
+                ));
+            }
+            if value.is_empty() || value.chars().any(char::is_control) {
+                return Err(invalid(
+                    "target value must not be empty or contain control characters",
+                ));
+            }
+        }
+        PatternTarget::Branch { path } | PatternTarget::CollapsePattern { path } => {
+            validate_path(path)
+                .map_err(|_| invalid("branch target must be a valid absolute branch path"))?;
+        }
+    }
+    Ok(())
 }
 
 impl PatternTarget {

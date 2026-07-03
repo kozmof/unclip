@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use async_trait::async_trait;
 use sea_orm::{
     sea_query::{LikeExpr, Query, SelectStatement},
@@ -280,21 +280,50 @@ impl BranchRepository for SeaOrmBranchRepository {
 
     async fn update(&self, branch: Branch) -> anyhow::Result<()> {
         validate_branch_record(&branch)?;
+        let expected_id = i32::try_from(
+            branch
+                .id
+                .context("branch has no persistence id; reload it before updating")?,
+        )
+        .context("branch id exceeds SQLite INTEGER range")?;
+        let expected_revision = branch
+            .revision
+            .clone()
+            .context("branch has no persistence revision; reload it before updating")?;
         let existing = self
             .model_by_path(&branch.path)
             .await?
             .ok_or_else(|| anyhow::anyhow!("branch not found: {}", branch.path))?;
-        let branch_id = existing.id;
+        ensure!(
+            existing.id == expected_id,
+            "branch was replaced by another process; reload and retry: {}",
+            branch.path
+        );
+        let branch_id = expected_id;
         let created_at = existing.created_at.clone();
-        let now = crate::history::now();
+        let next_revision = next_revision(&expected_revision)?;
 
         let txn = self.db.begin().await?;
 
-        // Replace the row, preserving created_at and the existing id.
+        // Compare-and-swap the opaque revision before replacing child rows.
+        // A concurrent editor that committed after this branch was loaded makes
+        // the predicate match zero rows, preventing a silent lost update.
         let mut branch = branch;
         branch.id = Some(branch_id as i64);
-        let am = mapper::branch_active_model(&branch, &created_at, &now)?;
-        branches::Entity::update(am).exec(&txn).await?;
+        branch.revision = Some(next_revision.clone());
+        let mut am = mapper::branch_active_model(&branch, &created_at, &next_revision)?;
+        am.id = NotSet;
+        let result = branches::Entity::update_many()
+            .set(am)
+            .filter(branches::Column::Id.eq(branch_id))
+            .filter(branches::Column::UpdatedAt.eq(&expected_revision))
+            .exec(&txn)
+            .await?;
+        ensure!(
+            result.rows_affected == 1,
+            "branch was modified by another process; reload and retry: {}",
+            branch.path
+        );
 
         Self::replace_children(&txn, branch_id, &branch).await?;
 
@@ -524,6 +553,31 @@ impl BranchRepository for SeaOrmBranchRepository {
         txn.commit().await?;
         Ok((added, updated))
     }
+}
+
+/// Produce a canonical timestamp that is strictly newer than `previous`.
+///
+/// The wall clock can have millisecond resolution or move backwards. Bumping
+/// from the stored value in either case guarantees that a successful
+/// compare-and-swap always changes the revision token.
+fn next_revision(previous: &str) -> anyhow::Result<String> {
+    use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
+
+    let previous = DateTime::parse_from_rfc3339(previous)
+        .context("branch has an invalid persistence revision")?
+        .with_timezone(&Utc);
+    let now =
+        DateTime::parse_from_rfc3339(&Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
+            .context("failed to create branch persistence revision")?
+            .with_timezone(&Utc);
+    let next = if now > previous {
+        now
+    } else {
+        previous
+            .checked_add_signed(TimeDelta::milliseconds(1))
+            .context("branch persistence revision overflow")?
+    };
+    Ok(next.to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
 /// The indexed child table a catalog query runs against. A closed enum so the

@@ -17,7 +17,9 @@ pub use history::{
 };
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{BranchRepository, IndexedValue, SeaOrmBranchRepository};
-pub use seaorm::{connect, connect_and_migrate};
+pub use seaorm::{
+    connect, connect_and_migrate, connect_and_migrate_with_options, connect_with_options,
+};
 
 #[cfg(test)]
 mod tests {
@@ -69,10 +71,13 @@ mod tests {
         repo.add(branch.clone()).await.unwrap();
 
         // get round-trips o2o/o2m/metadata/references (ignoring assigned id).
-        let mut got = repo.get(&branch.path).await.unwrap().unwrap();
+        let got = repo.get(&branch.path).await.unwrap().unwrap();
         assert!(got.id.is_some());
-        got.id = None;
-        assert_eq!(got, branch);
+        assert!(got.revision.is_some());
+        let mut comparable = got.clone();
+        comparable.id = None;
+        comparable.revision = None;
+        assert_eq!(comparable, branch);
 
         // update mutates indexed values.
         let mut edited = got.clone();
@@ -88,6 +93,28 @@ mod tests {
         // delete removes the branch and its child rows.
         repo.delete(&branch.path).await.unwrap();
         assert!(repo.get(&branch.path).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_branch_update_is_rejected() {
+        let repo = repo().await;
+        repo.add(Branch::new("/concurrent")).await.unwrap();
+
+        let mut first = repo.get("/concurrent").await.unwrap().unwrap();
+        let mut stale = first.clone();
+        first.title = Some("first writer".into());
+        repo.update(first).await.unwrap();
+
+        stale.description = Some("stale writer".into());
+        let error = repo.update(stale).await.unwrap_err().to_string();
+        assert!(
+            error.contains("modified by another process"),
+            "got: {error}"
+        );
+
+        let stored = repo.get("/concurrent").await.unwrap().unwrap();
+        assert_eq!(stored.title.as_deref(), Some("first writer"));
+        assert!(stored.description.is_none());
     }
 
     #[tokio::test]
@@ -751,6 +778,35 @@ mod tests {
             &e.target,
             PatternTarget::Branch { path } if path == "/movie/akira"
         )));
+    }
+
+    #[tokio::test]
+    async fn pattern_add_rejects_invalid_entries() {
+        use unclip_core::{PatternEntry, PatternTarget};
+
+        let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let patterns = SeaOrmPatternRepository::new(db);
+        let invalid = [
+            PatternEntry::new("   ", PatternTarget::Branch { path: "/ok".into() }),
+            PatternEntry::new(
+                "known",
+                PatternTarget::O2m {
+                    name: "tag".into(),
+                    value: String::new(),
+                },
+            ),
+            PatternEntry::new(
+                "known",
+                PatternTarget::Branch {
+                    path: "relative".into(),
+                },
+            ),
+        ];
+
+        for entry in invalid {
+            assert!(patterns.add(&entry).await.is_err(), "accepted {entry:?}");
+        }
+        assert!(patterns.list().await.unwrap().is_empty());
     }
 
     #[tokio::test]

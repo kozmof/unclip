@@ -2,52 +2,36 @@
 
 use std::path::Path;
 
-use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectOptions, DatabaseConnection};
 use unclip_store::{
     SeaOrmBranchRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository,
 };
 
-/// Build a SQLite connection URL for the given file path.
+/// Build SQLite connection options for the given file path.
 ///
-/// The path is resolved to an absolute path and opened in read-write-create
-/// mode so the database file is created on first use.
-///
-/// The path is percent-encoded before being placed in the URL. Without this, a
-/// directory containing URL-significant characters (`?` would start the query
-/// string, `#` a fragment, `%` an escape) would be silently truncated or
-/// mis-decoded, opening the wrong file.
-pub fn db_url(path: &Path) -> String {
+/// The path is resolved to an absolute path and passed to SQLx as a native
+/// filesystem `Path`. This avoids URL-significant characters and preserves
+/// non-UTF-8 input until SQLx can reject it instead of opening a lossy
+/// replacement path.
+fn db_options(path: &Path) -> anyhow::Result<ConnectOptions> {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
             .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
+            .map_err(|err| anyhow::anyhow!("failed to resolve database path: {err}"))?
     };
-    format!("sqlite://{}?mode=rwc", encode_path(&abs.to_string_lossy()))
-}
 
-/// Percent-encode a filesystem path for use in a `sqlite://` URL.
-///
-/// Every byte outside an unreserved set is `%XX`-escaped. Path separators (`/`)
-/// are preserved so the URL still names the same file; sqlx percent-decodes the
-/// path back to the original bytes when opening the connection.
-fn encode_path(path: &str) -> String {
-    let mut out = String::with_capacity(path.len());
-    for &byte in path.as_bytes() {
-        match byte {
-            b'/' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => out.push(byte as char),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    // Start with read-write-create behavior, then replace only the filename
+    // using SQLx's native Path API.
+    let mut options = ConnectOptions::new("sqlite://unclip-placeholder?mode=rwc");
+    options.map_sqlx_sqlite_opts(move |sqlite| sqlite.filename(&abs));
+    Ok(options)
 }
 
 /// Open the database, creating and migrating it if needed.
 pub async fn open(path: &Path) -> anyhow::Result<DatabaseConnection> {
-    let url = db_url(path);
-    unclip_store::connect_and_migrate(&url).await
+    unclip_store::connect_and_migrate_with_options(db_options(path)?).await
 }
 
 /// Open an existing database, erroring if the file is not there.
@@ -97,19 +81,31 @@ pub async fn open_repos(path: &Path, create: bool) -> anyhow::Result<Repos> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn encode_path_percent_encodes_significant_characters() {
-        assert_eq!(
-            encode_path("/tmp/od d?x#y%z/db.sqlite"),
-            "/tmp/od%20d%3Fx%23y%25z/db.sqlite"
-        );
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_rejects_non_utf8_path_without_lossy_replacement() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let bytes: Vec<u8> = format!("/tmp/unclip-non-utf8-{}-", std::process::id())
+            .into_bytes()
+            .into_iter()
+            .chain([0xff])
+            .chain(b".db".iter().copied())
+            .collect();
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes));
+        let error = open(&path).await.unwrap_err().to_string();
+        assert!(error.contains("valid UTF-8"), "got: {error}");
+        assert!(!path.exists());
     }
 
-    #[test]
-    fn encode_path_leaves_plain_paths_readable() {
-        assert_eq!(
-            encode_path("/home/user/.unclip/db.sqlite"),
-            "/home/user/.unclip/db.sqlite"
-        );
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_handles_url_significant_path_characters() {
+        let path =
+            std::path::PathBuf::from(format!("/tmp/unclip-od d?x#y%z-{}.db", std::process::id()));
+        let db = open(&path).await.unwrap();
+        assert!(path.exists());
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 }
