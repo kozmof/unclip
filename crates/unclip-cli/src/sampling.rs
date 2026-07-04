@@ -82,6 +82,7 @@ pub async fn sample_cmd(
         dry_run,
     } = input;
 
+    ensure!(count > 0, "sample count must be greater than zero");
     let query = filter.into_query()?;
     let params = SampleParams {
         count,

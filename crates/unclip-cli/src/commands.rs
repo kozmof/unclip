@@ -18,6 +18,9 @@ pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
     if name.is_empty() {
         bail!("empty name in `{raw}`");
     }
+    if value.is_empty() {
+        bail!("empty value in `{raw}`");
+    }
     Ok((name.to_string(), value.to_string()))
 }
 
@@ -577,14 +580,13 @@ mod tests {
             parse_kv("expr=a=b").unwrap(),
             ("expr".to_string(), "a=b".to_string())
         );
-        // An empty value is allowed (e.g. clearing a marker), an empty name is not.
-        assert_eq!(parse_kv("k=").unwrap(), ("k".to_string(), String::new()));
     }
 
     #[test]
-    fn parse_kv_rejects_missing_separator_or_empty_name() {
+    fn parse_kv_rejects_missing_separator_or_empty_parts() {
         assert!(parse_kv("nope").is_err());
         assert!(parse_kv("=value").is_err());
+        assert!(parse_kv("name=").is_err());
     }
 
     #[test]

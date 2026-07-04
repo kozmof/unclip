@@ -332,6 +332,17 @@ fn sample_seed_is_reproducible_and_dry_run_records_nothing() {
     assert!(stdout(&high_seed).contains("seed: 18446744073709551615"));
 }
 
+#[test]
+fn sample_rejects_zero_count() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+
+    let output = unclip(&path, &["sample", "--count", "0"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("sample count must be greater than zero"));
+}
+
 /// `export` returns every matching branch with no count to invent.
 #[test]
 fn export_returns_all_matches() {

@@ -1,10 +1,13 @@
 //! Repository for the pattern dictionary.
 
-use crate::StoreResult;
+use crate::{
+    repository::{ensure_bulk_result_limit, MAX_BULK_RESULTS},
+    StoreResult,
+};
 use anyhow::Context;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use unclip_core::{validate_pattern_entry, PatternEntry, PatternTarget};
 use unclip_entity::pattern_entries;
@@ -48,8 +51,10 @@ impl SeaOrmPatternRepository {
     pub async fn list(&self) -> StoreResult<Vec<StoredPattern>> {
         let rows = pattern_entries::Entity::find()
             .order_by_asc(pattern_entries::Column::Id)
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(rows.len())?;
         rows.into_iter()
             .map(row_to_stored)
             .collect::<anyhow::Result<_>>()
@@ -84,8 +89,10 @@ impl SeaOrmPatternRepository {
     pub async fn all_enabled(&self) -> StoreResult<Vec<PatternEntry>> {
         let rows = pattern_entries::Entity::find()
             .filter(pattern_entries::Column::Enabled.eq(1))
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(rows.len())?;
         rows.into_iter()
             .map(|r| row_to_stored(r).map(|s| s.entry))
             .collect::<anyhow::Result<_>>()

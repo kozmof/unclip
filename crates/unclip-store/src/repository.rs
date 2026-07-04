@@ -33,7 +33,7 @@ const MAX_FIND_RESULTS: u64 = 10_000;
 /// Pagination keeps individual SQL queries bounded, but returning a `Vec`
 /// still retains the entire hydrated archive. Callers that need to exceed this
 /// ceiling require a streaming API.
-const MAX_BULK_RESULTS: usize = 100_000;
+pub(crate) const MAX_BULK_RESULTS: usize = 100_000;
 
 /// Page size used by bulk callers that intentionally consume every match.
 const FIND_PAGE_SIZE: u64 = 1_000;
@@ -303,8 +303,9 @@ impl SeaOrmBranchRepository {
         };
         let sql = format!(
             "SELECT name, value, COUNT(*) AS count FROM {} {filter} \
-             GROUP BY name, value ORDER BY name, value",
-            table.as_table()
+             GROUP BY name, value ORDER BY name, value LIMIT {}",
+            table.as_table(),
+            MAX_BULK_RESULTS + 1
         );
         let rows = IndexedValue::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -313,6 +314,7 @@ impl SeaOrmBranchRepository {
         ))
         .all(&self.db)
         .await?;
+        ensure_bulk_result_limit(rows.len())?;
         Ok(rows)
     }
 
@@ -461,16 +463,20 @@ impl BranchRepository for SeaOrmBranchRepository {
     async fn children(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
         let models = branches::Entity::find()
             .filter(branches::Column::ParentPath.eq(path))
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(models.len())?;
         self.hydrate_all(models).await.map_err(Into::into)
     }
 
     async fn descendants(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
         let models = branches::Entity::find()
             .filter(branches::Column::Path.like(descendant_like(path)))
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(models.len())?;
         self.hydrate_all(models).await.map_err(Into::into)
     }
 
@@ -559,9 +565,11 @@ impl BranchRepository for SeaOrmBranchRepository {
             .column(branch_o2o_values::Column::BranchId)
             .filter(branch_o2o_values::Column::Name.eq(name))
             .filter(branch_o2o_values::Column::Value.eq(value))
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .into_tuple::<i32>()
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(ids.len())?;
         self.load_branches_by_ids(ids).await.map_err(Into::into)
     }
 
@@ -575,9 +583,11 @@ impl BranchRepository for SeaOrmBranchRepository {
             .column(branch_o2m_values::Column::BranchId)
             .filter(branch_o2m_values::Column::Name.eq(name))
             .filter(branch_o2m_values::Column::Value.eq(value))
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .into_tuple::<i32>()
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(ids.len())?;
         self.load_branches_by_ids(ids).await.map_err(Into::into)
     }
 
@@ -593,9 +603,12 @@ impl BranchRepository for SeaOrmBranchRepository {
             .select_only()
             .column(branches::Column::Path)
             .column(branches::Column::Title)
+            .filter(branches::Column::Title.is_not_null())
+            .limit((MAX_BULK_RESULTS + 1) as u64)
             .into_model::<TitleRow>()
             .all(&self.db)
             .await?;
+        ensure_bulk_result_limit(rows.len())?;
         Ok(rows
             .into_iter()
             .filter_map(|r| r.title.map(|t| (r.path, t)))
@@ -704,6 +717,31 @@ impl BranchRepository for SeaOrmBranchRepository {
 
         txn.commit().await?;
         Ok((added, updated))
+    }
+}
+
+pub(crate) fn ensure_bulk_result_limit(len: usize) -> BranchRepositoryResult<()> {
+    if len > MAX_BULK_RESULTS {
+        return Err(BranchRepositoryError::BulkQueryTooBroad {
+            limit: MAX_BULK_RESULTS,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    #[test]
+    fn bulk_result_limit_accepts_boundary_and_rejects_excess() {
+        assert!(ensure_bulk_result_limit(MAX_BULK_RESULTS).is_ok());
+        assert!(matches!(
+            ensure_bulk_result_limit(MAX_BULK_RESULTS + 1),
+            Err(BranchRepositoryError::BulkQueryTooBroad {
+                limit: MAX_BULK_RESULTS
+            })
+        ));
     }
 }
 
