@@ -100,13 +100,19 @@ impl SeaOrmPatternRepository {
     }
 }
 
+/// Column projection for a target. The `target_kind` discriminator is
+/// `PatternTarget::kind_label`, the same label `row_to_stored` matches on, so
+/// the two directions cannot drift apart.
 fn target_columns(target: &PatternTarget) -> (&'static str, Option<String>, Option<String>) {
-    match target {
-        PatternTarget::O2m { name, value } => ("o2m", Some(name.clone()), Some(value.clone())),
-        PatternTarget::O2o { name, value } => ("o2o", Some(name.clone()), Some(value.clone())),
-        PatternTarget::Branch { path } => ("branch", None, Some(path.clone())),
-        PatternTarget::CollapsePattern { path } => ("collapse", None, Some(path.clone())),
-    }
+    let (name, value) = match target {
+        PatternTarget::O2m { name, value } | PatternTarget::O2o { name, value } => {
+            (Some(name.clone()), Some(value.clone()))
+        }
+        PatternTarget::Branch { path } | PatternTarget::CollapsePattern { path } => {
+            (None, Some(path.clone()))
+        }
+    };
+    (target.kind_label(), name, value)
 }
 
 fn row_to_stored(row: pattern_entries::Model) -> anyhow::Result<StoredPattern> {

@@ -71,15 +71,8 @@ pub struct AddInput {
 
 pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Result<()> {
     validate_path(&input.path)?;
-    // A non-finite weight (NaN/inf) would poison the sampler's score sum, so
-    // reject it at the boundary rather than persisting an unusable branch.
-    if !input.weight.is_finite() {
-        bail!("weight must be a finite number, got {}", input.weight);
-    }
-    if repo.get(&input.path).await?.is_some() {
-        bail!("branch already exists: {}", input.path);
-    }
-
+    // The repository validates the full record (finite weight, o2o/o2m value
+    // shape) and reports a duplicate path atomically at the insert itself.
     let mut branch = Branch::new(&input.path);
     branch.title = input.title;
     branch.description = input.description;
@@ -169,10 +162,7 @@ pub async fn edit(repo: &impl BranchRepository, input: EditInput) -> anyhow::Res
     }
 
     if let Some(weight) = input.weight {
-        // Same guard as `add`: a non-finite weight poisons the sampler.
-        if !weight.is_finite() {
-            bail!("weight must be a finite number, got {weight}");
-        }
+        // A non-finite weight is rejected by `repo.update`'s record validation.
         branch.weight = weight;
         changed = true;
     }
@@ -194,19 +184,22 @@ pub async fn edit(repo: &impl BranchRepository, input: EditInput) -> anyhow::Res
 
     // o2m is a set: add inserts (the store dedups on write) and remove drops a
     // single value, pruning the name once its last value is gone. Removing an
-    // absent value is a harmless no-op, matching set semantics.
+    // absent value is a harmless no-op, matching set semantics — but it does
+    // not count as a change, so a patch made only of no-op removals is still
+    // reported as "no changes requested" instead of rewriting the branch.
     for (name, value) in input.add_o2m {
         branch.o2m.entry(name).or_default().push(value);
         changed = true;
     }
     for (name, value) in input.remove_o2m {
         if let Some(values) = branch.o2m.get_mut(&name) {
+            let before = values.len();
             values.retain(|v| v != &value);
+            changed |= values.len() != before;
             if values.is_empty() {
                 branch.o2m.remove(&name);
             }
         }
-        changed = true;
     }
 
     if !changed {
@@ -293,9 +286,11 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
         },
     };
     merge_o2o(&mut q.require_o2o, input.require_o2o)?;
-    // avoid_o2o is one value per name; reject a repeated name rather
-    // than silently keeping the last, matching require_o2o.
-    merge_o2o(&mut q.avoid_o2o, input.avoid_o2o)?;
+    // avoid_o2o accumulates: several values of one name can be excluded at
+    // once (matching avoid_o2m), unlike require_o2o which is one per name.
+    for (name, value) in input.avoid_o2o {
+        q.avoid_o2o.entry(name).or_default().push(value);
+    }
     for (name, value) in input.require_o2m {
         q.require_o2m.entry(name).or_default().push(value);
     }
@@ -481,9 +476,7 @@ pub async fn create(
         .slot(slot_name)
         .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
 
-    if branch_repo.get(&path).await?.is_some() {
-        bail!("branch already exists: {path}");
-    }
+    // A duplicate path is reported atomically by the repository insert.
     let branch = slot.skeleton(&path);
     branch_repo.add(branch.clone()).await?;
     crate::output::outln!("created {path} from {selector}");

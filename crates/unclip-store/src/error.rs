@@ -13,6 +13,9 @@ pub enum StoreError {
     /// A requested branch does not exist.
     #[error("branch not found: {path}")]
     NotFound { path: String },
+    /// A branch with the same path already exists.
+    #[error("branch already exists: {path}")]
+    AlreadyExists { path: String },
     /// Optimistic concurrency detected a stale branch value.
     #[error("branch was modified by another process; reload and retry: {path}")]
     Conflict { path: String },

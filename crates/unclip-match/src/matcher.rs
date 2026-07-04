@@ -11,10 +11,11 @@ use daachorse::DoubleArrayAhoCorasick;
 
 use crate::dictionary::{PatternEntry, PatternHit};
 
-/// Upper bound for entries compiled into one in-memory automaton.
+/// Upper bound for distinct patterns compiled into one in-memory automaton.
 ///
 /// Matcher inputs come from several database catalogs and may contain duplicate
-/// pattern strings, so this limit is applied before grouping.
+/// pattern strings, so the limit is applied after grouping — a catalog that
+/// dedups to a small automaton is not rejected for its raw entry count.
 const MAX_PATTERN_ENTRIES: usize = 100_000;
 
 /// A compiled multi-pattern matcher.
@@ -30,10 +31,6 @@ impl Matcher {
     /// entries that share a pattern string are grouped (daachorse rejects
     /// duplicate patterns).
     pub fn build(entries: Vec<PatternEntry>) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            entries.len() <= MAX_PATTERN_ENTRIES,
-            "matcher contains more than {MAX_PATTERN_ENTRIES} pattern entries; narrow the archive before scanning"
-        );
         let mut order: Vec<String> = Vec::new();
         let mut groups: Vec<Vec<PatternEntry>> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
@@ -56,6 +53,10 @@ impl Matcher {
             groups[i].push(entry);
         }
 
+        anyhow::ensure!(
+            order.len() <= MAX_PATTERN_ENTRIES,
+            "matcher contains more than {MAX_PATTERN_ENTRIES} distinct patterns; narrow the archive before scanning"
+        );
         let automaton = if order.is_empty() {
             None
         } else {
@@ -273,13 +274,26 @@ mod tests {
 
     #[test]
     fn rejects_an_unbounded_pattern_dictionary() {
-        let entry = PatternEntry::new("x", PatternTarget::Branch { path: "/x".into() });
-        let entries = vec![entry; MAX_PATTERN_ENTRIES + 1];
+        let entries: Vec<PatternEntry> = (0..=MAX_PATTERN_ENTRIES)
+            .map(|i| {
+                PatternEntry::new(format!("p{i}"), PatternTarget::Branch { path: "/x".into() })
+            })
+            .collect();
         let error = Matcher::build(entries)
             .err()
             .expect("limit error")
             .to_string();
 
-        assert!(error.contains("more than 100000 pattern entries"));
+        assert!(error.contains("more than 100000 distinct patterns"));
+    }
+
+    #[test]
+    fn duplicate_patterns_do_not_count_against_the_limit() {
+        // The same string many times dedups to one automaton pattern, so an
+        // entry count above the limit is fine when the distinct count is not.
+        let entry = PatternEntry::new("x", PatternTarget::Branch { path: "/x".into() });
+        let entries = vec![entry; MAX_PATTERN_ENTRIES + 1];
+        let matcher = Matcher::build(entries).unwrap();
+        assert!(!matcher.is_empty());
     }
 }

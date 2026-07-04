@@ -6,13 +6,14 @@ use anyhow::{ensure, Context};
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
 use unclip_core::{validate_path, Frame, Slot};
 use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, frames};
 
 use crate::frame_mapper;
+use crate::repository::{ensure_bulk_result_limit, MAX_BULK_RESULTS};
 use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
 use crate::StoreResult;
 
@@ -385,14 +386,29 @@ impl FrameRepository for SeaOrmFrameRepository {
     }
 
     async fn list_frames(&self) -> StoreResult<Vec<FrameInfo>> {
-        let mut frames_list = frames::Entity::find().all(&self.db).await?;
+        let mut frames_list = frames::Entity::find()
+            .limit((MAX_BULK_RESULTS + 1) as u64)
+            .all(&self.db)
+            .await?;
+        ensure_bulk_result_limit(frames_list.len())?;
         frames_list.sort_by(|a, b| a.name.cmp(&b.name));
 
-        // Count slots per frame in one query rather than one query per frame.
-        let mut slot_counts: HashMap<i32, usize> = HashMap::new();
-        for slot in frame_slots::Entity::find().all(&self.db).await? {
-            *slot_counts.entry(slot.frame_id).or_default() += 1;
+        // Count slots per frame in SQL rather than hydrating every slot row.
+        #[derive(FromQueryResult)]
+        struct SlotCount {
+            frame_id: i32,
+            count: i64,
         }
+        let rows = SlotCount::find_by_statement(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT frame_id, COUNT(*) AS count FROM frame_slots GROUP BY frame_id",
+        ))
+        .all(&self.db)
+        .await?;
+        let slot_counts: HashMap<i32, usize> = rows
+            .into_iter()
+            .map(|r| (r.frame_id, r.count.max(0) as usize))
+            .collect();
 
         Ok(frames_list
             .into_iter()

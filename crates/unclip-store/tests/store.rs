@@ -7,8 +7,8 @@ use serde_json::json;
 use unclip_core::{Branch, Frame, PatternEntry, PatternTarget, Reference, SampleQuery, Slot};
 use unclip_store::{
     connect_and_migrate, connect_and_migrate_with_options, BranchRepository, BranchRepositoryError,
-    FrameRepository, PacketUsageRecord, SeaOrmBranchRepository, SeaOrmFrameRepository,
-    SeaOrmHistoryRepository, SeaOrmPatternRepository,
+    FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
+    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository,
 };
 
 async fn repo() -> SeaOrmBranchRepository {
@@ -58,6 +58,45 @@ async fn rejects_invalid_branch_state_at_repository_boundary() {
 
     let err = repo.add(branch).await.unwrap_err().to_string();
     assert!(err.contains("weight must be finite"), "got: {err}");
+}
+
+#[tokio::test]
+async fn add_reports_a_duplicate_path_as_a_typed_error() {
+    let repo = repo().await;
+    repo.add(Branch::new("/dup")).await.unwrap();
+
+    // The duplicate is detected at the insert itself (unique path constraint),
+    // not by a separate lookup, so concurrent `add`s cannot race past it.
+    let err = repo.add(Branch::new("/dup")).await.unwrap_err();
+    assert!(
+        matches!(err, BranchRepositoryError::AlreadyExists { ref path } if path == "/dup"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn find_excludes_every_avoided_o2o_value_of_one_name() {
+    let repo = repo().await;
+
+    for (path, axis) in [("/a", Some("place")), ("/b", Some("time")), ("/c", None)] {
+        let mut branch = Branch::new(path);
+        if let Some(axis) = axis {
+            branch.o2o.insert("axis".into(), axis.into());
+        }
+        repo.add(branch).await.unwrap();
+    }
+
+    let mut q = SampleQuery::default();
+    q.avoid_o2o
+        .insert("axis".into(), vec!["place".into(), "time".into()]);
+    let found: Vec<_> = repo
+        .find(q)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|b| b.path)
+        .collect();
+    assert_eq!(found, vec!["/c".to_string()]);
 }
 
 #[tokio::test]
@@ -318,7 +357,7 @@ async fn find_applies_avoid_o2o_and_o2m_in_sql() {
     repo.add(skip_o2m).await.unwrap();
 
     let mut q = SampleQuery::default();
-    q.avoid_o2o.insert("mood".into(), "tense".into());
+    q.avoid_o2o.insert("mood".into(), vec!["tense".into()]);
     q.avoid_o2m.insert("topic".into(), vec!["cafe".into()]);
 
     let found: Vec<_> = repo

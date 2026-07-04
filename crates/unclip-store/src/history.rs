@@ -107,9 +107,12 @@ impl SeaOrmHistoryRepository {
         usage_history::Entity::insert(am).exec(&self.db).await?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl HistoryRepository for SeaOrmHistoryRepository {
     /// The set of branch ids appearing in the most recent `limit` usage rows.
-    pub async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
+    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
         let rows = usage_history::Entity::find()
             .order_by_desc(usage_history::Column::UsedAt)
             // `id` breaks ties so rows sharing a millisecond timestamp have a
@@ -129,10 +132,7 @@ impl SeaOrmHistoryRepository {
     /// The ids are queried in chunks of bound parameters. `stats`/`stale` can
     /// pass every matched branch, so a single `IN (...)` would otherwise grow
     /// past SQLite's bound-variable limit as an archive grows.
-    pub async fn usage_summaries(
-        &self,
-        branch_ids: &[i64],
-    ) -> StoreResult<HashMap<i64, UsageSummary>> {
+    async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>> {
         // Stay well under SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` (999 on
         // older builds) with margin to spare.
         const CHUNK: usize = 500;
@@ -171,7 +171,7 @@ impl SeaOrmHistoryRepository {
     ///
     /// Delegates to the batched aggregate so a single branch and a set of
     /// branches share one code path (and one query shape).
-    pub async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
+    async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
         Ok(self
             .usage_summaries(&[branch_id])
             .await?
@@ -186,7 +186,7 @@ impl SeaOrmHistoryRepository {
     /// timestamp, so a failure in any packet rolls back every packet and usage
     /// row in the batch — matching the all-or-nothing behavior of branch and
     /// frame imports. Single-packet callers pass a one-element slice.
-    pub async fn save_packets_with_usages(
+    async fn save_packets_with_usages(
         &self,
         records: &[PacketUsageRecord],
         command: &str,
@@ -243,27 +243,4 @@ async fn insert_usages(
             .await?;
     }
     Ok(())
-}
-
-#[async_trait]
-impl HistoryRepository for SeaOrmHistoryRepository {
-    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
-        SeaOrmHistoryRepository::recent_branch_ids(self, limit).await
-    }
-
-    async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>> {
-        SeaOrmHistoryRepository::usage_summaries(self, branch_ids).await
-    }
-
-    async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
-        SeaOrmHistoryRepository::usage_for(self, branch_id).await
-    }
-
-    async fn save_packets_with_usages(
-        &self,
-        records: &[PacketUsageRecord],
-        command: &str,
-    ) -> StoreResult<()> {
-        SeaOrmHistoryRepository::save_packets_with_usages(self, records, command).await
-    }
 }

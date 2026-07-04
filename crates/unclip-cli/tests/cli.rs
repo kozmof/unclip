@@ -203,6 +203,12 @@ fn edit_rejects_missing_branch_and_empty_patch() {
     let empty = unclip(&path, &["edit", "/a"]);
     assert!(!empty.status.success());
     assert!(stderr(&empty).contains("no changes requested"));
+
+    // Removing an o2m value the branch does not carry is a set-semantics no-op,
+    // so a patch made only of such removals is also "no changes".
+    let noop = unclip(&path, &["edit", "/a", "--remove-o2m", "mood=absent"]);
+    assert!(!noop.status.success());
+    assert!(stderr(&noop).contains("no changes requested"));
 }
 
 /// A command other than `init` must refuse to silently create a fresh database.
@@ -242,14 +248,20 @@ fn duplicate_o2o_name_on_add_is_rejected() {
     assert!(stderr(&out).contains("duplicate o2o name"));
 }
 
-/// `query --avoid-o2o` rejects a repeated name too (consistent with require),
-/// rather than silently keeping only the last value.
+/// Repeated `--avoid-o2o` names accumulate: every listed value is excluded
+/// (matching `--avoid-o2m`), unlike `--o2o`, which is one required value/name.
 #[test]
-fn duplicate_avoid_o2o_name_on_query_is_rejected() {
+fn repeated_avoid_o2o_names_accumulate_on_query() {
     let db = TempDb::new();
     let path = db.path();
     unclip(&path, &["init"]);
-    unclip(&path, &["add", "/a"]);
+    assert!(unclip(&path, &["add", "/a", "--o2o", "axis=place"])
+        .status
+        .success());
+    assert!(unclip(&path, &["add", "/b", "--o2o", "axis=time"])
+        .status
+        .success());
+    assert!(unclip(&path, &["add", "/c"]).status.success());
 
     let out = unclip(
         &path,
@@ -261,8 +273,11 @@ fn duplicate_avoid_o2o_name_on_query_is_rejected() {
             "axis=time",
         ],
     );
-    assert!(!out.status.success());
-    assert!(stderr(&out).contains("duplicate o2o name"));
+    assert!(out.status.success(), "query failed: {}", stderr(&out));
+    let got = stdout(&out);
+    assert!(got.contains("/c"), "got: {got}");
+    assert!(!got.contains("/a"), "got: {got}");
+    assert!(!got.contains("/b"), "got: {got}");
 }
 
 /// `sample --seed` is reproducible, and `--dry-run` records no usage.

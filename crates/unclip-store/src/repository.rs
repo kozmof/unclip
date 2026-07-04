@@ -330,10 +330,13 @@ impl SeaOrmBranchRepository {
             );
         }
         for (name, value) in &query.require_o2o {
-            select = select.filter(branches::Column::Id.in_subquery(o2o_subquery(name, value)));
+            select = select.filter(
+                branches::Column::Id.in_subquery(o2o_subquery(name, std::slice::from_ref(value))),
+            );
         }
-        for (name, value) in &query.avoid_o2o {
-            select = select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, value)));
+        for (name, values) in &query.avoid_o2o {
+            select =
+                select.filter(branches::Column::Id.not_in_subquery(o2o_subquery(name, values)));
         }
         for (name, values) in &query.require_o2m {
             // o2m is a set: every requested value is a separate membership test.
@@ -360,7 +363,23 @@ impl BranchRepository for SeaOrmBranchRepository {
         let txn = self.db.begin().await?;
 
         let am = mapper::branch_active_model(&branch, &now, &now)?;
-        let res = branches::Entity::insert(am).exec(&txn).await?;
+        // Map the unique-path violation to a typed error at the insert itself,
+        // so two concurrent `add`s cannot race a check-then-insert window.
+        let res = branches::Entity::insert(am)
+            .exec(&txn)
+            .await
+            .map_err(|err| {
+                if matches!(
+                    err.sql_err(),
+                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                ) {
+                    BranchRepositoryError::AlreadyExists {
+                        path: branch.path.clone(),
+                    }
+                } else {
+                    BranchRepositoryError::Database(err)
+                }
+            })?;
         let branch_id = res.last_insert_id;
 
         Self::insert_children(&txn, branch_id, &branch).await?;
@@ -758,15 +777,16 @@ mod limit_tests {
 /// from the stored value in either case guarantees that a successful
 /// compare-and-swap always changes the revision token.
 fn next_revision(previous: &str) -> anyhow::Result<String> {
-    use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
+    use chrono::{DateTime, DurationRound, SecondsFormat, TimeDelta, Utc};
 
     let previous = DateTime::parse_from_rfc3339(previous)
         .context("branch has an invalid persistence revision")?
         .with_timezone(&Utc);
-    let now =
-        DateTime::parse_from_rfc3339(&Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
-            .context("failed to create branch persistence revision")?
-            .with_timezone(&Utc);
+    // Truncate to the persisted millisecond precision so the comparison below
+    // sees exactly the value that would be stored.
+    let now = Utc::now()
+        .duration_trunc(TimeDelta::milliseconds(1))
+        .context("failed to create branch persistence revision")?;
     let next = if now > previous {
         now
     } else {
@@ -814,13 +834,16 @@ fn descendant_like(scope: &str) -> LikeExpr {
     LikeExpr::new(pattern).escape('\\')
 }
 
-/// Subquery selecting branch ids that carry the o2o pair `name=value`.
-fn o2o_subquery(name: &str, value: &str) -> SelectStatement {
+/// Subquery selecting branch ids that carry any of `values` under o2o `name`.
+///
+/// An empty `values` yields an empty result set, so `NOT IN (…)` keeps every
+/// branch — matching "avoid nothing".
+fn o2o_subquery(name: &str, values: &[String]) -> SelectStatement {
     Query::select()
         .column(branch_o2o_values::Column::BranchId)
         .from(branch_o2o_values::Entity)
         .and_where(branch_o2o_values::Column::Name.eq(name))
-        .and_where(branch_o2o_values::Column::Value.eq(value))
+        .and_where(branch_o2o_values::Column::Value.is_in(values.to_vec()))
         .to_owned()
 }
 

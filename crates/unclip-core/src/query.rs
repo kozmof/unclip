@@ -17,7 +17,9 @@ pub struct SampleQuery {
     pub under: Option<String>,
 
     pub require_o2o: BTreeMap<String, String>,
-    pub avoid_o2o: BTreeMap<String, String>,
+    /// Excluded o2o values. Unlike `require_o2o` (one required value per
+    /// name), several values of the same name can be avoided at once.
+    pub avoid_o2o: BTreeMap<String, Vec<String>>,
 
     pub require_o2m: BTreeMap<String, Vec<String>>,
     pub prefer_o2m: BTreeMap<String, Vec<String>>,
@@ -30,7 +32,11 @@ impl SampleQuery {
         Self {
             under: under_override.or_else(|| slot.under.clone()),
             require_o2o: slot.require_o2o.clone(),
-            avoid_o2o: slot.avoid_o2o.clone(),
+            avoid_o2o: slot
+                .avoid_o2o
+                .iter()
+                .map(|(name, value)| (name.clone(), vec![value.clone()]))
+                .collect(),
             require_o2m: slot.require_o2m.clone(),
             prefer_o2m: slot.prefer_o2m.clone(),
             avoid_o2m: slot.avoid_o2m.clone(),

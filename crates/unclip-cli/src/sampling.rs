@@ -56,9 +56,11 @@ impl FilterInput {
             ..Default::default()
         };
         crate::commands::merge_o2o(&mut q.require_o2o, self.require_o2o)?;
-        // avoid_o2o is one value per name; a repeated name is a usage
-        // error, mirroring require_o2o rather than silently keeping the last.
-        crate::commands::merge_o2o(&mut q.avoid_o2o, self.avoid_o2o)?;
+        // avoid_o2o accumulates: several values of one name can be excluded
+        // at once (matching avoid_o2m), unlike require_o2o's one per name.
+        for (name, value) in self.avoid_o2o {
+            q.avoid_o2o.entry(name).or_default().push(value);
+        }
         for (name, value) in self.require_o2m {
             q.require_o2m.entry(name).or_default().push(value);
         }
@@ -499,7 +501,7 @@ mod tests {
 
         assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
         assert_eq!(q.require_o2o.get("place").map(String::as_str), Some("cafe"));
-        assert_eq!(q.avoid_o2o.get("mood").map(String::as_str), Some("tense"));
+        assert_eq!(q.avoid_o2o.get("mood"), Some(&vec!["tense".to_string()]));
         // Repeated o2m names accumulate into a set of values under one name.
         assert_eq!(
             q.require_o2m.get("tag"),
@@ -513,17 +515,26 @@ mod tests {
     }
 
     #[test]
-    fn into_query_rejects_duplicate_o2o_name() {
+    fn into_query_rejects_duplicate_require_o2o_name() {
         let mut f = filter();
         f.require_o2o = vec![
             ("place".into(), "cafe".into()),
             ("place".into(), "park".into()),
         ];
         assert!(f.into_query().is_err());
+    }
 
+    #[test]
+    fn into_query_accumulates_repeated_avoid_o2o_names() {
+        // Excluding several values of one o2o name is legitimate (a branch can
+        // only carry one of them, so avoiding many just widens the exclusion).
         let mut f = filter();
         f.avoid_o2o = vec![("m".into(), "a".into()), ("m".into(), "b".into())];
-        assert!(f.into_query().is_err());
+        let q = f.into_query().unwrap();
+        assert_eq!(
+            q.avoid_o2o.get("m"),
+            Some(&vec!["a".to_string(), "b".to_string()])
+        );
     }
 
     #[test]
