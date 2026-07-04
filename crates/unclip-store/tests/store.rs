@@ -5,13 +5,13 @@
 
 use serde_json::json;
 use unclip_core::{
-    Branch, Frame, PatternEntry, PatternTarget, Reference, SampleQuery, Slot,
-    MAX_BRANCH_RECORD_BYTES,
+    Branch, CoreError, Frame, PatternEntry, PatternTarget, Reference, SampleQuery, Slot,
+    MAX_BRANCH_RECORD_BYTES, MAX_QUERY_FILTER_ITEMS,
 };
 use unclip_store::{
     connect_and_migrate, connect_and_migrate_with_options, BranchRepository, BranchRepositoryError,
     FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
-    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository,
+    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository, StoreError,
 };
 
 async fn repo() -> SeaOrmBranchRepository {
@@ -1131,4 +1131,49 @@ async fn pattern_mutations_reject_ids_outside_sqlite_range() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("pattern id exceeds"), "got: {err}");
+}
+
+#[tokio::test]
+async fn invalid_frames_surface_as_typed_domain_errors() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let frames = SeaOrmFrameRepository::new(db);
+    let frame = Frame {
+        name: "unsafe".into(),
+        description: Some("description\u{1b}[2J".into()),
+        slots: Vec::new(),
+    };
+
+    assert!(matches!(
+        frames.save_frame(frame).await,
+        Err(StoreError::InvalidDomain(CoreError::InvalidFrame { .. }))
+    ));
+}
+
+#[tokio::test]
+async fn repositories_reject_overly_complex_queries_before_sql() {
+    let repo = repo().await;
+    let mut query = SampleQuery::default();
+    query.avoid_o2m.insert(
+        "topic".into(),
+        (0..MAX_QUERY_FILTER_ITEMS)
+            .map(|index| format!("value-{index}"))
+            .collect(),
+    );
+
+    assert!(matches!(
+        repo.find(query).await,
+        Err(StoreError::InvalidDomain(CoreError::InvalidQuery(_)))
+    ));
+}
+
+#[tokio::test]
+async fn displayed_branch_text_is_rejected_at_the_store_boundary() {
+    let repo = repo().await;
+    let mut branch = Branch::new("/unsafe-title");
+    branch.title = Some("safe\u{1b}[31mred".into());
+
+    assert!(matches!(
+        repo.add(branch).await,
+        Err(StoreError::InvalidDomain(CoreError::InvalidBranch { .. }))
+    ));
 }

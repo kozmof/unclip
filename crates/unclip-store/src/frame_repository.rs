@@ -9,7 +9,7 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
-use unclip_core::{validate_path, Frame, Slot, MAX_BRANCH_RECORD_BYTES, MAX_DOMAIN_STRING_BYTES};
+use unclip_core::{validate_frame, Frame, Slot};
 use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, frames};
 
 use crate::frame_mapper;
@@ -84,8 +84,6 @@ impl SeaOrmFrameRepository {
     /// (one transaction spanning the whole batch), so both paths apply the same
     /// validation and replace-then-insert behavior.
     async fn save_frame_in_txn(txn: &DatabaseTransaction, frame: Frame) -> anyhow::Result<()> {
-        validate_frame(&frame)?;
-
         if let Some(existing) = frames::Entity::find()
             .filter(frames::Column::Name.eq(&frame.name))
             .one(txn)
@@ -211,177 +209,6 @@ impl SeaOrmFrameRepository {
     }
 }
 
-fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
-    validate_label("frame name", &frame.name)?;
-    if let Some(description) = &frame.description {
-        ensure!(
-            description.len() <= MAX_DOMAIN_STRING_BYTES,
-            "frame description is oversized"
-        );
-    }
-
-    let mut slot_names = HashSet::new();
-    let mut record_bytes = frame
-        .name
-        .len()
-        .saturating_add(frame.description.as_ref().map_or(0, String::len));
-    for slot in &frame.slots {
-        validate_label("slot name", &slot.name)?;
-        record_bytes = record_bytes.saturating_add(slot.name.len());
-        ensure!(
-            slot_names.insert(&slot.name),
-            "duplicate slot name `{}` in frame `{}`",
-            slot.name,
-            frame.name
-        );
-        if let Some(under) = &slot.under {
-            validate_path(under).with_context(|| {
-                format!(
-                    "invalid under path `{under}` for slot `{}` in frame `{}`",
-                    slot.name, frame.name
-                )
-            })?;
-        }
-        checked_slot_count(slot).with_context(|| {
-            format!(
-                "invalid count for slot `{}` in frame `{}`",
-                slot.name, frame.name
-            )
-        })?;
-        validate_o2o_map("require_o2o", &slot.require_o2o, slot, frame)?;
-        validate_o2o_map("default_o2o", &slot.default_o2o, slot, frame)?;
-        validate_o2o_map("avoid_o2o", &slot.avoid_o2o, slot, frame)?;
-        validate_o2m_map("require_o2m", &slot.require_o2m, slot, frame)?;
-        validate_o2m_map("prefer_o2m", &slot.prefer_o2m, slot, frame)?;
-        validate_o2m_map("avoid_o2m", &slot.avoid_o2m, slot, frame)?;
-
-        for (name, required) in &slot.require_o2o {
-            if let Some(default) = slot.default_o2o.get(name) {
-                ensure!(
-                    default == required,
-                    "default_o2o `{name}={default}` conflicts with required `{required}` in slot `{}` of frame `{}`",
-                    slot.name,
-                    frame.name
-                );
-            }
-            ensure!(
-                slot.avoid_o2o.get(name) != Some(required),
-                "o2o `{name}={required}` is both required and avoided in slot `{}` of frame `{}`",
-                slot.name,
-                frame.name
-            );
-        }
-        for (name, default) in &slot.default_o2o {
-            ensure!(
-                slot.avoid_o2o.get(name) != Some(default),
-                "o2o `{name}={default}` is both a default and avoided in slot `{}` of frame `{}`",
-                slot.name,
-                frame.name
-            );
-        }
-        for (name, required) in &slot.require_o2m {
-            if let Some(avoided) = slot.avoid_o2m.get(name) {
-                for value in required {
-                    ensure!(
-                        !avoided.contains(value),
-                        "o2m `{name}={value}` is both required and avoided in slot `{}` of frame `{}`",
-                        slot.name,
-                        frame.name
-                    );
-                }
-            }
-        }
-        for key in &slot.metadata_suggest {
-            validate_label("metadata_suggest key", key)?;
-            record_bytes = record_bytes.saturating_add(key.len());
-        }
-        record_bytes = record_bytes
-            .saturating_add(slot.under.as_ref().map_or(0, String::len))
-            .saturating_add(map_string_bytes(&slot.require_o2o))
-            .saturating_add(map_string_bytes(&slot.default_o2o))
-            .saturating_add(map_string_bytes(&slot.avoid_o2o))
-            .saturating_add(multimap_string_bytes(&slot.require_o2m))
-            .saturating_add(multimap_string_bytes(&slot.prefer_o2m))
-            .saturating_add(multimap_string_bytes(&slot.avoid_o2m));
-        ensure!(
-            record_bytes <= MAX_BRANCH_RECORD_BYTES,
-            "frame exceeds the {MAX_BRANCH_RECORD_BYTES}-byte record limit"
-        );
-    }
-
-    Ok(())
-}
-
-fn validate_label(field: &str, value: &str) -> anyhow::Result<()> {
-    ensure!(!value.is_empty(), "{field} must not be empty");
-    ensure!(
-        value.len() <= MAX_DOMAIN_STRING_BYTES,
-        "{field} is oversized"
-    );
-    ensure!(
-        !value.chars().any(char::is_control),
-        "{field} must not contain control characters"
-    );
-    Ok(())
-}
-
-fn map_string_bytes(values: &std::collections::BTreeMap<String, String>) -> usize {
-    values.iter().fold(0usize, |total, (name, value)| {
-        total.saturating_add(name.len()).saturating_add(value.len())
-    })
-}
-
-fn multimap_string_bytes(values: &std::collections::BTreeMap<String, Vec<String>>) -> usize {
-    values.iter().fold(0usize, |total, (name, entries)| {
-        entries
-            .iter()
-            .fold(total.saturating_add(name.len()), |total, value| {
-                total.saturating_add(value.len())
-            })
-    })
-}
-
-fn validate_o2o_map(
-    field: &str,
-    values: &std::collections::BTreeMap<String, String>,
-    slot: &Slot,
-    _frame: &Frame,
-) -> anyhow::Result<()> {
-    for (name, value) in values {
-        validate_label(&format!("{field} name in slot `{}`", slot.name), name)?;
-        validate_label(
-            &format!("{field} `{name}` value in slot `{}`", slot.name),
-            value,
-        )?;
-    }
-    Ok(())
-}
-
-fn validate_o2m_map(
-    field: &str,
-    values: &std::collections::BTreeMap<String, Vec<String>>,
-    slot: &Slot,
-    frame: &Frame,
-) -> anyhow::Result<()> {
-    for (name, entries) in values {
-        validate_label(&format!("{field} name in slot `{}`", slot.name), name)?;
-        let mut unique = HashSet::new();
-        for value in entries {
-            validate_label(
-                &format!("{field} `{name}` value in slot `{}`", slot.name),
-                value,
-            )?;
-            ensure!(
-                unique.insert(value),
-                "{field} `{name}` contains duplicate value `{value}` in slot `{}` of frame `{}`",
-                slot.name,
-                frame.name
-            );
-        }
-    }
-    Ok(())
-}
-
 fn checked_slot_count(slot: &Slot) -> anyhow::Result<i32> {
     ensure!(slot.count > 0, "slot count must be greater than zero");
     i32::try_from(slot.count).context("slot count exceeds SQLite INTEGER range")
@@ -390,6 +217,7 @@ fn checked_slot_count(slot: &Slot) -> anyhow::Result<i32> {
 #[async_trait]
 impl FrameRepository for SeaOrmFrameRepository {
     async fn save_frame(&self, frame: Frame) -> StoreResult<()> {
+        validate_frame(&frame)?;
         let txn = self.db.begin().await?;
         Self::save_frame_in_txn(&txn, frame).await?;
         txn.commit().await?;

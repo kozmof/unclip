@@ -19,6 +19,13 @@ pub const MAX_DOMAIN_STRING_BYTES: usize = 64 * 1024;
 pub const MAX_BRANCH_RECORD_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum number of indexed values and references carried by one branch.
 pub const MAX_BRANCH_COLLECTION_ITEMS: usize = 10_000;
+/// Maximum number of names and values carried by one frame.
+pub const MAX_FRAME_COLLECTION_ITEMS: usize = 10_000;
+/// Maximum aggregate complexity accepted in one query.
+///
+/// This stays below SQLite's historical 999-variable limit even when a filter
+/// shape binds each logical item more than once.
+pub const MAX_QUERY_FILTER_ITEMS: usize = 400;
 
 /// Validate a branch path address.
 ///
@@ -65,10 +72,18 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
         )));
     }
 
-    for field in [branch.title.as_deref(), branch.description.as_deref()] {
+    for (name, field) in [
+        ("title", branch.title.as_deref()),
+        ("description", branch.description.as_deref()),
+    ] {
         if field.is_some_and(|value| value.len() > MAX_DOMAIN_STRING_BYTES) {
             return Err(invalid(format!(
-                "title or description exceeds the {MAX_DOMAIN_STRING_BYTES}-byte string limit"
+                "{name} exceeds the {MAX_DOMAIN_STRING_BYTES}-byte string limit"
+            )));
+        }
+        if field.is_some_and(|value| value.chars().any(char::is_control)) {
+            return Err(invalid(format!(
+                "{name} must not contain control characters"
             )));
         }
     }
@@ -165,6 +180,16 @@ pub fn validate_reference(reference: &Reference) -> Result<()> {
         return Err(CoreError::InvalidBranch {
             path: "<reference>".to_string(),
             reason: "reference note is oversized".to_string(),
+        });
+    }
+    if reference
+        .note
+        .as_ref()
+        .is_some_and(|note| note.chars().any(char::is_control))
+    {
+        return Err(CoreError::InvalidBranch {
+            path: "<reference>".to_string(),
+            reason: "reference note must not contain control characters".to_string(),
         });
     }
     Ok(())
@@ -270,6 +295,12 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
     }
 
     for selection in &packet.selections {
+        if let Err(error) = validate_branch_record(&selection.branch) {
+            violations.push(format!(
+                "selection `{}` contains an invalid branch: {error}",
+                selection.branch.path
+            ));
+        }
         let Some(slot_name) = &selection.slot else {
             violations.push(format!(
                 "selection `{}` has no slot for frame `{}`",

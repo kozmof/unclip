@@ -32,9 +32,9 @@ pub enum StoreError {
     /// A repository request was internally inconsistent.
     #[error("invalid repository request: {message}")]
     InvalidRequest { message: String },
-    /// A domain value failed validation.
+    /// A domain value failed validation at the repository boundary.
     #[error(transparent)]
-    InvalidBranch(#[from] CoreError),
+    InvalidDomain(#[from] CoreError),
     /// SQLite or SeaORM rejected an operation.
     #[error(transparent)]
     Database(#[from] DbErr),

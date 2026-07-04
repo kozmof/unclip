@@ -11,7 +11,8 @@ use sea_orm::{
     QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
 };
 use unclip_core::{
-    parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
+    parent_of, validate_branch_record, validate_reference, validate_sample_query, Branch,
+    Reference, SampleQuery,
 };
 use unclip_entity::{
     branch_o2m_values, branch_o2o_values, branch_references, branches, usage_history,
@@ -516,6 +517,7 @@ impl BranchRepository for SeaOrmBranchRepository {
     }
 
     async fn find(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>> {
+        validate_sample_query(&query)?;
         // Sampling is seeded, so candidate order is part of its reproducibility
         // contract. SQL row order is undefined without ORDER BY and may change
         // with SQLite versions, indexes, or query plans.
@@ -538,6 +540,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         after_path: Option<&str>,
         limit: u64,
     ) -> BranchRepositoryResult<Vec<Branch>> {
+        validate_sample_query(query)?;
         if limit == 0 {
             return Err(BranchRepositoryError::InvalidRequest {
                 message: "page limit must be greater than zero".to_string(),

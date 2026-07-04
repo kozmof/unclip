@@ -9,22 +9,27 @@
 pub mod branch;
 pub mod error;
 pub mod frame;
+mod frame_validation;
 pub mod packet;
 pub mod pattern;
 pub mod query;
+mod query_validation;
 pub mod reference;
 pub mod validate;
 
 pub use branch::{is_under, parent_of, Branch};
 pub use error::{CoreError, Result};
 pub use frame::{Frame, Slot};
+pub use frame_validation::validate_frame;
 pub use packet::{Selection, SelectionPacket, PACKET_KIND, PACKET_VERSION};
 pub use pattern::{validate_pattern_entry, PatternEntry, PatternTarget};
 pub use query::{SampleParams, SampleQuery};
+pub use query_validation::validate_sample_query;
 pub use reference::Reference;
 pub use validate::{
     validate_branch, validate_branch_record, validate_packet, validate_path, validate_reference,
-    MAX_BRANCH_COLLECTION_ITEMS, MAX_BRANCH_RECORD_BYTES, MAX_DOMAIN_STRING_BYTES, MAX_PATH_BYTES,
+    MAX_BRANCH_COLLECTION_ITEMS, MAX_BRANCH_RECORD_BYTES, MAX_DOMAIN_STRING_BYTES,
+    MAX_FRAME_COLLECTION_ITEMS, MAX_PATH_BYTES, MAX_QUERY_FILTER_ITEMS,
 };
 
 #[cfg(test)]
@@ -343,5 +348,66 @@ avoid_recent: true
         let p = SampleParams::from_slot(&slot);
         assert!(p.avoid_recent);
         assert_eq!(p.count, 1);
+    }
+
+    #[test]
+    fn displayed_text_rejects_terminal_control_characters() {
+        let mut branch = Branch::new("/unsafe-title");
+        branch.title = Some("safe\u{1b}[31mred".into());
+        assert!(validate_branch_record(&branch).is_err());
+
+        let reference = Reference {
+            kind: "file".into(),
+            value: "notes.md".into(),
+            note: Some("note\u{1b}[2J".into()),
+        };
+        assert!(validate_reference(&reference).is_err());
+    }
+
+    #[test]
+    fn packet_validation_rejects_intrinsically_invalid_branches() {
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![Slot {
+                name: "place".into(),
+                ..Default::default()
+            }],
+        };
+        let mut packet = SelectionPacket::new(Some("story".into()), None);
+        packet.selections.push(Selection {
+            slot: Some("place".into()),
+            branch: Branch::new("relative-path"),
+        });
+
+        let violations = validate_packet(&frame, &packet);
+        assert!(violations
+            .iter()
+            .any(|reason| reason.contains("contains an invalid branch")));
+    }
+
+    #[test]
+    fn frame_and_query_validation_are_core_domain_rules() {
+        let frame = Frame {
+            name: "story".into(),
+            description: Some("unsafe\u{1b}[2J".into()),
+            slots: Vec::new(),
+        };
+        assert!(matches!(
+            validate_frame(&frame),
+            Err(CoreError::InvalidFrame { .. })
+        ));
+
+        let mut query = SampleQuery::default();
+        query.avoid_o2m.insert(
+            "topic".into(),
+            (0..MAX_QUERY_FILTER_ITEMS)
+                .map(|index| format!("value-{index}"))
+                .collect(),
+        );
+        assert!(matches!(
+            validate_sample_query(&query),
+            Err(CoreError::InvalidQuery(_))
+        ));
     }
 }
