@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod cli;
 mod commands;
 mod db;
 mod matching;

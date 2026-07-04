@@ -433,6 +433,7 @@ async fn persist_packet(
             &branch_ids,
         )
         .await
+        .map_err(Into::into)
 }
 fn packet_usage_record(
     frame_name: Option<&str>,

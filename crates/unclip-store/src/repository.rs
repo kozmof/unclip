@@ -7,12 +7,11 @@ use async_trait::async_trait;
 use sea_orm::{
     sea_query::{LikeExpr, Query, SelectStatement},
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, DbErr, EntityTrait,
-    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
 };
 use unclip_core::{
-    parent_of, validate_branch_record, validate_reference, Branch, CoreError, Reference,
-    SampleQuery,
+    parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
 };
 use unclip_entity::{
     branch_o2m_values, branch_o2o_values, branch_references, branches, usage_history,
@@ -20,6 +19,7 @@ use unclip_entity::{
 
 use crate::mapper;
 use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
+use crate::StoreError;
 
 /// Fail broad queries before hydrating an unbounded archive into memory.
 ///
@@ -38,30 +38,8 @@ const MAX_BULK_RESULTS: usize = 100_000;
 /// Page size used by bulk callers that intentionally consume every match.
 const FIND_PAGE_SIZE: u64 = 1_000;
 
-/// Repository conditions callers may need to handle programmatically.
-#[derive(Debug, thiserror::Error)]
-pub enum BranchRepositoryError {
-    #[error("branch not found: {path}")]
-    NotFound { path: String },
-    #[error("branch was modified by another process; reload and retry: {path}")]
-    Conflict { path: String },
-    #[error(
-        "query matched more than {limit} branches; narrow the filters or use paginated access"
-    )]
-    QueryTooBroad { limit: u64 },
-    #[error(
-        "bulk query matched more than {limit} branches; narrow the filters or use a streaming workflow"
-    )]
-    BulkQueryTooBroad { limit: usize },
-    #[error("invalid repository request: {message}")]
-    InvalidRequest { message: String },
-    #[error(transparent)]
-    InvalidBranch(#[from] CoreError),
-    #[error(transparent)]
-    Database(#[from] DbErr),
-    #[error(transparent)]
-    Unexpected(#[from] anyhow::Error),
-}
+/// Backward-compatible name for the shared repository error contract.
+pub type BranchRepositoryError = StoreError;
 
 /// Typed result returned by the branch persistence boundary.
 pub type BranchRepositoryResult<T> = Result<T, BranchRepositoryError>;

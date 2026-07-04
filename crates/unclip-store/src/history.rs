@@ -11,7 +11,7 @@ use sea_orm::{
 };
 use unclip_entity::{selection_packets, usage_history};
 
-use crate::sqlite_limits::INSERT_ROW_CHUNK;
+use crate::{sqlite_limits::INSERT_ROW_CHUNK, StoreResult};
 
 /// Aggregate usage info for a single branch.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -50,23 +50,20 @@ pub struct PacketUsageRecord {
 /// Persistence boundary used by sampling and usage-reporting commands.
 #[async_trait]
 pub trait HistoryRepository: Sync {
-    async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>>;
-    async fn usage_summaries(
-        &self,
-        branch_ids: &[i64],
-    ) -> anyhow::Result<HashMap<i64, UsageSummary>>;
-    async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary>;
+    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>>;
+    async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>>;
+    async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary>;
     async fn save_packet_with_usages(
         &self,
         record: PacketRecord<'_>,
         command: &str,
         branch_ids: &[i64],
-    ) -> anyhow::Result<()>;
+    ) -> StoreResult<()>;
     async fn save_packets_with_usages(
         &self,
         records: &[PacketUsageRecord],
         command: &str,
-    ) -> anyhow::Result<()>;
+    ) -> StoreResult<()>;
 }
 
 /// Store all 64 bits of an RNG seed in SQLite's signed 64-bit INTEGER.
@@ -106,7 +103,7 @@ impl SeaOrmHistoryRepository {
         command: &str,
         context: Option<&str>,
         packet_id: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> StoreResult<()> {
         let branch_id =
             i32::try_from(branch_id).context("branch id exceeds SQLite INTEGER range")?;
         let am = usage_history::ActiveModel {
@@ -122,7 +119,7 @@ impl SeaOrmHistoryRepository {
     }
 
     /// The set of branch ids appearing in the most recent `limit` usage rows.
-    pub async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>> {
+    pub async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
         let rows = usage_history::Entity::find()
             .order_by_desc(usage_history::Column::UsedAt)
             // `id` breaks ties so rows sharing a millisecond timestamp have a
@@ -145,7 +142,7 @@ impl SeaOrmHistoryRepository {
     pub async fn usage_summaries(
         &self,
         branch_ids: &[i64],
-    ) -> anyhow::Result<HashMap<i64, UsageSummary>> {
+    ) -> StoreResult<HashMap<i64, UsageSummary>> {
         // Stay well under SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` (999 on
         // older builds) with margin to spare.
         const CHUNK: usize = 500;
@@ -184,7 +181,7 @@ impl SeaOrmHistoryRepository {
     ///
     /// Delegates to the batched aggregate so a single branch and a set of
     /// branches share one code path (and one query shape).
-    pub async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary> {
+    pub async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
         Ok(self
             .usage_summaries(&[branch_id])
             .await?
@@ -193,7 +190,7 @@ impl SeaOrmHistoryRepository {
     }
 
     /// Persist a selection packet.
-    pub async fn save_packet(&self, record: PacketRecord<'_>) -> anyhow::Result<()> {
+    pub async fn save_packet(&self, record: PacketRecord<'_>) -> StoreResult<()> {
         let seed = record.seed.map(encode_seed);
         let am = selection_packets::ActiveModel {
             id: Set(record.id.to_string()),
@@ -218,7 +215,7 @@ impl SeaOrmHistoryRepository {
         record: PacketRecord<'_>,
         command: &str,
         branch_ids: &[i64],
-    ) -> anyhow::Result<()> {
+    ) -> StoreResult<()> {
         let ts = now();
         let txn = self.db.begin().await?;
         let seed = record.seed.map(encode_seed);
@@ -268,7 +265,7 @@ impl SeaOrmHistoryRepository {
         &self,
         records: &[PacketUsageRecord],
         command: &str,
-    ) -> anyhow::Result<()> {
+    ) -> StoreResult<()> {
         let ts = now();
         let txn = self.db.begin().await?;
 
@@ -314,18 +311,15 @@ impl SeaOrmHistoryRepository {
 
 #[async_trait]
 impl HistoryRepository for SeaOrmHistoryRepository {
-    async fn recent_branch_ids(&self, limit: u64) -> anyhow::Result<HashSet<i64>> {
+    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
         SeaOrmHistoryRepository::recent_branch_ids(self, limit).await
     }
 
-    async fn usage_summaries(
-        &self,
-        branch_ids: &[i64],
-    ) -> anyhow::Result<HashMap<i64, UsageSummary>> {
+    async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>> {
         SeaOrmHistoryRepository::usage_summaries(self, branch_ids).await
     }
 
-    async fn usage_for(&self, branch_id: i64) -> anyhow::Result<UsageSummary> {
+    async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
         SeaOrmHistoryRepository::usage_for(self, branch_id).await
     }
 
@@ -334,7 +328,7 @@ impl HistoryRepository for SeaOrmHistoryRepository {
         record: PacketRecord<'_>,
         command: &str,
         branch_ids: &[i64],
-    ) -> anyhow::Result<()> {
+    ) -> StoreResult<()> {
         SeaOrmHistoryRepository::save_packet_with_usages(self, record, command, branch_ids).await
     }
 
@@ -342,7 +336,7 @@ impl HistoryRepository for SeaOrmHistoryRepository {
         &self,
         records: &[PacketUsageRecord],
         command: &str,
-    ) -> anyhow::Result<()> {
+    ) -> StoreResult<()> {
         SeaOrmHistoryRepository::save_packets_with_usages(self, records, command).await
     }
 }

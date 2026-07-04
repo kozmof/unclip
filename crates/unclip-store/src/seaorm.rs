@@ -1,5 +1,6 @@
 //! Database connection helpers.
 
+use crate::StoreResult;
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 
 /// Open a connection to the given SQLite URL and enable foreign keys.
@@ -14,7 +15,7 @@ use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 /// `busy_timeout` lets a second writer (e.g. a concurrent CLI invocation in a
 /// separate process) wait briefly for a lock instead of failing immediately
 /// with "database is locked".
-pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
+pub async fn connect(url: &str) -> StoreResult<DatabaseConnection> {
     connect_with_options(ConnectOptions::new(url.to_owned())).await
 }
 
@@ -22,7 +23,7 @@ pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
 ///
 /// This is used by path-based callers that need to pass a native filesystem
 /// `Path` to SQLx instead of round-tripping it through a UTF-8 connection URL.
-pub async fn connect_with_options(mut opt: ConnectOptions) -> anyhow::Result<DatabaseConnection> {
+pub async fn connect_with_options(mut opt: ConnectOptions) -> StoreResult<DatabaseConnection> {
     opt.max_connections(1).min_connections(1);
     let db = Database::connect(opt).await?;
     db.execute_unprepared("PRAGMA foreign_keys = ON;").await?;
@@ -31,14 +32,14 @@ pub async fn connect_with_options(mut opt: ConnectOptions) -> anyhow::Result<Dat
 }
 
 /// Open a connection and run all pending migrations.
-pub async fn connect_and_migrate(url: &str) -> anyhow::Result<DatabaseConnection> {
+pub async fn connect_and_migrate(url: &str) -> StoreResult<DatabaseConnection> {
     connect_and_migrate_with_options(ConnectOptions::new(url.to_owned())).await
 }
 
 /// Open configured connection options and run all pending migrations.
 pub async fn connect_and_migrate_with_options(
     opt: ConnectOptions,
-) -> anyhow::Result<DatabaseConnection> {
+) -> StoreResult<DatabaseConnection> {
     let db = connect_with_options(opt).await?;
     unclip_migration::up(&db, None).await?;
     Ok(db)

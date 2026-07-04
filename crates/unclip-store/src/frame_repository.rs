@@ -14,6 +14,7 @@ use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, f
 
 use crate::frame_mapper;
 use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
+use crate::StoreResult;
 
 /// Summary of a stored frame, used for `unclip frames`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,13 +28,13 @@ pub struct FrameInfo {
 #[async_trait]
 pub trait FrameRepository {
     /// Insert or replace a frame and all of its slots.
-    async fn save_frame(&self, frame: Frame) -> anyhow::Result<()>;
+    async fn save_frame(&self, frame: Frame) -> StoreResult<()>;
     /// Insert or replace many frames atomically: a failure on any frame rolls
     /// the entire batch back, so an import never half-applies.
-    async fn save_frames(&self, frames: Vec<Frame>) -> anyhow::Result<()>;
-    async fn get_frame(&self, name: &str) -> anyhow::Result<Option<Frame>>;
-    async fn list_frames(&self) -> anyhow::Result<Vec<FrameInfo>>;
-    async fn delete_frame(&self, name: &str) -> anyhow::Result<()>;
+    async fn save_frames(&self, frames: Vec<Frame>) -> StoreResult<()>;
+    async fn get_frame(&self, name: &str) -> StoreResult<Option<Frame>>;
+    async fn list_frames(&self) -> StoreResult<Vec<FrameInfo>>;
+    async fn delete_frame(&self, name: &str) -> StoreResult<()>;
 }
 
 /// SeaORM implementation backed by SQLite.
@@ -343,14 +344,14 @@ fn checked_slot_count(slot: &Slot) -> anyhow::Result<i32> {
 
 #[async_trait]
 impl FrameRepository for SeaOrmFrameRepository {
-    async fn save_frame(&self, frame: Frame) -> anyhow::Result<()> {
+    async fn save_frame(&self, frame: Frame) -> StoreResult<()> {
         let txn = self.db.begin().await?;
         Self::save_frame_in_txn(&txn, frame).await?;
         txn.commit().await?;
         Ok(())
     }
 
-    async fn save_frames(&self, frames: Vec<Frame>) -> anyhow::Result<()> {
+    async fn save_frames(&self, frames: Vec<Frame>) -> StoreResult<()> {
         let txn = self.db.begin().await?;
         for frame in frames {
             Self::save_frame_in_txn(&txn, frame).await?;
@@ -359,7 +360,7 @@ impl FrameRepository for SeaOrmFrameRepository {
         Ok(())
     }
 
-    async fn get_frame(&self, name: &str) -> anyhow::Result<Option<Frame>> {
+    async fn get_frame(&self, name: &str) -> StoreResult<Option<Frame>> {
         let Some(frame) = frames::Entity::find()
             .filter(frames::Column::Name.eq(name))
             .one(&self.db)
@@ -383,7 +384,7 @@ impl FrameRepository for SeaOrmFrameRepository {
         )))
     }
 
-    async fn list_frames(&self) -> anyhow::Result<Vec<FrameInfo>> {
+    async fn list_frames(&self) -> StoreResult<Vec<FrameInfo>> {
         let mut frames_list = frames::Entity::find().all(&self.db).await?;
         frames_list.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -403,7 +404,7 @@ impl FrameRepository for SeaOrmFrameRepository {
             .collect())
     }
 
-    async fn delete_frame(&self, name: &str) -> anyhow::Result<()> {
+    async fn delete_frame(&self, name: &str) -> StoreResult<()> {
         let Some(frame) = frames::Entity::find()
             .filter(frames::Column::Name.eq(name))
             .one(&self.db)

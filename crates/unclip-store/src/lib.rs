@@ -2,15 +2,17 @@
 
 #![forbid(unsafe_code)]
 
-pub mod frame_mapper;
-pub mod frame_repository;
-pub mod history;
-pub mod mapper;
-pub mod pattern_repository;
-pub mod repository;
-pub mod seaorm;
+mod error;
+mod frame_mapper;
+mod frame_repository;
+mod history;
+mod mapper;
+mod pattern_repository;
+mod repository;
+mod seaorm;
 mod sqlite_limits;
 
+pub use error::{StoreError, StoreResult};
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
     now, HistoryRepository, PacketRecord, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,

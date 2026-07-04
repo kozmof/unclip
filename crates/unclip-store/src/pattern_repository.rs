@@ -1,5 +1,6 @@
 //! Repository for the pattern dictionary.
 
+use crate::StoreResult;
 use anyhow::Context;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
@@ -27,7 +28,7 @@ impl SeaOrmPatternRepository {
     }
 
     /// Add a pattern entry; returns its new id.
-    pub async fn add(&self, entry: &PatternEntry) -> anyhow::Result<i64> {
+    pub async fn add(&self, entry: &PatternEntry) -> StoreResult<i64> {
         validate_pattern_entry(entry)?;
         let (kind, name, value) = target_columns(&entry.target);
         let am = pattern_entries::ActiveModel {
@@ -44,16 +45,19 @@ impl SeaOrmPatternRepository {
     }
 
     /// List all stored patterns, ordered by id.
-    pub async fn list(&self) -> anyhow::Result<Vec<StoredPattern>> {
+    pub async fn list(&self) -> StoreResult<Vec<StoredPattern>> {
         let rows = pattern_entries::Entity::find()
             .order_by_asc(pattern_entries::Column::Id)
             .all(&self.db)
             .await?;
-        rows.into_iter().map(row_to_stored).collect()
+        rows.into_iter()
+            .map(row_to_stored)
+            .collect::<anyhow::Result<_>>()
+            .map_err(Into::into)
     }
 
     /// Remove a pattern entry by id. Returns whether a row was deleted.
-    pub async fn remove(&self, id: i64) -> anyhow::Result<bool> {
+    pub async fn remove(&self, id: i64) -> StoreResult<bool> {
         let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
         let res = pattern_entries::Entity::delete_by_id(id)
             .exec(&self.db)
@@ -62,7 +66,7 @@ impl SeaOrmPatternRepository {
     }
 
     /// Enable or disable a pattern entry by id. Returns whether a row matched.
-    pub async fn set_enabled(&self, id: i64, enabled: bool) -> anyhow::Result<bool> {
+    pub async fn set_enabled(&self, id: i64, enabled: bool) -> StoreResult<bool> {
         let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
         let am = pattern_entries::ActiveModel {
             enabled: Set(enabled as i32),
@@ -77,14 +81,15 @@ impl SeaOrmPatternRepository {
     }
 
     /// All enabled pattern entries as matcher input.
-    pub async fn all_enabled(&self) -> anyhow::Result<Vec<PatternEntry>> {
+    pub async fn all_enabled(&self) -> StoreResult<Vec<PatternEntry>> {
         let rows = pattern_entries::Entity::find()
             .filter(pattern_entries::Column::Enabled.eq(1))
             .all(&self.db)
             .await?;
         rows.into_iter()
             .map(|r| row_to_stored(r).map(|s| s.entry))
-            .collect()
+            .collect::<anyhow::Result<_>>()
+            .map_err(Into::into)
     }
 }
 

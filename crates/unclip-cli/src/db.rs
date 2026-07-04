@@ -31,7 +31,9 @@ fn db_options(path: &Path) -> anyhow::Result<ConnectOptions> {
 
 /// Open the database, creating and migrating it if needed.
 pub async fn open(path: &Path) -> anyhow::Result<DatabaseConnection> {
-    unclip_store::connect_and_migrate_with_options(db_options(path)?).await
+    unclip_store::connect_and_migrate_with_options(db_options(path)?)
+        .await
+        .map_err(Into::into)
 }
 
 /// Open an existing database, erroring if the file is not there.

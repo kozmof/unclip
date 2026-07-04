@@ -29,8 +29,18 @@ jobs:
         # dependency build-script warnings as hard errors.
         run: cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings
 
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
+
       - name: Test
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --all-targets
+
+      # Keep release-only code generation and optimization failures from being
+      # discovered for the first time during packaging.
+      - name: Release build
+        run: cargo build --release --locked --workspace
 
   audit:
     name: cargo-deny (advisories + bans + sources + licenses)
