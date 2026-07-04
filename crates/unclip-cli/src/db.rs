@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use sea_orm::{ConnectOptions, DatabaseConnection};
 use unclip_store::{
     SeaOrmBranchRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository,
@@ -13,7 +14,7 @@ use unclip_store::{
 /// filesystem `Path`. This avoids URL-significant characters and preserves
 /// non-UTF-8 input until SQLx can reject it instead of opening a lossy
 /// replacement path.
-fn db_options(path: &Path) -> anyhow::Result<ConnectOptions> {
+fn db_options(path: &Path, create: bool) -> anyhow::Result<ConnectOptions> {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -22,35 +23,43 @@ fn db_options(path: &Path) -> anyhow::Result<ConnectOptions> {
             .map_err(|err| anyhow::anyhow!("failed to resolve database path: {err}"))?
     };
 
-    // Start with read-write-create behavior, then replace only the filename
-    // using SQLx's native Path API.
-    let mut options = ConnectOptions::new("sqlite://unclip-placeholder?mode=rwc");
+    // Select the SQLite open mode before replacing only the filename through
+    // SQLx's native Path API. Existing-database callers use `mode=rw`, so the
+    // open itself—not a racy preflight existence check—guarantees that a
+    // missing file cannot be silently recreated.
+    let url = if create {
+        "sqlite://unclip-placeholder?mode=rwc"
+    } else {
+        "sqlite://unclip-placeholder?mode=rw"
+    };
+    let mut options = ConnectOptions::new(url);
     options.map_sqlx_sqlite_opts(move |sqlite| sqlite.filename(&abs));
     Ok(options)
 }
 
 /// Open the database, creating and migrating it if needed.
 pub async fn open(path: &Path) -> anyhow::Result<DatabaseConnection> {
-    unclip_store::connect_and_migrate_with_options(db_options(path)?)
+    unclip_store::connect_and_migrate_with_options(db_options(path, true)?)
         .await
         .map_err(Into::into)
 }
 
 /// Open an existing database, erroring if the file is not there.
 ///
-/// Only `init` should create a database; every other command requires one to
-/// already exist. Without this guard a typo in `--db` would silently open a
-/// fresh, empty database (SQLite `mode=rwc` creates the file), making commands
-/// look like they ran against an empty archive. Migrations are still applied so
-/// an existing database is transparently upgraded.
+/// Only `init` should create a database; every other command opens SQLite in
+/// read-write-only mode. This makes the existence requirement atomic with the
+/// open: a typo or a file removed concurrently cannot create a fresh, empty
+/// archive. Migrations are still applied so an existing database is
+/// transparently upgraded.
 pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
-    if !path.exists() {
-        anyhow::bail!(
-            "database not found: {} (run `unclip init` to create it)",
-            path.display()
-        );
-    }
-    open(path).await
+    unclip_store::connect_and_migrate_with_options(db_options(path, false)?)
+        .await
+        .with_context(|| {
+            format!(
+                "database not found or could not be opened: {} (run `unclip init` to create it)",
+                path.display()
+            )
+        })
 }
 
 /// A bundle of repositories sharing one connection.
@@ -109,5 +118,23 @@ mod tests {
         assert!(path.exists());
         drop(db);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn open_existing_never_creates_a_missing_database() {
+        let path = std::env::temp_dir().join(format!(
+            "unclip-missing-existing-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock is before Unix epoch")
+                .as_nanos()
+        ));
+        assert!(!path.exists());
+
+        let error = open_existing(&path).await.unwrap_err().to_string();
+
+        assert!(error.contains("database not found"), "got: {error}");
+        assert!(!path.exists());
     }
 }
