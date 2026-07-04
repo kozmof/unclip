@@ -59,6 +59,29 @@ fn default_count() -> usize {
     1
 }
 
+/// `Default` mirrors the serde defaults: every constraint map empty and
+/// `count` = 1. The empty `name` is not a valid persisted slot (the store
+/// rejects it); the impl exists so constructors and tests can write
+/// `Slot { name: ..., ..Default::default() }` instead of listing every field.
+impl Default for Slot {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            under: None,
+            require_o2o: BTreeMap::new(),
+            default_o2o: BTreeMap::new(),
+            avoid_o2o: BTreeMap::new(),
+            require_o2m: BTreeMap::new(),
+            prefer_o2m: BTreeMap::new(),
+            avoid_o2m: BTreeMap::new(),
+            count: default_count(),
+            avoid_recent: false,
+            weighted: false,
+            metadata_suggest: Vec::new(),
+        }
+    }
+}
+
 impl Frame {
     /// Look up a slot by name.
     pub fn slot(&self, name: &str) -> Option<&Slot> {

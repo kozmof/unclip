@@ -5,10 +5,11 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::Context;
 use sea_orm::ActiveValue::{NotSet, Set};
 use unclip_core::{parent_of, Branch, Reference};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
+
+use crate::sqlite_limits::sqlite_branch_id;
 
 /// Build a `branches` active model for insertion/update.
 ///
@@ -26,7 +27,7 @@ pub fn branch_active_model(
 
     Ok(branches::ActiveModel {
         id: match branch.id {
-            Some(id) => Set(i32::try_from(id).context("branch id exceeds SQLite INTEGER range")?),
+            Some(id) => Set(sqlite_branch_id(id)?),
             None => NotSet,
         },
         path: Set(branch.path.clone()),

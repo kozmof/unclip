@@ -26,7 +26,7 @@ pub struct FrameInfo {
 
 /// Persistence boundary for frames.
 #[async_trait]
-pub trait FrameRepository {
+pub trait FrameRepository: Sync {
     /// Insert or replace a frame and all of its slots.
     async fn save_frame(&self, frame: Frame) -> StoreResult<()>;
     /// Insert or replace many frames atomically: a failure on any frame rolls

@@ -18,7 +18,7 @@ use unclip_entity::{
 };
 
 use crate::mapper;
-use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
+use crate::sqlite_limits::{sqlite_branch_id, ID_CHUNK, INSERT_ROW_CHUNK};
 use crate::StoreError;
 
 /// Fail broad queries before hydrating an unbounded archive into memory.
@@ -377,12 +377,11 @@ impl BranchRepository for SeaOrmBranchRepository {
 
     async fn update(&self, branch: Branch) -> BranchRepositoryResult<()> {
         validate_branch_record(&branch)?;
-        let expected_id = i32::try_from(
+        let expected_id = sqlite_branch_id(
             branch
                 .id
                 .context("branch has no persistence id; reload it before updating")?,
-        )
-        .context("branch id exceeds SQLite INTEGER range")?;
+        )?;
         let expected_revision = branch
             .revision
             .clone()
@@ -682,12 +681,20 @@ impl BranchRepository for SeaOrmBranchRepository {
         let txn = self.db.begin().await?;
         let (mut added, mut updated) = (0usize, 0usize);
 
-        for mut branch in branches {
-            let existing = branches::Entity::find()
-                .filter(branches::Column::Path.eq(&branch.path))
-                .one(&txn)
+        // One chunked lookup for every incoming path instead of a SELECT per
+        // branch; large imports would otherwise pay one round-trip per record.
+        let all_paths: Vec<&str> = branches.iter().map(|b| b.path.as_str()).collect();
+        let mut existing_by_path: HashMap<String, branches::Model> = HashMap::new();
+        for chunk in all_paths.chunks(ID_CHUNK) {
+            let models = branches::Entity::find()
+                .filter(branches::Column::Path.is_in(chunk.iter().copied()))
+                .all(&txn)
                 .await?;
-            match existing {
+            existing_by_path.extend(models.into_iter().map(|m| (m.path.clone(), m)));
+        }
+
+        for mut branch in branches {
+            match existing_by_path.remove(&branch.path) {
                 Some(model) => {
                     let branch_id = model.id;
                     branch.id = Some(branch_id as i64);

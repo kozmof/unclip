@@ -2,16 +2,18 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
-    DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryOrder, QuerySelect,
-    Statement, TransactionTrait,
+    DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryOrder,
+    QuerySelect, Statement, TransactionTrait,
 };
 use unclip_entity::{selection_packets, usage_history};
 
-use crate::{sqlite_limits::INSERT_ROW_CHUNK, StoreResult};
+use crate::{
+    sqlite_limits::{sqlite_branch_id, INSERT_ROW_CHUNK},
+    StoreResult,
+};
 
 /// Aggregate usage info for a single branch.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -28,16 +30,9 @@ struct UsageRow {
     last_used: Option<String>,
 }
 
-/// Record to persist when saving a packet.
-pub struct PacketRecord<'a> {
-    pub id: &'a str,
-    pub frame_name: Option<&'a str>,
-    pub seed: Option<u64>,
-    pub query_json: Option<&'a str>,
-    pub packet_json: &'a str,
-}
-
-/// An owned packet and its selected branch ids, used for atomic batch writes.
+/// A packet and its selected branch ids, persisted atomically. Single-packet
+/// callers pass a one-element batch; there is deliberately no separate
+/// single-packet record type or code path.
 pub struct PacketUsageRecord {
     pub id: String,
     pub frame_name: Option<String>,
@@ -53,12 +48,8 @@ pub trait HistoryRepository: Sync {
     async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>>;
     async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>>;
     async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary>;
-    async fn save_packet_with_usages(
-        &self,
-        record: PacketRecord<'_>,
-        command: &str,
-        branch_ids: &[i64],
-    ) -> StoreResult<()>;
+    /// Persist packets and their usage rows atomically: a failure on any packet
+    /// rolls back the whole batch.
     async fn save_packets_with_usages(
         &self,
         records: &[PacketUsageRecord],
@@ -104,8 +95,7 @@ impl SeaOrmHistoryRepository {
         context: Option<&str>,
         packet_id: Option<&str>,
     ) -> StoreResult<()> {
-        let branch_id =
-            i32::try_from(branch_id).context("branch id exceeds SQLite INTEGER range")?;
+        let branch_id = sqlite_branch_id(branch_id)?;
         let am = usage_history::ActiveModel {
             id: NotSet,
             branch_id: Set(branch_id),
@@ -189,78 +179,13 @@ impl SeaOrmHistoryRepository {
             .unwrap_or_default())
     }
 
-    /// Persist a selection packet.
-    pub async fn save_packet(&self, record: PacketRecord<'_>) -> StoreResult<()> {
-        let seed = record.seed.map(encode_seed);
-        let am = selection_packets::ActiveModel {
-            id: Set(record.id.to_string()),
-            frame_name: Set(record.frame_name.map(str::to_string)),
-            seed: Set(seed),
-            created_at: Set(now()),
-            query_json: Set(record.query_json.map(str::to_string)),
-            packet_json: Set(record.packet_json.to_string()),
-        };
-        selection_packets::Entity::insert(am).exec(&self.db).await?;
-        Ok(())
-    }
-
-    /// Persist a packet and the usage rows for its selected branches atomically.
-    ///
-    /// The packet row and one `usage_history` row per id in `branch_ids` are
-    /// written in a single transaction, so a failure part-way through cannot
-    /// leave a packet without its usages (or vice versa). All rows share one
-    /// `used_at`/`created_at` timestamp.
-    pub async fn save_packet_with_usages(
-        &self,
-        record: PacketRecord<'_>,
-        command: &str,
-        branch_ids: &[i64],
-    ) -> StoreResult<()> {
-        let ts = now();
-        let txn = self.db.begin().await?;
-        let seed = record.seed.map(encode_seed);
-
-        let packet = selection_packets::ActiveModel {
-            id: Set(record.id.to_string()),
-            frame_name: Set(record.frame_name.map(str::to_string)),
-            seed: Set(seed),
-            created_at: Set(ts.clone()),
-            query_json: Set(record.query_json.map(str::to_string)),
-            packet_json: Set(record.packet_json.to_string()),
-        };
-        selection_packets::Entity::insert(packet).exec(&txn).await?;
-
-        if !branch_ids.is_empty() {
-            let usages: Vec<usage_history::ActiveModel> = branch_ids
-                .iter()
-                .map(|&id| {
-                    Ok(usage_history::ActiveModel {
-                        id: NotSet,
-                        branch_id: Set(
-                            i32::try_from(id).context("branch id exceeds SQLite INTEGER range")?
-                        ),
-                        used_at: Set(ts.clone()),
-                        command: Set(Some(command.to_string())),
-                        context: Set(None),
-                        packet_id: Set(Some(record.id.to_string())),
-                    })
-                })
-                .collect::<anyhow::Result<_>>()?;
-            let mut usages = usages.into_iter().peekable();
-            while usages.peek().is_some() {
-                let chunk: Vec<_> = usages.by_ref().take(INSERT_ROW_CHUNK).collect();
-                usage_history::Entity::insert_many(chunk).exec(&txn).await?;
-            }
-        }
-
-        txn.commit().await?;
-        Ok(())
-    }
-
     /// Persist a batch of packets and all their usage rows atomically.
     ///
-    /// A failure in any packet rolls back every packet and usage row in the
-    /// batch, matching the all-or-nothing behavior of branch and frame imports.
+    /// Every packet row and one `usage_history` row per selected branch are
+    /// written in a single transaction sharing one `used_at`/`created_at`
+    /// timestamp, so a failure in any packet rolls back every packet and usage
+    /// row in the batch — matching the all-or-nothing behavior of branch and
+    /// frame imports. Single-packet callers pass a one-element slice.
     pub async fn save_packets_with_usages(
         &self,
         records: &[PacketUsageRecord],
@@ -279,34 +204,45 @@ impl SeaOrmHistoryRepository {
                 packet_json: Set(record.packet_json.clone()),
             };
             selection_packets::Entity::insert(packet).exec(&txn).await?;
-
-            if !record.branch_ids.is_empty() {
-                let usages: Vec<usage_history::ActiveModel> = record
-                    .branch_ids
-                    .iter()
-                    .map(|&id| {
-                        Ok(usage_history::ActiveModel {
-                            id: NotSet,
-                            branch_id: Set(i32::try_from(id)
-                                .context("branch id exceeds SQLite INTEGER range")?),
-                            used_at: Set(ts.clone()),
-                            command: Set(Some(command.to_string())),
-                            context: Set(None),
-                            packet_id: Set(Some(record.id.clone())),
-                        })
-                    })
-                    .collect::<anyhow::Result<_>>()?;
-                let mut usages = usages.into_iter().peekable();
-                while usages.peek().is_some() {
-                    let chunk: Vec<_> = usages.by_ref().take(INSERT_ROW_CHUNK).collect();
-                    usage_history::Entity::insert_many(chunk).exec(&txn).await?;
-                }
-            }
+            insert_usages(&txn, &ts, command, &record.id, &record.branch_ids).await?;
         }
 
         txn.commit().await?;
         Ok(())
     }
+}
+
+/// Insert one usage row per branch id, chunked below SQLite's bound-variable
+/// limit, all sharing `ts` and pointing at `packet_id`.
+async fn insert_usages(
+    txn: &DatabaseTransaction,
+    ts: &str,
+    command: &str,
+    packet_id: &str,
+    branch_ids: &[i64],
+) -> StoreResult<()> {
+    if branch_ids.is_empty() {
+        return Ok(());
+    }
+    let usages: Vec<usage_history::ActiveModel> = branch_ids
+        .iter()
+        .map(|&id| {
+            Ok(usage_history::ActiveModel {
+                id: NotSet,
+                branch_id: Set(sqlite_branch_id(id)?),
+                used_at: Set(ts.to_string()),
+                command: Set(Some(command.to_string())),
+                context: Set(None),
+                packet_id: Set(Some(packet_id.to_string())),
+            })
+        })
+        .collect::<anyhow::Result<_>>()?;
+    for chunk in usages.chunks(INSERT_ROW_CHUNK) {
+        usage_history::Entity::insert_many(chunk.iter().cloned())
+            .exec(txn)
+            .await?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -321,15 +257,6 @@ impl HistoryRepository for SeaOrmHistoryRepository {
 
     async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary> {
         SeaOrmHistoryRepository::usage_for(self, branch_id).await
-    }
-
-    async fn save_packet_with_usages(
-        &self,
-        record: PacketRecord<'_>,
-        command: &str,
-        branch_ids: &[i64],
-    ) -> StoreResult<()> {
-        SeaOrmHistoryRepository::save_packet_with_usages(self, record, command, branch_ids).await
     }
 
     async fn save_packets_with_usages(

@@ -49,13 +49,23 @@ pub fn merge_o2o(
     Ok(())
 }
 
-/// Arguments for `add`, assembled by clap in `main`.
+/// Arguments for `add`, parsed directly by clap and flattened into the
+/// `add` subcommand.
+#[derive(clap::Args)]
 pub struct AddInput {
+    /// Slash-separated scope address, e.g. /ikebukuro/station/exit.
     pub path: String,
+    #[arg(long)]
     pub title: Option<String>,
+    #[arg(long)]
     pub description: Option<String>,
+    #[arg(long, default_value_t = 1.0)]
     pub weight: f64,
+    /// One-to-one indexed value, name=value (repeatable).
+    #[arg(long = "o2o", value_parser = parse_kv)]
     pub o2o: Vec<(String, String)>,
+    /// One-to-many indexed value, name=value (repeatable).
+    #[arg(long = "o2m", value_parser = parse_kv)]
     pub o2m: Vec<(String, String)>,
 }
 
@@ -90,22 +100,40 @@ pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Resul
     Ok(())
 }
 
-/// Arguments for `edit`, assembled by clap in `main`.
+/// Arguments for `edit`, parsed directly by clap and flattened into the
+/// `edit` subcommand.
 ///
 /// Every field is an additive/overwriting patch over an existing branch; a
 /// `None`/empty value leaves the corresponding part untouched. `metadata` is
 /// intentionally not editable here — it is free-form JSON and is better managed
 /// by re-`import`.
+#[derive(clap::Args)]
 pub struct EditInput {
+    /// Branch path to edit.
     pub path: String,
+    #[arg(long)]
     pub title: Option<String>,
+    /// Remove the title.
+    #[arg(long = "clear-title")]
     pub clear_title: bool,
+    #[arg(long)]
     pub description: Option<String>,
+    /// Remove the description.
+    #[arg(long = "clear-description")]
     pub clear_description: bool,
+    #[arg(long)]
     pub weight: Option<f64>,
+    /// Set (overwrite) a one-to-one value, name=value (repeatable).
+    #[arg(long = "o2o", value_parser = parse_kv)]
     pub o2o: Vec<(String, String)>,
+    /// Remove a one-to-one value by name (repeatable).
+    #[arg(long = "remove-o2o")]
     pub remove_o2o: Vec<String>,
+    /// Add a one-to-many value, name=value (repeatable).
+    #[arg(long = "add-o2m", value_parser = parse_kv)]
     pub add_o2m: Vec<(String, String)>,
+    /// Remove a one-to-many value, name=value (repeatable).
+    #[arg(long = "remove-o2m", value_parser = parse_kv)]
     pub remove_o2m: Vec<(String, String)>,
 }
 
@@ -522,6 +550,11 @@ fn parse_selector(selector: Option<String>) -> anyhow::Result<Selector> {
                 if name.is_empty() {
                     bail!("empty name in `{s}`");
                 }
+                // Indexed values are never empty (the store rejects them), so
+                // an empty value is a usage error, not a search for "".
+                if value.is_empty() {
+                    bail!("empty value in `{s}`");
+                }
                 Ok(Selector::Pair(name.to_string(), value.to_string()))
             }
             None => Ok(Selector::Name(s)),
@@ -653,8 +686,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_selector_rejects_empty_name() {
+    fn parse_selector_rejects_empty_name_or_value() {
         assert!(parse_selector(Some("=cafe".to_string())).is_err());
+        assert!(parse_selector(Some("place=".to_string())).is_err());
     }
 
     #[test]

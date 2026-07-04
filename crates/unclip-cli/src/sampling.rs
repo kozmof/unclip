@@ -3,15 +3,17 @@
 use std::collections::HashSet;
 
 use anyhow::{ensure, Context};
-use unclip_core::{
-    validate_path, Frame, SampleParams, SampleQuery, Selection, SelectionPacket,
-};
+use unclip_core::{validate_path, Frame, SampleParams, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
-use unclip_store::{now, BranchRepository, HistoryRepository, PacketRecord, PacketUsageRecord};
+use unclip_store::{now, BranchRepository, HistoryRepository, PacketUsageRecord};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
+
+/// Page size for streaming export; keeps each SQL page bounded while the
+/// rendered lines are flushed instead of accumulated.
+const EXPORT_PAGE_SIZE: u64 = 1_000;
 
 /// Prevent a typo or hostile input from preallocating an unbounded packet
 /// batch. Larger jobs can be split across invocations with explicit seeds.
@@ -28,6 +30,20 @@ pub struct FilterInput {
 }
 
 impl FilterInput {
+    /// Combine the shared filter flags with a command-specific `prefer_o2m`
+    /// list. Commands that never score (`query`, `stats`, `stale`, `export`)
+    /// pass an empty one — they do not expose the flag at all.
+    pub fn from_args(args: crate::cli::FilterArgs, prefer_o2m: Vec<(String, String)>) -> Self {
+        Self {
+            under: args.under,
+            require_o2o: args.o2o,
+            avoid_o2o: args.avoid_o2o,
+            require_o2m: args.require_o2m,
+            prefer_o2m,
+            avoid_o2m: args.avoid_o2m,
+        }
+    }
+
     /// Assemble the hard/soft filter from the parsed flags. Sampling controls
     /// (count/weighted/avoid_recent) are not part of the filter — callers that
     /// draw build a [`SampleParams`] separately.
@@ -121,8 +137,10 @@ pub async fn sample_cmd(
     // `--dry-run`.
     crate::output::write_stdout(&rendered)?;
     if !dry_run {
-        let id = random_packet_id();
-        persist_packet(history, &id, None, "sample", &packet).await?;
+        let record = packet_usage_record(None, &packet)?;
+        history
+            .save_packets_with_usages(std::slice::from_ref(&record), "sample")
+            .await?;
     }
     Ok(())
 }
@@ -190,7 +208,10 @@ pub async fn compose_cmd(
     let mut packets = Vec::with_capacity(input.count);
 
     // The recent set is independent of slot and packet; fetch it once if any
-    // slot needs it.
+    // slot needs it. It is deliberately fixed for the whole invocation:
+    // selections drawn by earlier packets in this batch do not join the
+    // recent set for later ones, keeping every packet's draw distribution
+    // identical and reproducible from `base_seed`.
     let recent = if frame.slots.iter().any(|s| s.avoid_recent) {
         history.recent_branch_ids(RECENT_LIMIT).await?
     } else {
@@ -295,16 +316,39 @@ fn validate_under_overrides(frame: &Frame, overrides: &[UnderOverride]) -> anyho
 }
 
 /// `unclip export` — find branches by filter and render them.
+///
+/// JSONL has no document wrapper, so it streams: each page is rendered and
+/// written as it loads instead of retaining the whole hydrated result set.
+/// YAML/JSON produce a single wrapped document and still buffer (bounded by
+/// the store's bulk-result ceiling).
 pub async fn export_cmd(
     branches: &impl BranchRepository,
     filter: FilterInput,
     format: Format,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
-    let mut matched = branches.find_all(query).await?;
-    matched.sort_by(|a, b| a.path.cmp(&b.path));
-    crate::output::write_stdout(&unclip_io::render_branches(&matched, format)?)?;
-    Ok(())
+    match format {
+        Format::Jsonl => {
+            let mut after_path: Option<String> = None;
+            loop {
+                let page = branches
+                    .find_page(&query, after_path.as_deref(), EXPORT_PAGE_SIZE)
+                    .await?;
+                let done = (page.len() as u64) < EXPORT_PAGE_SIZE;
+                after_path = page.last().map(|branch| branch.path.clone());
+                crate::output::write_stdout(&unclip_io::render_branches(&page, format)?)?;
+                if done {
+                    return Ok(());
+                }
+            }
+        }
+        Format::Yaml | Format::Json => {
+            // `find_all` pages in path order, so the result needs no re-sort.
+            let matched = branches.find_all(query).await?;
+            crate::output::write_stdout(&unclip_io::render_branches(&matched, format)?)?;
+            Ok(())
+        }
+    }
 }
 
 /// `unclip used <path>`.
@@ -402,37 +446,7 @@ fn query_provenance(
     Ok(value)
 }
 
-/// Persist a packet and the usage rows for its selected branches in one
-/// transaction, so history can never record a packet without its usages.
-async fn persist_packet(
-    history: &impl HistoryRepository,
-    id: &str,
-    frame_name: Option<&str>,
-    command: &str,
-    packet: &SelectionPacket,
-) -> anyhow::Result<()> {
-    let packet_json = serde_json::to_string(packet)?;
-    let query_json = packet.query.as_ref().map(|q| q.to_string());
-    let branch_ids: Vec<i64> = packet
-        .selections
-        .iter()
-        .filter_map(|s| s.branch.id)
-        .collect();
-    history
-        .save_packet_with_usages(
-            PacketRecord {
-                id,
-                frame_name,
-                seed: packet.seed,
-                query_json: query_json.as_deref(),
-                packet_json: &packet_json,
-            },
-            command,
-            &branch_ids,
-        )
-        .await
-        .map_err(Into::into)
-}
+/// Build the record that persists a packet and its usage rows atomically.
 fn packet_usage_record(
     frame_name: Option<&str>,
     packet: &SelectionPacket,

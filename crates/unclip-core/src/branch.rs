@@ -82,7 +82,8 @@ impl Branch {
 pub fn is_under(path: &str, scope: &str) -> bool {
     let path = path.trim_end_matches('/');
     let scope = scope.trim_end_matches('/');
-    path == scope || path.starts_with(&format!("{scope}/"))
+    path.strip_prefix(scope)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// Compute the parent path of a slash-separated scope address.

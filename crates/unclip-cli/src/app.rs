@@ -8,7 +8,7 @@ use unclip_store::FrameRepository;
 use crate::cli::{Cli, Command, PatternAction};
 use crate::{commands, db, matching, sampling};
 
-use commands::{AddInput, EditInput, QueryInput};
+use commands::QueryInput;
 use sampling::{ComposeInput, FilterInput, SampleInput};
 
 pub async fn run() -> anyhow::Result<()> {
@@ -22,77 +22,22 @@ pub async fn run() -> anyhow::Result<()> {
             // open_repos already ran migrations; just confirm.
             crate::output::outln!("initialized {}", cli.db.display());
         }
-        Command::Add {
-            path,
-            title,
-            description,
-            weight,
-            o2o,
-            o2m,
-        } => {
-            commands::add(
-                &repos.branches,
-                AddInput {
-                    path,
-                    title,
-                    description,
-                    weight,
-                    o2o,
-                    o2m,
-                },
-            )
-            .await?;
-        }
-        Command::Edit {
-            path,
-            title,
-            clear_title,
-            description,
-            clear_description,
-            weight,
-            o2o,
-            remove_o2o,
-            add_o2m,
-            remove_o2m,
-        } => {
-            commands::edit(
-                &repos.branches,
-                EditInput {
-                    path,
-                    title,
-                    clear_title,
-                    description,
-                    clear_description,
-                    weight,
-                    o2o,
-                    remove_o2o,
-                    add_o2m,
-                    remove_o2m,
-                },
-            )
-            .await?;
-        }
+        Command::Add(input) => commands::add(&repos.branches, input).await?,
+        Command::Edit(input) => commands::edit(&repos.branches, input).await?,
         Command::Show { path } => commands::show(&repos.branches, &path).await?,
         Command::Ls { path } => commands::ls(&repos.branches, &path).await?,
         Command::Tree { path } => commands::tree(&repos.branches, &path).await?,
-        Command::Query {
-            under,
-            frame,
-            o2o,
-            avoid_o2o,
-            require_o2m,
-            avoid_o2m,
-        } => {
+        Command::Query { filter, frame } => {
             let frame_slot = resolve_query_slot(&repos.frames, frame.as_deref()).await?;
             commands::query(
                 &repos.branches,
                 QueryInput {
-                    under,
+                    under: filter.under,
                     frame_slot,
-                    require_o2o: o2o,
-                    avoid_o2o,
-                    require_o2m,
-                    avoid_o2m,
+                    require_o2o: filter.o2o,
+                    avoid_o2o: filter.avoid_o2o,
+                    require_o2m: filter.require_o2m,
+                    avoid_o2m: filter.avoid_o2m,
                 },
             )
             .await?;
@@ -112,12 +57,8 @@ pub async fn run() -> anyhow::Result<()> {
             commands::validate(&repos.branches, &repos.frames, &target, &frame).await?;
         }
         Command::Sample {
-            under,
-            o2o,
-            avoid_o2o,
-            require_o2m,
+            filter,
             prefer_o2m,
-            avoid_o2m,
             count,
             weighted,
             avoid_recent,
@@ -129,14 +70,7 @@ pub async fn run() -> anyhow::Result<()> {
                 &repos.branches,
                 &repos.history,
                 SampleInput {
-                    filter: FilterInput {
-                        under,
-                        require_o2o: o2o,
-                        avoid_o2o,
-                        require_o2m,
-                        prefer_o2m,
-                        avoid_o2m,
-                    },
+                    filter: FilterInput::from_args(filter, prefer_o2m),
                     count,
                     weighted,
                     avoid_recent,
@@ -173,45 +107,19 @@ pub async fn run() -> anyhow::Result<()> {
         Command::Used { path } => {
             sampling::used_cmd(&repos.branches, &repos.history, &path).await?;
         }
-        Command::Stats {
-            under,
-            o2o,
-            avoid_o2o,
-            require_o2m,
-            avoid_o2m,
-        } => {
+        Command::Stats { filter } => {
             sampling::stats_cmd(
                 &repos.branches,
                 &repos.history,
-                FilterInput {
-                    under,
-                    require_o2o: o2o,
-                    avoid_o2o,
-                    require_o2m,
-                    prefer_o2m: Vec::new(),
-                    avoid_o2m,
-                },
+                FilterInput::from_args(filter, Vec::new()),
             )
             .await?;
         }
-        Command::Stale {
-            under,
-            o2o,
-            avoid_o2o,
-            require_o2m,
-            avoid_o2m,
-        } => {
+        Command::Stale { filter } => {
             sampling::stale_cmd(
                 &repos.branches,
                 &repos.history,
-                FilterInput {
-                    under,
-                    require_o2o: o2o,
-                    avoid_o2o,
-                    require_o2m,
-                    prefer_o2m: Vec::new(),
-                    avoid_o2m,
-                },
+                FilterInput::from_args(filter, Vec::new()),
             )
             .await?;
         }
@@ -219,24 +127,10 @@ pub async fn run() -> anyhow::Result<()> {
             let branches = unclip_io::load_branches_file(&file)?;
             commands::import(&repos.branches, branches).await?;
         }
-        Command::Export {
-            under,
-            o2o,
-            avoid_o2o,
-            require_o2m,
-            avoid_o2m,
-            format,
-        } => {
+        Command::Export { filter, format } => {
             sampling::export_cmd(
                 &repos.branches,
-                FilterInput {
-                    under,
-                    require_o2o: o2o,
-                    avoid_o2o,
-                    require_o2m,
-                    prefer_o2m: Vec::new(),
-                    avoid_o2m,
-                },
+                FilterInput::from_args(filter, Vec::new()),
                 format,
             )
             .await?;
