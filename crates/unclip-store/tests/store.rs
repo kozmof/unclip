@@ -177,8 +177,8 @@ async fn reference_attachment_invalidates_stale_edits_across_connections() {
 
     let db_a = connect_and_migrate_with_options(options()).await.unwrap();
     let db_b = connect_and_migrate_with_options(options()).await.unwrap();
-    let repo_a = SeaOrmBranchRepository::new(db_a);
-    let repo_b = SeaOrmBranchRepository::new(db_b);
+    let repo_a = SeaOrmBranchRepository::new(db_a.clone());
+    let repo_b = SeaOrmBranchRepository::new(db_b.clone());
 
     repo_a.add(Branch::new("/shared")).await.unwrap();
     let mut stale = repo_a.get("/shared").await.unwrap().unwrap();
@@ -211,6 +211,11 @@ async fn reference_attachment_invalidates_stale_edits_across_connections() {
 
     drop(repo_a);
     drop(repo_b);
+    // Dropping a connection releases its pool asynchronously; on Windows the
+    // file stays locked until the pool is closed, so close explicitly before
+    // deleting the database file.
+    db_a.close().await.unwrap();
+    db_b.close().await.unwrap();
     std::fs::remove_file(path).unwrap();
 }
 
