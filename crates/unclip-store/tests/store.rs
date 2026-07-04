@@ -4,7 +4,10 @@
 //! public API exactly as downstream crates see it.
 
 use serde_json::json;
-use unclip_core::{Branch, Frame, PatternEntry, PatternTarget, Reference, SampleQuery, Slot};
+use unclip_core::{
+    Branch, Frame, PatternEntry, PatternTarget, Reference, SampleQuery, Slot,
+    MAX_BRANCH_RECORD_BYTES,
+};
 use unclip_store::{
     connect_and_migrate, connect_and_migrate_with_options, BranchRepository, BranchRepositoryError,
     FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
@@ -625,6 +628,30 @@ async fn save_frames_is_atomic() {
 }
 
 #[tokio::test]
+async fn save_frames_rejects_duplicate_names_without_writing() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let frames = SeaOrmFrameRepository::new(db);
+    let frame = |count| Frame {
+        name: "duplicate".into(),
+        description: None,
+        slots: vec![Slot {
+            name: "s".into(),
+            count,
+            ..Default::default()
+        }],
+    };
+
+    let error = frames
+        .save_frames(vec![frame(1), frame(2)])
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("duplicate frame name"), "got: {error}");
+    assert!(frames.list_frames().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn upsert_many_inserts_and_replaces() {
     let repo = repo().await;
 
@@ -939,6 +966,36 @@ async fn pattern_disable_enable_remove() {
     assert!(patterns.list().await.unwrap().is_empty());
     assert!(!patterns.remove(id).await.unwrap());
     assert!(!patterns.set_enabled(id, true).await.unwrap());
+}
+
+#[tokio::test]
+async fn attach_reference_rejects_an_oversized_resulting_branch() {
+    let repo = repo().await;
+    let mut branch = Branch::new("/nearly-full");
+    branch.metadata = json!({
+        "payload": "x".repeat(MAX_BRANCH_RECORD_BYTES - 100),
+    });
+    repo.add(branch).await.unwrap();
+
+    let reference = Reference {
+        kind: "file".into(),
+        value: "x".repeat(256),
+        note: None,
+    };
+    let error = repo
+        .attach_reference("/nearly-full", &reference)
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("record limit"), "got: {error}");
+    assert!(repo
+        .get("/nearly-full")
+        .await
+        .unwrap()
+        .unwrap()
+        .references
+        .is_empty());
 }
 
 #[tokio::test]

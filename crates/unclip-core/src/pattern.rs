@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
-use crate::validate::validate_path;
+use crate::validate::{validate_path, MAX_DOMAIN_STRING_BYTES};
 
 /// Where a matched text pattern maps to in the structured model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,18 +41,27 @@ pub fn validate_pattern_entry(entry: &PatternEntry) -> Result<()> {
     if entry.pattern.trim().is_empty() {
         return Err(invalid("pattern must not be empty or whitespace-only"));
     }
+    if entry.pattern.len() > MAX_DOMAIN_STRING_BYTES {
+        return Err(invalid("pattern is oversized"));
+    }
     if entry.pattern.chars().any(char::is_control) {
         return Err(invalid("pattern must not contain control characters"));
     }
 
     match &entry.target {
         PatternTarget::O2m { name, value } | PatternTarget::O2o { name, value } => {
-            if name.is_empty() || name.chars().any(char::is_control) {
+            if name.is_empty()
+                || name.len() > MAX_DOMAIN_STRING_BYTES
+                || name.chars().any(char::is_control)
+            {
                 return Err(invalid(
                     "target name must not be empty or contain control characters",
                 ));
             }
-            if value.is_empty() || value.chars().any(char::is_control) {
+            if value.is_empty()
+                || value.len() > MAX_DOMAIN_STRING_BYTES
+                || value.chars().any(char::is_control)
+            {
                 return Err(invalid(
                     "target value must not be empty or contain control characters",
                 ));

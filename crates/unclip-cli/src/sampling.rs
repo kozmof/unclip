@@ -132,18 +132,17 @@ pub async fn sample_cmd(
 
     let rendered = unclip_io::render_packet(&packet, format)?;
 
-    // Stdout and SQLite cannot share an atomic commit. Use output-first
-    // semantics deliberately: a broken pipe records no usage, while a later
-    // persistence failure returns a non-zero status even though bytes may have
-    // reached stdout. Callers that need output with no persistence use
-    // `--dry-run`.
-    crate::output::write_stdout(&rendered)?;
+    // Commit before emission so a successfully emitted packet is always
+    // recoverable from the packet store. Stdout and SQLite cannot share an
+    // atomic commit: an output failure may therefore leave a persisted packet,
+    // while `--dry-run` remains side-effect free.
     if !dry_run {
         let record = packet_usage_record(None, &packet)?;
         history
             .save_packets_with_usages(std::slice::from_ref(&record), "sample")
             .await?;
     }
+    crate::output::write_stdout(&rendered)?;
     Ok(())
 }
 
@@ -266,10 +265,9 @@ pub async fn compose_cmd(
 
     let rendered = unclip_io::render_packets(&packets, input.format)?;
 
-    // Match `sample`'s explicit output-first semantics. This keeps broken pipes
-    // side-effect free; a persistence failure is still reported as a command
-    // failure after output because stdout and SQLite cannot commit atomically.
-    crate::output::write_stdout(&rendered)?;
+    // Match `sample`'s persistence-first contract: anything emitted has already
+    // been durably recorded, though a later output failure can leave a record
+    // that its intended consumer did not receive.
     if !input.dry_run {
         let records = packets
             .iter()
@@ -279,6 +277,7 @@ pub async fn compose_cmd(
             .save_packets_with_usages(&records, "compose")
             .await?;
     }
+    crate::output::write_stdout(&rendered)?;
     Ok(())
 }
 

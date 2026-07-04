@@ -639,6 +639,22 @@ impl BranchRepository for SeaOrmBranchRepository {
         reference: &Reference,
     ) -> BranchRepositoryResult<()> {
         validate_reference(reference)?;
+        // Validate the resulting aggregate, not only the new reference. This
+        // prevents repeated attachments from bypassing branch size/cardinality
+        // limits that full add/update operations enforce.
+        let mut aggregate =
+            self.get(path)
+                .await?
+                .ok_or_else(|| BranchRepositoryError::NotFound {
+                    path: path.to_string(),
+                })?;
+        let expected_revision = aggregate
+            .revision
+            .clone()
+            .context("branch has no persistence revision; reload it before attaching")?;
+        aggregate.references.push(reference.clone());
+        validate_branch_record(&aggregate)?;
+
         let txn = self.db.begin().await?;
         let model = branches::Entity::find()
             .filter(branches::Column::Path.eq(path))
@@ -648,10 +664,15 @@ impl BranchRepository for SeaOrmBranchRepository {
                 path: path.to_string(),
             })?;
 
-        // Attaching a reference mutates the branch aggregate. Advance the same
-        // revision token used by full edits so an editor holding an older copy
-        // cannot later replace the child rows and silently erase this reference.
-        let next_revision = next_revision(&model.updated_at)?;
+        // Attaching a reference mutates the branch aggregate. Compare against
+        // the revision whose complete aggregate was validated above, then
+        // advance the same token used by full edits.
+        if model.updated_at != expected_revision {
+            return Err(BranchRepositoryError::Conflict {
+                path: path.to_string(),
+            });
+        }
+        let next_revision = next_revision(&expected_revision)?;
         let revision = branches::ActiveModel {
             updated_at: Set(next_revision),
             ..Default::default()
@@ -659,7 +680,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         let result = branches::Entity::update_many()
             .set(revision)
             .filter(branches::Column::Id.eq(model.id))
-            .filter(branches::Column::UpdatedAt.eq(&model.updated_at))
+            .filter(branches::Column::UpdatedAt.eq(&expected_revision))
             .exec(&txn)
             .await?;
         if result.rows_affected != 1 {

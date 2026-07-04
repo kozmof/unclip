@@ -9,13 +9,13 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
     QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
-use unclip_core::{validate_path, Frame, Slot};
+use unclip_core::{validate_path, Frame, Slot, MAX_BRANCH_RECORD_BYTES, MAX_DOMAIN_STRING_BYTES};
 use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, frames};
 
 use crate::frame_mapper;
 use crate::repository::{ensure_bulk_result_limit, MAX_BULK_RESULTS};
 use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
-use crate::StoreResult;
+use crate::{StoreError, StoreResult};
 
 /// Summary of a stored frame, used for `unclip frames`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,10 +213,21 @@ impl SeaOrmFrameRepository {
 
 fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
     validate_label("frame name", &frame.name)?;
+    if let Some(description) = &frame.description {
+        ensure!(
+            description.len() <= MAX_DOMAIN_STRING_BYTES,
+            "frame description is oversized"
+        );
+    }
 
     let mut slot_names = HashSet::new();
+    let mut record_bytes = frame
+        .name
+        .len()
+        .saturating_add(frame.description.as_ref().map_or(0, String::len));
     for slot in &frame.slots {
         validate_label("slot name", &slot.name)?;
+        record_bytes = record_bytes.saturating_add(slot.name.len());
         ensure!(
             slot_names.insert(&slot.name),
             "duplicate slot name `{}` in frame `{}`",
@@ -282,7 +293,20 @@ fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
         }
         for key in &slot.metadata_suggest {
             validate_label("metadata_suggest key", key)?;
+            record_bytes = record_bytes.saturating_add(key.len());
         }
+        record_bytes = record_bytes
+            .saturating_add(slot.under.as_ref().map_or(0, String::len))
+            .saturating_add(map_string_bytes(&slot.require_o2o))
+            .saturating_add(map_string_bytes(&slot.default_o2o))
+            .saturating_add(map_string_bytes(&slot.avoid_o2o))
+            .saturating_add(multimap_string_bytes(&slot.require_o2m))
+            .saturating_add(multimap_string_bytes(&slot.prefer_o2m))
+            .saturating_add(multimap_string_bytes(&slot.avoid_o2m));
+        ensure!(
+            record_bytes <= MAX_BRANCH_RECORD_BYTES,
+            "frame exceeds the {MAX_BRANCH_RECORD_BYTES}-byte record limit"
+        );
     }
 
     Ok(())
@@ -291,10 +315,30 @@ fn validate_frame(frame: &Frame) -> anyhow::Result<()> {
 fn validate_label(field: &str, value: &str) -> anyhow::Result<()> {
     ensure!(!value.is_empty(), "{field} must not be empty");
     ensure!(
+        value.len() <= MAX_DOMAIN_STRING_BYTES,
+        "{field} is oversized"
+    );
+    ensure!(
         !value.chars().any(char::is_control),
         "{field} must not contain control characters"
     );
     Ok(())
+}
+
+fn map_string_bytes(values: &std::collections::BTreeMap<String, String>) -> usize {
+    values.iter().fold(0usize, |total, (name, value)| {
+        total.saturating_add(name.len()).saturating_add(value.len())
+    })
+}
+
+fn multimap_string_bytes(values: &std::collections::BTreeMap<String, Vec<String>>) -> usize {
+    values.iter().fold(0usize, |total, (name, entries)| {
+        entries
+            .iter()
+            .fold(total.saturating_add(name.len()), |total, value| {
+                total.saturating_add(value.len())
+            })
+    })
 }
 
 fn validate_o2o_map(
@@ -353,6 +397,16 @@ impl FrameRepository for SeaOrmFrameRepository {
     }
 
     async fn save_frames(&self, frames: Vec<Frame>) -> StoreResult<()> {
+        let mut names = HashSet::with_capacity(frames.len());
+        for frame in &frames {
+            validate_frame(frame)?;
+            if !names.insert(&frame.name) {
+                return Err(StoreError::InvalidRequest {
+                    message: format!("duplicate frame name `{}` in import", frame.name),
+                });
+            }
+        }
+
         let txn = self.db.begin().await?;
         for frame in frames {
             Self::save_frame_in_txn(&txn, frame).await?;

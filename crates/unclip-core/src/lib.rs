@@ -24,6 +24,7 @@ pub use query::{SampleParams, SampleQuery};
 pub use reference::Reference;
 pub use validate::{
     validate_branch, validate_branch_record, validate_packet, validate_path, validate_reference,
+    MAX_BRANCH_COLLECTION_ITEMS, MAX_BRANCH_RECORD_BYTES, MAX_DOMAIN_STRING_BYTES, MAX_PATH_BYTES,
 };
 
 #[cfg(test)]
@@ -278,6 +279,21 @@ unexpected: true
         branch
             .o2m
             .insert("topic".into(), vec!["line\nbreak".into()]);
+        assert!(validate_branch_record(&branch).is_err());
+    }
+
+    #[test]
+    fn validate_branch_record_rejects_oversized_records() {
+        assert!(validate_path(&format!("/{}", "x".repeat(MAX_PATH_BYTES))).is_err());
+
+        let mut branch = Branch::new("/oversized-value");
+        branch
+            .o2o
+            .insert("axis".into(), "x".repeat(MAX_DOMAIN_STRING_BYTES + 1));
+        assert!(validate_branch_record(&branch).is_err());
+
+        let mut branch = Branch::new("/oversized-metadata");
+        branch.metadata = serde_json::json!({ "payload": "x".repeat(MAX_BRANCH_RECORD_BYTES) });
         assert!(validate_branch_record(&branch).is_err());
     }
 
