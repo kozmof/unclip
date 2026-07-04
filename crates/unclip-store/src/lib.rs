@@ -17,7 +17,8 @@ pub use history::{
 };
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{
-    BranchRepository, BranchRepositoryError, IndexedValue, SeaOrmBranchRepository,
+    BranchRepository, BranchRepositoryError, BranchRepositoryResult, IndexedValue,
+    SeaOrmBranchRepository,
 };
 pub use seaorm::{
     connect, connect_and_migrate, connect_and_migrate_with_options, connect_with_options,
@@ -111,8 +112,8 @@ mod tests {
         let error = repo.update(stale).await.unwrap_err();
         assert!(
             matches!(
-                error.downcast_ref::<BranchRepositoryError>(),
-                Some(BranchRepositoryError::Conflict { path }) if path == "/concurrent"
+                &error,
+                BranchRepositoryError::Conflict { path } if path == "/concurrent"
             ),
             "got: {error}"
         );
@@ -165,8 +166,8 @@ mod tests {
         stale.description = Some("stale replacement".into());
         let error = repo_a.update(stale).await.unwrap_err();
         assert!(matches!(
-            error.downcast_ref::<BranchRepositoryError>(),
-            Some(BranchRepositoryError::Conflict { path }) if path == "/shared"
+            &error,
+            BranchRepositoryError::Conflict { path } if path == "/shared"
         ));
 
         let stored = repo_a.get("/shared").await.unwrap().unwrap();
@@ -643,6 +644,43 @@ mod tests {
 
         let got = repo.get("/a").await.unwrap().unwrap();
         assert_eq!(got.o2m.get("topic").unwrap(), &vec!["two".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn upsert_many_always_advances_the_revision() {
+        use sea_orm::ConnectionTrait;
+
+        let repo = repo().await;
+        repo.add(Branch::new("/revision")).await.unwrap();
+
+        // Put the stored revision ahead of the wall clock. The import path
+        // must advance from the persisted token instead of replacing it with
+        // a potentially equal or older timestamp.
+        repo.connection()
+            .execute_unprepared(
+                "UPDATE branches \
+                 SET updated_at = '2999-01-01T00:00:00.000Z' \
+                 WHERE path = '/revision'",
+            )
+            .await
+            .unwrap();
+        let stale = repo.get("/revision").await.unwrap().unwrap();
+
+        let mut imported = Branch::new("/revision");
+        imported.title = Some("imported".into());
+        repo.upsert_many(vec![imported]).await.unwrap();
+
+        let stored = repo.get("/revision").await.unwrap().unwrap();
+        assert!(
+            stored.revision.as_deref() > stale.revision.as_deref(),
+            "import did not advance the revision: before={:?}, after={:?}",
+            stale.revision,
+            stored.revision
+        );
+
+        let mut stale_edit = stale;
+        stale_edit.description = Some("must not win".into());
+        assert!(repo.update(stale_edit).await.is_err());
     }
 
     #[tokio::test]

@@ -24,8 +24,8 @@ async fn broad_find_fails_before_hydrating_an_excessive_archive() {
     let error = repo.find(SampleQuery::default()).await.unwrap_err();
     assert!(
         matches!(
-            error.downcast_ref::<BranchRepositoryError>(),
-            Some(BranchRepositoryError::QueryTooBroad { limit: 10_000 })
+            error,
+            BranchRepositoryError::QueryTooBroad { limit: 10_000 }
         ),
         "unexpected error: {error}"
     );

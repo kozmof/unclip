@@ -2,16 +2,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{ensure, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
     sea_query::{LikeExpr, Query, SelectStatement},
     ActiveValue::{NotSet, Set},
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
-    QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, DbErr, EntityTrait,
+    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
 };
 use unclip_core::{
-    parent_of, validate_branch_record, validate_reference, Branch, Reference, SampleQuery,
+    parent_of, validate_branch_record, validate_reference, Branch, CoreError, Reference,
+    SampleQuery,
 };
 use unclip_entity::{
     branch_o2m_values, branch_o2o_values, branch_references, branches, usage_history,
@@ -38,10 +39,6 @@ const MAX_BULK_RESULTS: usize = 100_000;
 const FIND_PAGE_SIZE: u64 = 1_000;
 
 /// Repository conditions callers may need to handle programmatically.
-///
-/// Repository methods retain `anyhow::Result` for database and serialization
-/// context, while these expected conditions can be recovered with
-/// `anyhow::Error::downcast_ref`.
 #[derive(Debug, thiserror::Error)]
 pub enum BranchRepositoryError {
     #[error("branch not found: {path}")]
@@ -56,7 +53,18 @@ pub enum BranchRepositoryError {
         "bulk query matched more than {limit} branches; narrow the filters or use a streaming workflow"
     )]
     BulkQueryTooBroad { limit: usize },
+    #[error("invalid repository request: {message}")]
+    InvalidRequest { message: String },
+    #[error(transparent)]
+    InvalidBranch(#[from] CoreError),
+    #[error(transparent)]
+    Database(#[from] DbErr),
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
 }
+
+/// Typed result returned by the branch persistence boundary.
+pub type BranchRepositoryResult<T> = Result<T, BranchRepositoryError>;
 
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
@@ -71,26 +79,26 @@ pub struct IndexedValue {
 /// not on SeaORM entities directly.
 #[async_trait]
 pub trait BranchRepository: Sync {
-    async fn add(&self, branch: Branch) -> anyhow::Result<()>;
-    async fn get(&self, path: &str) -> anyhow::Result<Option<Branch>>;
-    async fn update(&self, branch: Branch) -> anyhow::Result<()>;
-    async fn delete(&self, path: &str) -> anyhow::Result<()>;
+    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()>;
+    async fn get(&self, path: &str) -> BranchRepositoryResult<Option<Branch>>;
+    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()>;
+    async fn delete(&self, path: &str) -> BranchRepositoryResult<()>;
 
-    async fn children(&self, path: &str) -> anyhow::Result<Vec<Branch>>;
-    async fn descendants(&self, path: &str) -> anyhow::Result<Vec<Branch>>;
-    async fn ancestors(&self, path: &str) -> anyhow::Result<Vec<Branch>>;
+    async fn children(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
+    async fn descendants(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
+    async fn ancestors(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
 
-    async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>>;
+    async fn find(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>>;
     /// Return one stable path-ordered page. `after_path` is an exclusive cursor.
     async fn find_page(
         &self,
         query: &SampleQuery,
         after_path: Option<&str>,
         limit: u64,
-    ) -> anyhow::Result<Vec<Branch>>;
+    ) -> BranchRepositoryResult<Vec<Branch>>;
     /// Consume every matching page. Bulk commands use this deliberately; code
     /// that samples candidates should prefer bounded [`Self::find`].
-    async fn find_all(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>> {
+    async fn find_all(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>> {
         let mut all = Vec::new();
         let mut after_path = None;
         loop {
@@ -102,8 +110,7 @@ pub trait BranchRepository: Sync {
             if all.len() > MAX_BULK_RESULTS.saturating_sub(page.len()) {
                 return Err(BranchRepositoryError::BulkQueryTooBroad {
                     limit: MAX_BULK_RESULTS,
-                }
-                .into());
+                });
             }
             all.extend(page);
             if done {
@@ -114,27 +121,39 @@ pub trait BranchRepository: Sync {
 
     /// Distinct o2o `name=value` pairs with branch counts, optionally for a
     /// single name. Ordered by name then value.
-    async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>>;
+    async fn o2o_catalog(&self, name: Option<&str>) -> BranchRepositoryResult<Vec<IndexedValue>>;
     /// Distinct o2m `name=value` pairs with branch counts, optionally for a
     /// single name. Ordered by name then value.
-    async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>>;
+    async fn o2m_catalog(&self, name: Option<&str>) -> BranchRepositoryResult<Vec<IndexedValue>>;
 
     /// Branches carrying a specific o2o value.
-    async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>>;
+    async fn branches_with_o2o(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> BranchRepositoryResult<Vec<Branch>>;
     /// Branches carrying a specific o2m value.
-    async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>>;
+    async fn branches_with_o2m(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> BranchRepositoryResult<Vec<Branch>>;
 
     /// `(path, title)` for every branch that has a title.
-    async fn titles(&self) -> anyhow::Result<Vec<(String, String)>>;
+    async fn titles(&self) -> BranchRepositoryResult<Vec<(String, String)>>;
 
     /// Attach a single reference to an existing branch.
-    async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()>;
+    async fn attach_reference(
+        &self,
+        path: &str,
+        reference: &Reference,
+    ) -> BranchRepositoryResult<()>;
 
     /// Insert or replace many branches (upsert by path), returning the
     /// `(added, updated)` counts.
     ///
     /// Implementations must run the whole batch atomically.
-    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)>;
+    async fn upsert_many(&self, branches: Vec<Branch>) -> BranchRepositoryResult<(usize, usize)>;
 }
 
 /// SeaORM implementation backed by SQLite.
@@ -355,7 +374,7 @@ impl SeaOrmBranchRepository {
 
 #[async_trait]
 impl BranchRepository for SeaOrmBranchRepository {
-    async fn add(&self, branch: Branch) -> anyhow::Result<()> {
+    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()> {
         validate_branch_record(&branch)?;
         let now = crate::history::now();
         let txn = self.db.begin().await?;
@@ -369,14 +388,14 @@ impl BranchRepository for SeaOrmBranchRepository {
         Ok(())
     }
 
-    async fn get(&self, path: &str) -> anyhow::Result<Option<Branch>> {
+    async fn get(&self, path: &str) -> BranchRepositoryResult<Option<Branch>> {
         match self.model_by_path(path).await? {
             Some(model) => Ok(Some(self.hydrate(model).await?)),
             None => Ok(None),
         }
     }
 
-    async fn update(&self, branch: Branch) -> anyhow::Result<()> {
+    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()> {
         validate_branch_record(&branch)?;
         let expected_id = i32::try_from(
             branch
@@ -393,12 +412,11 @@ impl BranchRepository for SeaOrmBranchRepository {
                 path: branch.path.clone(),
             }
         })?;
-        ensure!(
-            existing.id == expected_id,
-            BranchRepositoryError::Conflict {
-                path: branch.path.clone()
-            }
-        );
+        if existing.id != expected_id {
+            return Err(BranchRepositoryError::Conflict {
+                path: branch.path.clone(),
+            });
+        }
         let branch_id = expected_id;
         let created_at = existing.created_at.clone();
         let next_revision = next_revision(&expected_revision)?;
@@ -419,12 +437,11 @@ impl BranchRepository for SeaOrmBranchRepository {
             .filter(branches::Column::UpdatedAt.eq(&expected_revision))
             .exec(&txn)
             .await?;
-        ensure!(
-            result.rows_affected == 1,
-            BranchRepositoryError::Conflict {
-                path: branch.path.clone()
-            }
-        );
+        if result.rows_affected != 1 {
+            return Err(BranchRepositoryError::Conflict {
+                path: branch.path.clone(),
+            });
+        }
 
         Self::replace_children(&txn, branch_id, &branch).await?;
 
@@ -432,7 +449,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         Ok(())
     }
 
-    async fn delete(&self, path: &str) -> anyhow::Result<()> {
+    async fn delete(&self, path: &str) -> BranchRepositoryResult<()> {
         let Some(model) = self.model_by_path(path).await? else {
             return Ok(());
         };
@@ -463,23 +480,23 @@ impl BranchRepository for SeaOrmBranchRepository {
         Ok(())
     }
 
-    async fn children(&self, path: &str) -> anyhow::Result<Vec<Branch>> {
+    async fn children(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
         let models = branches::Entity::find()
             .filter(branches::Column::ParentPath.eq(path))
             .all(&self.db)
             .await?;
-        self.hydrate_all(models).await
+        self.hydrate_all(models).await.map_err(Into::into)
     }
 
-    async fn descendants(&self, path: &str) -> anyhow::Result<Vec<Branch>> {
+    async fn descendants(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
         let models = branches::Entity::find()
             .filter(branches::Column::Path.like(descendant_like(path)))
             .all(&self.db)
             .await?;
-        self.hydrate_all(models).await
+        self.hydrate_all(models).await.map_err(Into::into)
     }
 
-    async fn ancestors(&self, path: &str) -> anyhow::Result<Vec<Branch>> {
+    async fn ancestors(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
         let mut paths = Vec::new();
         let mut current = path.to_string();
         while let Some(parent) = parent_of(&current) {
@@ -493,10 +510,10 @@ impl BranchRepository for SeaOrmBranchRepository {
             .filter(branches::Column::Path.is_in(paths))
             .all(&self.db)
             .await?;
-        self.hydrate_all(models).await
+        self.hydrate_all(models).await.map_err(Into::into)
     }
 
-    async fn find(&self, query: SampleQuery) -> anyhow::Result<Vec<Branch>> {
+    async fn find(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>> {
         // Sampling is seeded, so candidate order is part of its reproducibility
         // contract. SQL row order is undefined without ORDER BY and may change
         // with SQLite versions, indexes, or query plans.
@@ -508,10 +525,9 @@ impl BranchRepository for SeaOrmBranchRepository {
         if models.len() as u64 > MAX_FIND_RESULTS {
             return Err(BranchRepositoryError::QueryTooBroad {
                 limit: MAX_FIND_RESULTS,
-            }
-            .into());
+            });
         }
-        self.hydrate_all(models).await
+        self.hydrate_all(models).await.map_err(Into::into)
     }
 
     async fn find_page(
@@ -519,12 +535,17 @@ impl BranchRepository for SeaOrmBranchRepository {
         query: &SampleQuery,
         after_path: Option<&str>,
         limit: u64,
-    ) -> anyhow::Result<Vec<Branch>> {
-        ensure!(limit > 0, "page limit must be greater than zero");
-        ensure!(
-            limit <= MAX_FIND_RESULTS,
-            "page limit must not exceed {MAX_FIND_RESULTS}"
-        );
+    ) -> BranchRepositoryResult<Vec<Branch>> {
+        if limit == 0 {
+            return Err(BranchRepositoryError::InvalidRequest {
+                message: "page limit must be greater than zero".to_string(),
+            });
+        }
+        if limit > MAX_FIND_RESULTS {
+            return Err(BranchRepositoryError::InvalidRequest {
+                message: format!("page limit must not exceed {MAX_FIND_RESULTS}"),
+            });
+        }
         let mut select = Self::filtered_select(query);
         if let Some(path) = after_path {
             select = select.filter(branches::Column::Path.gt(path));
@@ -534,18 +555,26 @@ impl BranchRepository for SeaOrmBranchRepository {
             .limit(limit)
             .all(&self.db)
             .await?;
-        self.hydrate_all(models).await
+        self.hydrate_all(models).await.map_err(Into::into)
     }
 
-    async fn o2o_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog(IndexTable::O2o, name).await
+    async fn o2o_catalog(&self, name: Option<&str>) -> BranchRepositoryResult<Vec<IndexedValue>> {
+        self.index_catalog(IndexTable::O2o, name)
+            .await
+            .map_err(Into::into)
     }
 
-    async fn o2m_catalog(&self, name: Option<&str>) -> anyhow::Result<Vec<IndexedValue>> {
-        self.index_catalog(IndexTable::O2m, name).await
+    async fn o2m_catalog(&self, name: Option<&str>) -> BranchRepositoryResult<Vec<IndexedValue>> {
+        self.index_catalog(IndexTable::O2m, name)
+            .await
+            .map_err(Into::into)
     }
 
-    async fn branches_with_o2o(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+    async fn branches_with_o2o(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> BranchRepositoryResult<Vec<Branch>> {
         // Project only the branch ids rather than hydrating whole value rows.
         let ids = branch_o2o_values::Entity::find()
             .select_only()
@@ -555,10 +584,14 @@ impl BranchRepository for SeaOrmBranchRepository {
             .into_tuple::<i32>()
             .all(&self.db)
             .await?;
-        self.load_branches_by_ids(ids).await
+        self.load_branches_by_ids(ids).await.map_err(Into::into)
     }
 
-    async fn branches_with_o2m(&self, name: &str, value: &str) -> anyhow::Result<Vec<Branch>> {
+    async fn branches_with_o2m(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> BranchRepositoryResult<Vec<Branch>> {
         let ids = branch_o2m_values::Entity::find()
             .select_only()
             .column(branch_o2m_values::Column::BranchId)
@@ -567,12 +600,12 @@ impl BranchRepository for SeaOrmBranchRepository {
             .into_tuple::<i32>()
             .all(&self.db)
             .await?;
-        self.load_branches_by_ids(ids).await
+        self.load_branches_by_ids(ids).await.map_err(Into::into)
     }
 
     /// A projection — it loads only the two columns the matcher needs, avoiding
     /// the full o2o/o2m/reference hydration of `find`.
-    async fn titles(&self) -> anyhow::Result<Vec<(String, String)>> {
+    async fn titles(&self) -> BranchRepositoryResult<Vec<(String, String)>> {
         #[derive(FromQueryResult)]
         struct TitleRow {
             path: String,
@@ -591,7 +624,11 @@ impl BranchRepository for SeaOrmBranchRepository {
             .collect())
     }
 
-    async fn attach_reference(&self, path: &str, reference: &Reference) -> anyhow::Result<()> {
+    async fn attach_reference(
+        &self,
+        path: &str,
+        reference: &Reference,
+    ) -> BranchRepositoryResult<()> {
         validate_reference(reference)?;
         let txn = self.db.begin().await?;
         let model = branches::Entity::find()
@@ -619,8 +656,7 @@ impl BranchRepository for SeaOrmBranchRepository {
         if result.rows_affected != 1 {
             return Err(BranchRepositoryError::Conflict {
                 path: path.to_string(),
-            }
-            .into());
+            });
         }
 
         let am = branch_references::ActiveModel {
@@ -637,18 +673,18 @@ impl BranchRepository for SeaOrmBranchRepository {
 
     /// Atomic batch upsert: the whole set is applied in one transaction, so a
     /// failure on any branch rolls the entire import back.
-    async fn upsert_many(&self, branches: Vec<Branch>) -> anyhow::Result<(usize, usize)> {
+    async fn upsert_many(&self, branches: Vec<Branch>) -> BranchRepositoryResult<(usize, usize)> {
         // Reject an ambiguous import before writing anything. Otherwise two
         // records for the same path would silently make the last one win and
         // misleadingly report one addition plus one update.
         let mut paths = HashSet::with_capacity(branches.len());
         for branch in &branches {
             validate_branch_record(branch)?;
-            ensure!(
-                paths.insert(&branch.path),
-                "duplicate branch path `{}` in import",
-                branch.path
-            );
+            if !paths.insert(&branch.path) {
+                return Err(BranchRepositoryError::InvalidRequest {
+                    message: format!("duplicate branch path `{}` in import", branch.path),
+                });
+            }
         }
 
         let now = crate::history::now();
@@ -664,7 +700,13 @@ impl BranchRepository for SeaOrmBranchRepository {
                 Some(model) => {
                     let branch_id = model.id;
                     branch.id = Some(branch_id as i64);
-                    let am = mapper::branch_active_model(&branch, &model.created_at, &now)?;
+                    // Imports replace the aggregate just like an edit, so they
+                    // must also invalidate every previously loaded copy. Do
+                    // not use the batch wall-clock timestamp directly: its
+                    // millisecond precision can equal (or precede) the stored
+                    // revision.
+                    let revision = next_revision(&model.updated_at)?;
+                    let am = mapper::branch_active_model(&branch, &model.created_at, &revision)?;
                     branches::Entity::update(am).exec(&txn).await?;
                     Self::replace_children(&txn, branch_id, &branch).await?;
                     updated += 1;
