@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use anyhow::{ensure, Context};
 use unclip_core::{
-    validate_path, Branch, Frame, SampleParams, SampleQuery, Selection, SelectionPacket,
+    validate_path, Frame, SampleParams, SampleQuery, Selection, SelectionPacket,
 };
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
@@ -99,19 +99,16 @@ pub async fn sample_cmd(
 
     let seed = seed.unwrap_or_else(random_seed);
     let mut rng = rng_from_seed(seed);
-    let chosen: Vec<Branch> = sample(&candidates, &query, &params, &recent, &mut rng)
-        .into_iter()
-        .cloned()
-        .collect();
+    let chosen = sample(&candidates, &query, &params, &recent, &mut rng);
 
     let mut packet = SelectionPacket::new(None, Some(seed));
     packet.created_at = Some(now());
     packet.query = Some(query_provenance(&query, &params)?);
     packet.selections = chosen
-        .iter()
-        .map(|b| Selection {
+        .into_iter()
+        .map(|branch| Selection {
             slot: None,
-            branch: b.clone(),
+            branch: branch.clone(),
         })
         .collect();
 

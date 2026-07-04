@@ -95,8 +95,8 @@ impl SeaOrmFrameRepository {
 
         let am = frames::ActiveModel {
             id: NotSet,
-            name: Set(frame.name.clone()),
-            description: Set(frame.description.clone()),
+            name: Set(frame.name),
+            description: Set(frame.description),
         };
         let frame_id = frames::Entity::insert(am).exec(txn).await?.last_insert_id;
 

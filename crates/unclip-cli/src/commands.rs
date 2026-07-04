@@ -1,5 +1,6 @@
 //! Command handlers for the unclip CLI.
 
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
@@ -33,8 +34,16 @@ pub fn merge_o2o(
     pairs: Vec<(String, String)>,
 ) -> anyhow::Result<()> {
     for (name, value) in pairs {
-        if map.insert(name.clone(), value).is_some() {
-            bail!("duplicate o2o name `{name}` (o2o values are one-to-one)");
+        match map.entry(name) {
+            Entry::Occupied(entry) => {
+                bail!(
+                    "duplicate o2o name `{}` (o2o values are one-to-one)",
+                    entry.key()
+                );
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
         }
     }
     Ok(())
@@ -612,10 +621,8 @@ mod tests {
         // usage error because o2o is one-to-one.
         let err = merge_o2o(&mut map, vec![("place".into(), "park".into())]).unwrap_err();
         assert!(err.to_string().contains("duplicate o2o name `place`"));
-        // The map is left partially mutated on error (the collision is detected
-        // after the overwrite); callers discard the query on error, so this is
-        // harmless — the test pins the behavior rather than asserting a rollback.
-        assert_eq!(map.get("place").map(String::as_str), Some("park"));
+        // The colliding pair is rejected without touching the existing entry.
+        assert_eq!(map.get("place").map(String::as_str), Some("cafe"));
     }
 
     #[test]

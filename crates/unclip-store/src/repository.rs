@@ -322,11 +322,11 @@ impl SeaOrmBranchRepository {
     fn filtered_select(query: &SampleQuery) -> Select<branches::Entity> {
         let mut select = branches::Entity::find();
         if let Some(under) = &query.under {
-            let under = under.trim_end_matches('/').to_string();
+            let under = under.trim_end_matches('/');
             select = select.filter(
                 branches::Column::Path
-                    .eq(under.clone())
-                    .or(branches::Column::Path.like(descendant_like(&under))),
+                    .eq(under)
+                    .or(branches::Column::Path.like(descendant_like(under))),
             );
         }
         for (name, value) in &query.require_o2o {

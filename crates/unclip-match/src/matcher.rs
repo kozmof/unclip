@@ -43,11 +43,16 @@ impl Matcher {
                 continue;
             }
             let key = entry.pattern.to_lowercase();
-            let i = *index.entry(key.clone()).or_insert_with(|| {
-                order.push(key);
-                groups.push(Vec::new());
-                groups.len() - 1
-            });
+            let i = match index.get(&key) {
+                Some(&i) => i,
+                None => {
+                    let i = groups.len();
+                    index.insert(key.clone(), i);
+                    order.push(key);
+                    groups.push(Vec::new());
+                    i
+                }
+            };
             groups[i].push(entry);
         }
 

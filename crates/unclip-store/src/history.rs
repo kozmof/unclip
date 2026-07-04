@@ -246,10 +246,10 @@ impl SeaOrmHistoryRepository {
                     })
                 })
                 .collect::<anyhow::Result<_>>()?;
-            for chunk in usages.chunks(INSERT_ROW_CHUNK) {
-                usage_history::Entity::insert_many(chunk.iter().cloned())
-                    .exec(&txn)
-                    .await?;
+            let mut usages = usages.into_iter().peekable();
+            while usages.peek().is_some() {
+                let chunk: Vec<_> = usages.by_ref().take(INSERT_ROW_CHUNK).collect();
+                usage_history::Entity::insert_many(chunk).exec(&txn).await?;
             }
         }
 
@@ -296,10 +296,10 @@ impl SeaOrmHistoryRepository {
                         })
                     })
                     .collect::<anyhow::Result<_>>()?;
-                for chunk in usages.chunks(INSERT_ROW_CHUNK) {
-                    usage_history::Entity::insert_many(chunk.iter().cloned())
-                        .exec(&txn)
-                        .await?;
+                let mut usages = usages.into_iter().peekable();
+                while usages.peek().is_some() {
+                    let chunk: Vec<_> = usages.by_ref().take(INSERT_ROW_CHUNK).collect();
+                    usage_history::Entity::insert_many(chunk).exec(&txn).await?;
                 }
             }
         }
