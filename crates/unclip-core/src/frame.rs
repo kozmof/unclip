@@ -31,9 +31,17 @@ pub struct Slot {
     /// o2o values added during data creation from this slot.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub default_o2o: BTreeMap<String, String>,
-    /// Hard o2o exclusions.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub avoid_o2o: BTreeMap<String, String>,
+    /// Hard o2o exclusions. Several values of one name can be avoided at once
+    /// (a branch carries at most one of them, so avoiding many only widens the
+    /// exclusion) — matching `avoid_o2m` and the query's `avoid_o2o` shape.
+    /// For frame files written before this was a list, a bare string value is
+    /// still accepted and read as a one-element list.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "one_or_many_map"
+    )]
+    pub avoid_o2o: BTreeMap<String, Vec<String>>,
 
     /// Hard o2m requirements: a candidate must carry every listed value.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -57,6 +65,32 @@ pub struct Slot {
 
 fn default_count() -> usize {
     1
+}
+
+/// Deserialize a map whose values are either one string or a list of strings,
+/// normalizing to a list. Keeps pre-list `avoid_o2o: {name: value}` frame
+/// files parseable while the canonical (serialized) shape is always a list.
+fn one_or_many_map<'de, D>(deserializer: D) -> Result<BTreeMap<String, Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    let raw: BTreeMap<String, OneOrMany> = BTreeMap::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .map(|(name, values)| {
+            let values = match values {
+                OneOrMany::One(value) => vec![value],
+                OneOrMany::Many(values) => values,
+            };
+            (name, values)
+        })
+        .collect())
 }
 
 /// `Default` mirrors the serde defaults: every constraint map empty and

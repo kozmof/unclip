@@ -5,15 +5,15 @@ use std::collections::HashSet;
 use anyhow::{ensure, Context};
 use unclip_core::{validate_path, Frame, SampleParams, SampleQuery, Selection, SelectionPacket};
 use unclip_io::Format;
-use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample};
-use unclip_store::{now, BranchRepository, HistoryRepository, PacketUsageRecord};
+use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample, score, Reservoir};
+use unclip_store::{now, BranchReader, HistoryRepository, PacketUsageRecord};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
 
-/// Page size for streaming export; keeps each SQL page bounded while the
-/// rendered lines are flushed instead of accumulated.
-const EXPORT_PAGE_SIZE: u64 = 1_000;
+/// Page size for streaming commands (`export`, `stats`, `sample`); keeps each
+/// SQL page bounded while results are consumed instead of accumulated.
+const STREAM_PAGE_SIZE: u64 = 1_000;
 
 /// Prevent a typo or hostile input from preallocating an unbounded packet
 /// batch. Larger jobs can be split across invocations with explicit seeds.
@@ -86,7 +86,7 @@ pub struct SampleInput {
 }
 
 pub async fn sample_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     history: &impl HistoryRepository,
     input: SampleInput,
 ) -> anyhow::Result<()> {
@@ -100,16 +100,37 @@ pub async fn sample_cmd(
         dry_run,
     } = input;
 
-    ensure!(count > 0, "sample count must be greater than zero");
     let query = filter.into_query()?;
     let params = SampleParams {
         count,
         weighted,
         avoid_recent,
     };
-    let candidates = branches.find(query.clone()).await?;
+    run_sample(branches, history, query, params, seed, format, dry_run).await
+}
 
-    let recent = if avoid_recent {
+/// Draw one packet from a fully assembled query/params pair.
+///
+/// Shared by `sample` (which builds the pair from flags) and `replay` (which
+/// reconstructs it from a packet's embedded provenance).
+///
+/// Candidates are streamed page by page through a weighted [`Reservoir`], so
+/// the command holds at most one page plus `count` branches in memory and is
+/// not subject to the bounded `find` candidate ceiling. Pages arrive in path
+/// order and each candidate consumes one RNG draw, so a fixed seed still
+/// reproduces the same selection.
+async fn run_sample(
+    branches: &impl BranchReader,
+    history: &impl HistoryRepository,
+    query: SampleQuery,
+    params: SampleParams,
+    seed: Option<u64>,
+    format: Format,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    ensure!(params.count > 0, "sample count must be greater than zero");
+
+    let recent = if params.avoid_recent {
         history.recent_branch_ids(RECENT_LIMIT).await?
     } else {
         Default::default()
@@ -117,17 +138,30 @@ pub async fn sample_cmd(
 
     let seed = seed.unwrap_or_else(random_seed);
     let mut rng = rng_from_seed(seed);
-    let chosen = sample(&candidates, &query, &params, &recent, &mut rng);
+    let mut reservoir = Reservoir::new(params.count);
+    let mut after_path: Option<String> = None;
+    loop {
+        let page = branches
+            .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
+            .await?;
+        let done = (page.len() as u64) < STREAM_PAGE_SIZE;
+        after_path = page.last().map(|branch| branch.path.clone());
+        for branch in page {
+            let s = score(&branch, &query, &params, &recent);
+            reservoir.offer(branch, s, &mut rng);
+        }
+        if done {
+            break;
+        }
+    }
 
     let mut packet = SelectionPacket::new(None, Some(seed));
     packet.created_at = Some(now());
     packet.query = Some(query_provenance(&query, &params)?);
-    packet.selections = chosen
+    packet.selections = reservoir
+        .into_branches()
         .into_iter()
-        .map(|branch| Selection {
-            slot: None,
-            branch: branch.clone(),
-        })
+        .map(|branch| Selection { slot: None, branch })
         .collect();
 
     let rendered = unclip_io::render_packet(&packet, format)?;
@@ -154,8 +188,9 @@ pub fn parse_format(s: &str) -> anyhow::Result<Format> {
 /// A `--under` override for compose: a slot-specific or global scope.
 ///
 /// `slot: None` is a global override applied to any slot without a more
-/// specific one.
-#[derive(Debug, Clone)]
+/// specific one. Serializable so compose can record its overrides in packet
+/// provenance and `replay` can reconstruct them.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnderOverride {
     pub slot: Option<String>,
     pub path: String,
@@ -189,7 +224,7 @@ pub struct ComposeInput {
 }
 
 pub async fn compose_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     frames: &impl unclip_store::FrameRepository,
     history: &impl HistoryRepository,
     input: ComposeInput,
@@ -244,7 +279,7 @@ pub async fn compose_cmd(
 
         let mut packet = SelectionPacket::new(Some(frame.name.clone()), Some(seed));
         packet.created_at = Some(now());
-        packet.query = Some(serde_json::json!({ "frame": frame.name }));
+        packet.query = Some(compose_provenance(&frame.name, &input.under));
 
         for (slot, query, params, candidates) in &slot_plans {
             let slot_recent = if slot.avoid_recent {
@@ -279,6 +314,102 @@ pub async fn compose_cmd(
     }
     crate::output::write_stdout(&rendered)?;
     Ok(())
+}
+
+/// Build compose's packet `query` provenance: the frame plus any `--under`
+/// overrides, so a packet records everything needed to re-draw it.
+fn compose_provenance(frame: &str, overrides: &[UnderOverride]) -> serde_json::Value {
+    if overrides.is_empty() {
+        serde_json::json!({ "frame": frame })
+    } else {
+        serde_json::json!({ "frame": frame, "under": overrides })
+    }
+}
+
+/// Arguments for `replay`.
+pub struct ReplayInput {
+    pub file: std::path::PathBuf,
+    pub seed: Option<u64>,
+    pub format: Format,
+    pub dry_run: bool,
+}
+
+/// `unclip replay <packet-file>` — re-run the sampling a packet records.
+///
+/// The packet's embedded `query` provenance supplies the filter (or the frame
+/// and its `--under` overrides); its `seed` reproduces the same selections
+/// unless `--seed` overrides it. Like `sample`/`compose`, a replay records
+/// usage and persists the new packet unless `--dry-run` is passed.
+pub async fn replay_cmd(
+    branches: &impl BranchReader,
+    frames: &impl unclip_store::FrameRepository,
+    history: &impl HistoryRepository,
+    input: ReplayInput,
+) -> anyhow::Result<()> {
+    use unclip_core::{PACKET_KIND, PACKET_VERSION};
+
+    let text = unclip_io::read_text_file(&input.file, "packet file")?;
+    let packet: SelectionPacket = serde_norway::from_str(&text)?;
+    ensure!(
+        packet.version == PACKET_VERSION,
+        "packet version {} is unsupported; expected {PACKET_VERSION}",
+        packet.version
+    );
+    ensure!(
+        packet.kind == PACKET_KIND,
+        "packet kind `{}` is invalid; expected `{PACKET_KIND}`",
+        packet.kind
+    );
+    let seed = input.seed.or(packet.seed);
+
+    match packet.frame {
+        Some(frame_name) => {
+            // Compose provenance: frame name plus optional under overrides.
+            let under = packet
+                .query
+                .as_ref()
+                .and_then(|q| q.get("under"))
+                .map(|v| serde_json::from_value::<Vec<UnderOverride>>(v.clone()))
+                .transpose()
+                .context("packet has malformed `under` provenance")?
+                .unwrap_or_default();
+            compose_cmd(
+                branches,
+                frames,
+                history,
+                ComposeInput {
+                    frame: frame_name,
+                    under,
+                    count: 1,
+                    seed,
+                    format: input.format,
+                    dry_run: input.dry_run,
+                },
+            )
+            .await
+        }
+        None => {
+            // Sample provenance: one object carrying the query fields plus the
+            // flattened sampling controls; parse both types from it.
+            let provenance = packet
+                .query
+                .context("packet has no embedded query; cannot replay")?;
+            let query: SampleQuery = serde_json::from_value(provenance.clone())
+                .context("packet has malformed query provenance")?;
+            let params: SampleParams = serde_json::from_value(provenance)
+                .context("packet has malformed sampling-control provenance")?;
+            run_sample(
+                branches,
+                history,
+                query,
+                params,
+                seed,
+                input.format,
+                input.dry_run,
+            )
+            .await
+        }
+    }
 }
 
 fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> {
@@ -323,7 +454,7 @@ fn validate_under_overrides(frame: &Frame, overrides: &[UnderOverride]) -> anyho
 /// YAML/JSON produce a single wrapped document and still buffer (bounded by
 /// the store's bulk-result ceiling).
 pub async fn export_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     filter: FilterInput,
     format: Format,
 ) -> anyhow::Result<()> {
@@ -333,9 +464,9 @@ pub async fn export_cmd(
             let mut after_path: Option<String> = None;
             loop {
                 let page = branches
-                    .find_page(&query, after_path.as_deref(), EXPORT_PAGE_SIZE)
+                    .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
                     .await?;
-                let done = (page.len() as u64) < EXPORT_PAGE_SIZE;
+                let done = (page.len() as u64) < STREAM_PAGE_SIZE;
                 after_path = page.last().map(|branch| branch.path.clone());
                 crate::output::write_stdout(&unclip_io::render_branches(&page, format)?)?;
                 if done {
@@ -354,7 +485,7 @@ pub async fn export_cmd(
 
 /// `unclip used <path>`.
 pub async fn used_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     history: &impl HistoryRepository,
     path: &str,
 ) -> anyhow::Result<()> {
@@ -373,26 +504,40 @@ pub async fn used_cmd(
 
 /// `unclip stats` — aggregate usage over a filter.
 pub async fn stats_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     history: &impl HistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
     let query = filter.into_query()?;
-    let matched = branches.find_all(query).await?;
 
-    let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
-    let summaries = history.usage_summaries(&ids).await?;
-
+    // Aggregate page by page: the counters are all that is retained, so the
+    // command is bounded by the page size rather than the bulk-result ceiling.
+    let mut matched = 0u64;
     let mut total_uses = 0u64;
     let mut unused = 0u64;
-    for id in &ids {
-        let count = summaries.get(id).map(|s| s.count).unwrap_or(0);
-        total_uses += count;
-        if count == 0 {
-            unused += 1;
+    let mut after_path: Option<String> = None;
+    loop {
+        let page = branches
+            .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
+            .await?;
+        let done = (page.len() as u64) < STREAM_PAGE_SIZE;
+        after_path = page.last().map(|branch| branch.path.clone());
+        matched += page.len() as u64;
+
+        let ids: Vec<i64> = page.iter().filter_map(|b| b.id).collect();
+        let summaries = history.usage_summaries(&ids).await?;
+        for id in &ids {
+            let count = summaries.get(id).map(|s| s.count).unwrap_or(0);
+            total_uses += count;
+            if count == 0 {
+                unused += 1;
+            }
+        }
+        if done {
+            break;
         }
     }
-    crate::output::outln!("branches: {}", matched.len());
+    crate::output::outln!("branches: {matched}");
     crate::output::outln!("total uses: {total_uses}");
     crate::output::outln!("unused: {unused}");
     Ok(())
@@ -400,7 +545,7 @@ pub async fn stats_cmd(
 
 /// `unclip stale` — branches matching a filter, least-used first.
 pub async fn stale_cmd(
-    branches: &impl BranchRepository,
+    branches: &impl BranchReader,
     history: &impl HistoryRepository,
     filter: FilterInput,
 ) -> anyhow::Result<()> {
@@ -425,8 +570,11 @@ pub async fn stale_cmd(
         crate::output::errln!("(no matching branches)");
         return Ok(());
     }
-    for (path, count, _) in rows {
-        crate::output::outln!("{path}\tuses={count}");
+    for (path, count, last_used) in rows {
+        crate::output::outln!(
+            "{path}\tuses={count}\tlast={}",
+            last_used.as_deref().unwrap_or("-")
+        );
     }
     Ok(())
 }

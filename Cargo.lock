@@ -2498,6 +2498,7 @@ dependencies = [
  "anyhow",
  "clap",
  "sea-orm",
+ "serde",
  "serde_json",
  "serde_norway",
  "tokio",

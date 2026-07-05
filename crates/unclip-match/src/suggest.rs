@@ -36,10 +36,10 @@ pub fn suggest_o2m(
     matcher.for_each_hit(text, |hit| {
         if let PatternTarget::O2m { name, value } = hit.target {
             let already = existing
-                .get(&name)
-                .is_some_and(|values| values.contains(&value));
+                .get(name)
+                .is_some_and(|values| values.contains(value));
             if !already {
-                found.insert((name, value));
+                found.insert((name.clone(), value.clone()));
             }
         }
     });

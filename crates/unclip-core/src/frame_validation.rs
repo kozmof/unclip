@@ -46,7 +46,9 @@ pub fn validate_frame(frame: &Frame) -> Result<()> {
 
         validate_o2o("require_o2o", &slot.require_o2o, slot, frame)?;
         validate_o2o("default_o2o", &slot.default_o2o, slot, frame)?;
-        validate_o2o("avoid_o2o", &slot.avoid_o2o, slot, frame)?;
+        // avoid_o2o is a multi-value exclusion, shaped (and validated) like
+        // the o2m maps: several avoided values may share one name.
+        validate_o2m("avoid_o2o", &slot.avoid_o2o, slot, frame)?;
         validate_o2m("require_o2m", &slot.require_o2m, slot, frame)?;
         validate_o2m("prefer_o2m", &slot.prefer_o2m, slot, frame)?;
         validate_o2m("avoid_o2m", &slot.avoid_o2m, slot, frame)?;
@@ -65,7 +67,11 @@ pub fn validate_frame(frame: &Frame) -> Result<()> {
                     ),
                 ));
             }
-            if slot.avoid_o2o.get(name) == Some(required) {
+            if slot
+                .avoid_o2o
+                .get(name)
+                .is_some_and(|avoided| avoided.contains(required))
+            {
                 return Err(invalid(
                     frame,
                     format!(
@@ -76,7 +82,11 @@ pub fn validate_frame(frame: &Frame) -> Result<()> {
             }
         }
         for (name, default) in &slot.default_o2o {
-            if slot.avoid_o2o.get(name) == Some(default) {
+            if slot
+                .avoid_o2o
+                .get(name)
+                .is_some_and(|avoided| avoided.contains(default))
+            {
                 return Err(invalid(
                     frame,
                     format!(
@@ -109,7 +119,7 @@ pub fn validate_frame(frame: &Frame) -> Result<()> {
             .saturating_add(1)
             .saturating_add(o2o_items(&slot.require_o2o))
             .saturating_add(o2o_items(&slot.default_o2o))
-            .saturating_add(o2o_items(&slot.avoid_o2o))
+            .saturating_add(o2m_items(&slot.avoid_o2o))
             .saturating_add(o2m_items(&slot.require_o2m))
             .saturating_add(o2m_items(&slot.prefer_o2m))
             .saturating_add(o2m_items(&slot.avoid_o2m))
@@ -126,7 +136,7 @@ pub fn validate_frame(frame: &Frame) -> Result<()> {
             .saturating_add(slot.under.as_ref().map_or(0, String::len))
             .saturating_add(map_bytes(&slot.require_o2o))
             .saturating_add(map_bytes(&slot.default_o2o))
-            .saturating_add(map_bytes(&slot.avoid_o2o))
+            .saturating_add(multimap_bytes(&slot.avoid_o2o))
             .saturating_add(multimap_bytes(&slot.require_o2m))
             .saturating_add(multimap_bytes(&slot.prefer_o2m))
             .saturating_add(multimap_bytes(&slot.avoid_o2m))

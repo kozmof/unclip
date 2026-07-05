@@ -83,6 +83,63 @@ pub fn score(
     }
 }
 
+/// A fixed-size weighted reservoir (Efraimidis–Spirakis "A-Res").
+///
+/// Offer every candidate exactly once, in a stable order, with its positive
+/// score; the kept set is distributed exactly like sequential weighted
+/// sampling without replacement, while holding only `take` candidates in
+/// memory. This is what lets `sample` stream candidates page by page instead
+/// of hydrating the whole filtered archive first.
+///
+/// Each `offer` consumes exactly one RNG draw, so for a fixed seed the result
+/// depends only on the candidate sequence, not on page boundaries.
+pub struct Reservoir {
+    take: usize,
+    /// `(key, branch)` pairs; keys are `u^(1/score)` with `u ~ U(0,1)`.
+    kept: Vec<(f64, Branch)>,
+}
+
+impl Reservoir {
+    pub fn new(take: usize) -> Self {
+        Self {
+            take,
+            kept: Vec::with_capacity(take),
+        }
+    }
+
+    /// Offer one candidate with its score (must be positive; [`score`]
+    /// guarantees that via its `MIN_SCORE` floor).
+    pub fn offer(&mut self, branch: Branch, score: f64, rng: &mut StdRng) {
+        // Always draw, even when the candidate cannot be kept, so the RNG
+        // stream stays aligned with the candidate sequence.
+        let u: f64 = rng.gen();
+        if self.take == 0 {
+            return;
+        }
+        let key = u.powf(1.0 / score);
+        if self.kept.len() < self.take {
+            self.kept.push((key, branch));
+            return;
+        }
+        let (min_index, min_key) = self
+            .kept
+            .iter()
+            .enumerate()
+            .map(|(i, (k, _))| (i, *k))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("reservoir with take > 0 is non-empty here");
+        if key > min_key {
+            self.kept[min_index] = (key, branch);
+        }
+    }
+
+    /// The selected branches, highest key first (the equivalent of draw order).
+    pub fn into_branches(mut self) -> Vec<Branch> {
+        self.kept.sort_by(|a, b| b.0.total_cmp(&a.0));
+        self.kept.into_iter().map(|(_, branch)| branch).collect()
+    }
+}
+
 /// Select up to `params.count` branches from `candidates` by weighted random
 /// selection without replacement. Returns references into `candidates`.
 pub fn sample<'a>(
@@ -97,29 +154,32 @@ pub fn sample<'a>(
         return Vec::new();
     }
 
-    // (index, score) pool we draw from and shrink as we pick.
+    // (index, score) pool we draw from and shrink as we pick. Scores are
+    // normalized once by the pool's largest score: each is then ≤ 1, so any
+    // partial sum is bounded by the pool length and cannot overflow, and
+    // draws need no per-iteration re-normalization (scaling every score by
+    // one constant leaves the draw proportions unchanged).
     let mut pool: Vec<(usize, f64)> = candidates
         .iter()
         .enumerate()
         .map(|(i, b)| (i, score(b, query, params, recent_ids)))
         .collect();
+    let max_score = pool.iter().map(|(_, s)| *s).fold(0.0, f64::max);
+    for (_, s) in &mut pool {
+        *s /= max_score;
+    }
 
     let mut chosen = Vec::with_capacity(take);
     for _ in 0..take {
-        // Normalize by the largest score before summing. A collection of valid
-        // finite scores can otherwise overflow its total even though each
-        // individual score is safe.
-        let max_score = pool.iter().map(|(_, s)| *s).fold(0.0, f64::max);
-        let total: f64 = pool.iter().map(|(_, s)| *s / max_score).sum();
+        let total: f64 = pool.iter().map(|(_, s)| *s).sum();
         let mut r = rng.gen_range(0.0..total);
         let mut picked = pool.len() - 1;
         for (idx, (_, s)) in pool.iter().enumerate() {
-            let normalized = *s / max_score;
-            if r < normalized {
+            if r < *s {
                 picked = idx;
                 break;
             }
-            r -= normalized;
+            r -= *s;
         }
         let (branch_index, _) = pool.swap_remove(picked);
         chosen.push(&candidates[branch_index]);
@@ -172,6 +232,51 @@ mod tests {
         // No duplicates (without replacement).
         let unique: HashSet<_> = a.iter().collect();
         assert_eq!(unique.len(), 3);
+    }
+
+    #[test]
+    fn reservoir_is_deterministic_capped_and_unique() {
+        let candidates: Vec<Branch> = (0..10).map(|i| branch(&format!("/b{i}"), i, 1.0)).collect();
+
+        let draw = |seed: u64, take: usize| {
+            let mut rng = rng_from_seed(seed);
+            let mut reservoir = Reservoir::new(take);
+            for candidate in &candidates {
+                reservoir.offer(candidate.clone(), 1.0, &mut rng);
+            }
+            reservoir
+                .into_branches()
+                .into_iter()
+                .map(|b| b.path)
+                .collect::<Vec<_>>()
+        };
+
+        // Same seed, same selection; distinct entries; capped at candidates.
+        let a = draw(42, 3);
+        assert_eq!(a, draw(42, 3));
+        assert_eq!(a.len(), 3);
+        assert_eq!(a.iter().collect::<HashSet<_>>().len(), 3);
+        assert_eq!(draw(1, 20).len(), 10);
+        assert!(draw(1, 0).is_empty());
+    }
+
+    #[test]
+    fn reservoir_prefers_heavier_scores() {
+        // With scores this far apart the heavy candidate should essentially
+        // always win. Seeds are fixed, so the assertion is deterministic.
+        let heavy = branch("/heavy", 1, 0.0);
+        let light = branch("/light", 2, 0.0);
+        let mut heavy_wins = 0;
+        for seed in 0..40 {
+            let mut rng = rng_from_seed(seed);
+            let mut reservoir = Reservoir::new(1);
+            reservoir.offer(heavy.clone(), 1_000.0, &mut rng);
+            reservoir.offer(light.clone(), 1.0, &mut rng);
+            if reservoir.into_branches()[0].path == "/heavy" {
+                heavy_wins += 1;
+            }
+        }
+        assert!(heavy_wins >= 38, "heavy won only {heavy_wins}/40 draws");
     }
 
     #[test]

@@ -1,30 +1,8 @@
 //! Rendering selection packets to YAML / JSON / JSONL.
 
-use std::str::FromStr;
-
 use unclip_core::SelectionPacket;
 
-/// Output format for packets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Format {
-    #[default]
-    Yaml,
-    Json,
-    Jsonl,
-}
-
-impl FromStr for Format {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "yaml" | "yml" => Ok(Format::Yaml),
-            "json" => Ok(Format::Json),
-            "jsonl" | "ndjson" => Ok(Format::Jsonl),
-            other => anyhow::bail!("unknown format `{other}` (expected yaml, json, or jsonl)"),
-        }
-    }
-}
+use crate::format::Format;
 
 /// Render a single packet (no trailing newline beyond the format's own).
 pub fn render_packet(packet: &SelectionPacket, format: Format) -> anyhow::Result<String> {
@@ -76,14 +54,6 @@ mod tests {
             branch: Branch::new("/ikebukuro/station/coin-locker"),
         });
         p
-    }
-
-    #[test]
-    fn formats_parse() {
-        assert_eq!("yaml".parse::<Format>().unwrap(), Format::Yaml);
-        assert_eq!("JSON".parse::<Format>().unwrap(), Format::Json);
-        assert_eq!("jsonl".parse::<Format>().unwrap(), Format::Jsonl);
-        assert!("xml".parse::<Format>().is_err());
     }
 
     #[test]

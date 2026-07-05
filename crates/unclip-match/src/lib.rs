@@ -9,6 +9,6 @@ pub mod dictionary;
 pub mod matcher;
 pub mod suggest;
 
-pub use dictionary::{PatternEntry, PatternHit, PatternTarget};
+pub use dictionary::{HitRef, PatternEntry, PatternHit, PatternTarget};
 pub use matcher::Matcher;
 pub use suggest::{branch_text, suggest_o2m};

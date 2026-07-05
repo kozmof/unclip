@@ -19,3 +19,16 @@ pub struct PatternHit {
     pub end: usize,
     pub target: PatternTarget,
 }
+
+/// A borrowed view of one hit, visited by [`crate::Matcher::for_each_hit`].
+///
+/// Repeated or overlapping patterns can produce far more hits than the text
+/// is long; borrowing keeps that streaming path allocation-free, and visitors
+/// clone only what they keep.
+#[derive(Debug, Clone, Copy)]
+pub struct HitRef<'a> {
+    pub pattern: &'a str,
+    pub start: usize,
+    pub end: usize,
+    pub target: &'a PatternTarget,
+}

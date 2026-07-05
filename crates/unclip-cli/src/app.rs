@@ -24,6 +24,10 @@ pub async fn run() -> anyhow::Result<()> {
         }
         Command::Add(input) => commands::add(&repos.branches, input).await?,
         Command::Edit(input) => commands::edit(&repos.branches, input).await?,
+        Command::Rm { path, recursive } => {
+            commands::rm(&repos.branches, &path, recursive).await?;
+        }
+        Command::RmFrame { name } => commands::rm_frame(&repos.frames, &name).await?,
         Command::Show { path } => commands::show(&repos.branches, &path).await?,
         Command::Ls { path } => commands::ls(&repos.branches, &path).await?,
         Command::Tree { path } => commands::tree(&repos.branches, &path).await?,
@@ -97,6 +101,25 @@ pub async fn run() -> anyhow::Result<()> {
                     frame,
                     under,
                     count,
+                    seed,
+                    format,
+                    dry_run,
+                },
+            )
+            .await?;
+        }
+        Command::Replay {
+            file,
+            seed,
+            format,
+            dry_run,
+        } => {
+            sampling::replay_cmd(
+                &repos.branches,
+                &repos.frames,
+                &repos.history,
+                sampling::ReplayInput {
+                    file,
                     seed,
                     format,
                     dry_run,

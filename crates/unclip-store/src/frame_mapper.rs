@@ -23,15 +23,22 @@ pub fn assemble_slot(
 ) -> anyhow::Result<Slot> {
     let mut require_o2o = BTreeMap::new();
     let mut default_o2o = BTreeMap::new();
-    let mut avoid_o2o = BTreeMap::new();
+    // avoid is a multi-value exclusion: several avoided values per name.
+    let mut avoid_o2o: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for row in o2o {
         let target = match row.mode.as_str() {
             O2O_REQUIRE => &mut require_o2o,
             O2O_DEFAULT => &mut default_o2o,
-            O2O_AVOID => &mut avoid_o2o,
+            O2O_AVOID => {
+                avoid_o2o.entry(row.name).or_default().push(row.value);
+                continue;
+            }
             other => anyhow::bail!("unknown o2o slot mode `{other}`"),
         };
         target.insert(row.name, row.value);
+    }
+    for values in avoid_o2o.values_mut() {
+        values.sort();
     }
 
     let mut require_o2m: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -84,8 +91,10 @@ pub fn slot_o2o_rows(slot: &Slot) -> Vec<(&'static str, String, String)> {
     for (name, value) in &slot.default_o2o {
         rows.push((O2O_DEFAULT, name.clone(), value.clone()));
     }
-    for (name, value) in &slot.avoid_o2o {
-        rows.push((O2O_AVOID, name.clone(), value.clone()));
+    for (name, values) in &slot.avoid_o2o {
+        for value in values {
+            rows.push((O2O_AVOID, name.clone(), value.clone()));
+        }
     }
     rows
 }

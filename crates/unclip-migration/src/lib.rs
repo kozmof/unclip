@@ -10,6 +10,7 @@ mod m20260702_000003_add_frame_slot_position;
 mod m20260703_000004_harden_domain_constraints;
 mod m20260703_000005_harden_pattern_paths;
 mod m20260703_000006_harden_branch_records;
+mod m20260705_000007_multi_value_avoid_o2o;
 
 struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260703_000004_harden_domain_constraints::Migration),
             Box::new(m20260703_000005_harden_pattern_paths::Migration),
             Box::new(m20260703_000006_harden_branch_records::Migration),
+            Box::new(m20260705_000007_multi_value_avoid_o2o::Migration),
         ]
     }
 }

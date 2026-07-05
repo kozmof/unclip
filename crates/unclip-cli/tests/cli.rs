@@ -590,3 +590,163 @@ fn import_upserts_from_file() {
     // Both paths are now present.
     assert!(unclip(&path, &["show", "/b"]).status.success());
 }
+
+/// `ls` tolerates a trailing slash, and `stale` reports last-used timestamps.
+#[test]
+fn ls_accepts_trailing_slash_and_stale_reports_last_used() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    assert!(unclip(&path, &["add", "/a/b", "--title", "B"]).status.success());
+
+    // `/a/` must list the same children as `/a`.
+    let ls = unclip(&path, &["ls", "/a/"]);
+    assert!(ls.status.success());
+    assert!(stdout(&ls).contains("/a/b"), "got: {}", stdout(&ls));
+
+    // Never-used branches report `last=-`.
+    let stale = unclip(&path, &["stale", "--under", "/a"]);
+    assert!(stale.status.success());
+    assert!(
+        stdout(&stale).contains("/a/b\tuses=0\tlast=-"),
+        "got: {}",
+        stdout(&stale)
+    );
+
+    // After a sample records usage, the timestamp appears.
+    let sample = unclip(&path, &["sample", "--under", "/a", "--seed", "1"]);
+    assert!(sample.status.success(), "sample failed: {}", stderr(&sample));
+    let stale = unclip(&path, &["stale", "--under", "/a"]);
+    assert!(
+        stdout(&stale).contains("uses=1\tlast=20"),
+        "got: {}",
+        stdout(&stale)
+    );
+}
+
+/// `rm` refuses a subtree without --recursive and deletes it with it;
+/// `rm-frame` deletes a stored frame. Both error on missing targets.
+#[test]
+fn rm_and_rm_frame_delete_explicitly() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    assert!(unclip(&path, &["add", "/a"]).status.success());
+    // A gap descendant: /a/b does not exist, only /a/b/c.
+    assert!(unclip(&path, &["add", "/a/b/c"]).status.success());
+
+    // Missing target is an error.
+    let out = unclip(&path, &["rm", "/nope"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("branch not found"));
+
+    // A branch with descendants needs --recursive.
+    let out = unclip(&path, &["rm", "/a"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("--recursive"), "got: {}", stderr(&out));
+
+    let out = unclip(&path, &["rm", "/a", "--recursive"]);
+    assert!(out.status.success(), "rm failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("deleted /a (2 branch(es))"));
+    assert!(!unclip(&path, &["show", "/a/b/c"]).status.success());
+
+    // A leaf deletes without --recursive.
+    assert!(unclip(&path, &["add", "/leaf"]).status.success());
+    assert!(unclip(&path, &["rm", "/leaf"]).status.success());
+    assert!(!unclip(&path, &["show", "/leaf"]).status.success());
+
+    // --recursive accepts a pure scope: a path that only exists through its
+    // descendants. An empty scope is still an error.
+    assert!(unclip(&path, &["add", "/scope/only/child"]).status.success());
+    let out = unclip(&path, &["rm", "/scope", "--recursive"]);
+    assert!(out.status.success(), "scope rm failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("deleted /scope (1 branch(es))"));
+    let out = unclip(&path, &["rm", "/scope", "--recursive"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("no branches under /scope"));
+
+    // rm-frame deletes a stored frame and errors when it is missing.
+    let frames = db.write(
+        "frames.yaml",
+        "frames:\n  story:\n    slots:\n      - name: place\n",
+    );
+    assert!(unclip(&path, &["import-frames", frames.to_str().unwrap()])
+        .status
+        .success());
+    let out = unclip(&path, &["rm-frame", "story"]);
+    assert!(out.status.success(), "rm-frame failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("deleted frame story"));
+    let out = unclip(&path, &["rm-frame", "story"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("frame not found"));
+}
+
+/// `replay` re-runs a packet's recorded query with its seed and reproduces
+/// the same selections, for both `sample` and `compose` packets.
+#[test]
+fn replay_reproduces_sample_and_compose_packets() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    for branch in ["/r/one", "/r/two", "/r/three", "/r/four"] {
+        assert!(unclip(&path, &["add", branch, "--o2o", "domain=story"])
+            .status
+            .success());
+    }
+
+    // Selected branch paths, in order, from a rendered packet.
+    fn selected_paths(yaml: &str) -> Vec<String> {
+        yaml.lines()
+            .filter(|l| l.trim_start().starts_with("path: "))
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    // Sample-packet replay.
+    let sampled = unclip(
+        &path,
+        &[
+            "sample", "--under", "/r", "--o2o", "domain=story", "--count", "2", "--seed", "42",
+            "--dry-run",
+        ],
+    );
+    assert!(sampled.status.success(), "sample: {}", stderr(&sampled));
+    let packet = db.write("sample-packet.yaml", &stdout(&sampled));
+    let replayed = unclip(&path, &["replay", packet.to_str().unwrap(), "--dry-run"]);
+    assert!(replayed.status.success(), "replay: {}", stderr(&replayed));
+    let original = selected_paths(&stdout(&sampled));
+    assert_eq!(original.len(), 2);
+    assert_eq!(selected_paths(&stdout(&replayed)), original);
+
+    // Compose-packet replay, including an --under override recorded in
+    // provenance.
+    let frames = db.write(
+        "frames.yaml",
+        "frames:\n  story:\n    slots:\n      - name: place\n        require_o2o:\n          domain: story\n",
+    );
+    assert!(unclip(&path, &["import-frames", frames.to_str().unwrap()])
+        .status
+        .success());
+    let composed = unclip(
+        &path,
+        &[
+            "compose", "--frame", "story", "--under", "place:/r", "--seed", "7", "--dry-run",
+        ],
+    );
+    assert!(composed.status.success(), "compose: {}", stderr(&composed));
+    let packet = db.write("compose-packet.yaml", &stdout(&composed));
+    let replayed = unclip(&path, &["replay", packet.to_str().unwrap(), "--dry-run"]);
+    assert!(replayed.status.success(), "replay: {}", stderr(&replayed));
+    assert_eq!(
+        selected_paths(&stdout(&replayed)),
+        selected_paths(&stdout(&composed))
+    );
+
+    // A --seed override takes precedence over the packet's seed.
+    let reseeded = unclip(
+        &path,
+        &["replay", packet.to_str().unwrap(), "--seed", "8", "--dry-run"],
+    );
+    assert!(reseeded.status.success());
+    assert!(stdout(&reseeded).contains("seed: 8"));
+}

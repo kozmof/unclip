@@ -259,6 +259,55 @@ metadata_suggest:
     }
 
     #[test]
+    fn validate_packet_rejects_duplicate_branches_in_one_slot() {
+        let frame = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![Slot {
+                name: "place".into(),
+                count: 2,
+                ..Default::default()
+            }],
+        };
+        // Two selections of the *same* branch satisfy the slot count but not
+        // the without-replacement contract.
+        let mut packet = SelectionPacket::new(Some("story".into()), None);
+        for _ in 0..2 {
+            packet.selections.push(Selection {
+                slot: Some("place".into()),
+                branch: Branch::new("/ikebukuro/station/coin-locker"),
+            });
+        }
+        let violations = validate_packet(&frame, &packet);
+        assert_eq!(violations.len(), 1, "got: {violations:?}");
+        assert!(violations[0].contains("more than once"));
+
+        // The same branch in *different* slots is legitimate.
+        let frame_two_slots = Frame {
+            name: "story".into(),
+            description: None,
+            slots: vec![
+                Slot {
+                    name: "place".into(),
+                    ..Default::default()
+                },
+                Slot {
+                    name: "mood".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        let mut cross_slot = SelectionPacket::new(Some("story".into()), None);
+        for slot in ["place", "mood"] {
+            cross_slot.selections.push(Selection {
+                slot: Some(slot.into()),
+                branch: Branch::new("/ikebukuro/station/coin-locker"),
+            });
+        }
+        assert!(validate_packet(&frame_two_slots, &cross_slot).is_empty());
+    }
+
+    #[test]
     fn packet_rejects_unknown_fields() {
         let yaml = r#"
 version: 1
@@ -348,6 +397,38 @@ avoid_recent: true
         let p = SampleParams::from_slot(&slot);
         assert!(p.avoid_recent);
         assert_eq!(p.count, 1);
+    }
+
+    #[test]
+    fn avoid_o2o_accepts_one_or_many_and_excludes_each_value() {
+        // Legacy single-string form parses as a one-element list.
+        let slot: Slot =
+            serde_norway::from_str("name: place\navoid_o2o:\n  use: background\n").unwrap();
+        assert_eq!(
+            slot.avoid_o2o.get("use"),
+            Some(&vec!["background".to_string()])
+        );
+
+        // List form: several avoided values of one name.
+        let slot: Slot = serde_norway::from_str(
+            "name: place\navoid_o2o:\n  use:\n    - background\n    - prop\n",
+        )
+        .unwrap();
+        assert_eq!(slot.avoid_o2o.get("use").map(Vec::len), Some(2));
+
+        // The canonical serialized shape (a list) re-parses identically.
+        let yaml = serde_norway::to_string(&slot).unwrap();
+        let again: Slot = serde_norway::from_str(&yaml).unwrap();
+        assert_eq!(slot, again);
+
+        // Every listed value excludes a carrying branch.
+        for value in ["background", "prop"] {
+            let mut branch = Branch::new("/x");
+            branch.o2o.insert("use".into(), value.into());
+            let violations = validate_branch(&slot, &branch);
+            assert_eq!(violations.len(), 1, "got: {violations:?}");
+            assert!(violations[0].contains("excluded"));
+        }
     }
 
     #[test]

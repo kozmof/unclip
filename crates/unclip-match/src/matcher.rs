@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use daachorse::DoubleArrayAhoCorasick;
 
-use crate::dictionary::{PatternEntry, PatternHit};
+use crate::dictionary::{HitRef, PatternEntry, PatternHit};
 
 /// Upper bound for distinct patterns compiled into one in-memory automaton.
 ///
@@ -84,7 +84,14 @@ impl Matcher {
     /// when Unicode lowercasing changes the haystack byte length.
     pub fn scan(&self, text: &str) -> Vec<PatternHit> {
         let mut hits = Vec::new();
-        self.for_each_hit(text, |hit| hits.push(hit));
+        self.for_each_hit(text, |hit| {
+            hits.push(PatternHit {
+                pattern: hit.pattern.to_string(),
+                start: hit.start,
+                end: hit.end,
+                target: hit.target.clone(),
+            })
+        });
         hits
     }
 
@@ -92,8 +99,9 @@ impl Matcher {
     ///
     /// Production consumers that aggregate results should prefer this method:
     /// repeated or overlapping patterns can otherwise make the number of hits
-    /// much larger than the scanned text.
-    pub fn for_each_hit(&self, text: &str, mut visit: impl FnMut(PatternHit)) {
+    /// much larger than the scanned text. Hits are borrowed views; a visitor
+    /// clones only the parts it keeps.
+    pub fn for_each_hit(&self, text: &str, mut visit: impl FnMut(HitRef<'_>)) {
         let Some(automaton) = &self.automaton else {
             return;
         };
@@ -112,11 +120,11 @@ impl Matcher {
             };
             let group = &self.groups[m.value() as usize];
             for entry in group {
-                visit(PatternHit {
-                    pattern: entry.pattern.clone(),
+                visit(HitRef {
+                    pattern: &entry.pattern,
                     start,
                     end,
-                    target: entry.target.clone(),
+                    target: &entry.target,
                 });
             }
         }

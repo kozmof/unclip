@@ -22,8 +22,8 @@ pub use history::{
 };
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{
-    BranchRepository, BranchRepositoryError, BranchRepositoryResult, IndexedValue,
-    SeaOrmBranchRepository,
+    BranchReader, BranchRepository, BranchRepositoryError, BranchRepositoryResult, BranchWriter,
+    IndexedValue, SeaOrmBranchRepository,
 };
 pub use seaorm::{
     connect, connect_and_migrate, connect_and_migrate_with_options, connect_with_options,

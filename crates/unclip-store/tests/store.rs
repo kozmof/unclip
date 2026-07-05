@@ -9,8 +9,8 @@ use unclip_core::{
     MAX_BRANCH_RECORD_BYTES, MAX_QUERY_FILTER_ITEMS,
 };
 use unclip_store::{
-    connect_and_migrate, connect_and_migrate_with_options, BranchRepository, BranchRepositoryError,
-    FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
+    connect_and_migrate, connect_and_migrate_with_options, BranchReader, BranchRepositoryError,
+    BranchWriter, FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
     SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository, StoreError,
 };
 
@@ -521,6 +521,14 @@ async fn frame_save_get_list_roundtrip() {
         avoid_o2m: [("topic".to_string(), vec!["cafe".to_string()])]
             .into_iter()
             .collect(),
+        // Several avoided values of one o2o name persist as a set (returned
+        // sorted), exercising the relaxed avoid-mode unique index.
+        avoid_o2o: [(
+            "use".to_string(),
+            vec!["background".to_string(), "prop".to_string()],
+        )]
+        .into_iter()
+        .collect(),
         avoid_recent: true,
         metadata_suggest: vec!["sensory".into(), "affordances".into()],
         ..Default::default()
@@ -802,6 +810,36 @@ async fn save_packet_with_usages_persists_both() {
 }
 
 #[tokio::test]
+async fn recent_branch_ids_counts_distinct_branches_not_usage_rows() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let branches = SeaOrmBranchRepository::new(db.clone());
+    let history = SeaOrmHistoryRepository::new(db);
+
+    branches.add(Branch::new("/old")).await.unwrap();
+    branches.add(Branch::new("/hot")).await.unwrap();
+    let old = branches.get("/old").await.unwrap().unwrap().id.unwrap();
+    let hot = branches.get("/hot").await.unwrap().unwrap().id.unwrap();
+
+    // One older usage of `/old`, then a burst of rows all hitting `/hot`
+    // (as one big packet would produce).
+    history.record_usage(old, "sample", None, None).await.unwrap();
+    for _ in 0..5 {
+        history.record_usage(hot, "sample", None, None).await.unwrap();
+    }
+
+    // A window of 2 distinct branches must still cover `/old`; under the old
+    // row-based window the `/hot` burst alone would have flushed it out.
+    let recent = history.recent_branch_ids(2).await.unwrap();
+    assert!(recent.contains(&hot));
+    assert!(recent.contains(&old), "got: {recent:?}");
+
+    // A window of 1 keeps only the most recently used branch.
+    let recent = history.recent_branch_ids(1).await.unwrap();
+    assert_eq!(recent.len(), 1);
+    assert!(recent.contains(&hot));
+}
+
+#[tokio::test]
 async fn packet_batch_rolls_back_every_packet_and_usage_on_failure() {
     use sea_orm::EntityTrait;
     use unclip_entity::selection_packets;
@@ -872,6 +910,42 @@ async fn branch_delete_removes_history_without_foreign_key_cascades() {
     branches.delete("/used").await.unwrap();
 
     assert_eq!(history.usage_for(id).await.unwrap().count, 0);
+}
+
+#[tokio::test]
+async fn delete_subtree_removes_branch_descendants_and_history() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let branches = SeaOrmBranchRepository::new(db.clone());
+    let history = SeaOrmHistoryRepository::new(db);
+
+    // `/a/b/c` exists without `/a/b`: descendants are not a chain of children.
+    branches.add(sample_branch_at("/a")).await.unwrap();
+    branches.add(sample_branch_at("/a/b/c")).await.unwrap();
+    branches.add(Branch::new("/ab")).await.unwrap(); // sibling, must survive
+
+    let c = branches.get("/a/b/c").await.unwrap().unwrap().id.unwrap();
+    history.record_usage(c, "sample", None, None).await.unwrap();
+
+    let deleted = branches.delete_subtree("/a").await.unwrap();
+    assert_eq!(deleted, 2);
+
+    assert!(branches.get("/a").await.unwrap().is_none());
+    assert!(branches.get("/a/b/c").await.unwrap().is_none());
+    // The `/ab` sibling is not under `/a` and survives.
+    assert!(branches.get("/ab").await.unwrap().is_some());
+    // Usage rows of deleted branches are gone.
+    assert_eq!(history.usage_for(c).await.unwrap().count, 0);
+
+    // Nothing left to delete: idempotently reports zero.
+    assert_eq!(branches.delete_subtree("/a").await.unwrap(), 0);
+}
+
+/// A `sample_branch` clone re-addressed to `path`, so subtree tests exercise
+/// branches that carry child rows (o2o/o2m/references) at every level.
+fn sample_branch_at(path: &str) -> Branch {
+    let mut b = sample_branch();
+    b.path = path.to_string();
+    b
 }
 
 #[tokio::test]
@@ -1069,7 +1143,8 @@ async fn frame_save_rejects_contradictory_constraints() {
         ..Default::default()
     };
     slot.require_o2o.insert("axis".into(), "place".into());
-    slot.avoid_o2o.insert("axis".into(), "place".into());
+    slot.avoid_o2o
+        .insert("axis".into(), vec!["place".into()]);
     let frame = Frame {
         name: "story".into(),
         description: None,

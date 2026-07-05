@@ -4,9 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use sea_orm::{
+    sea_query::{Alias, Expr, Query as SeaQuery},
     ActiveValue::{NotSet, Set},
-    DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryOrder,
-    QuerySelect, Statement, TransactionTrait,
+    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult,
+    Statement, TransactionTrait,
 };
 use unclip_entity::{selection_packets, usage_history};
 
@@ -111,17 +112,28 @@ impl SeaOrmHistoryRepository {
 
 #[async_trait]
 impl HistoryRepository for SeaOrmHistoryRepository {
-    /// The set of branch ids appearing in the most recent `limit` usage rows.
+    /// The `limit` most recently used *distinct* branch ids.
+    ///
+    /// Grouping by branch first means one large packet (which writes one usage
+    /// row per selected branch, all sharing a timestamp) cannot flush the whole
+    /// recency window by itself: the window always covers `limit` different
+    /// branches, however many rows each contributed.
     async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
-        let rows = usage_history::Entity::find()
-            .order_by_desc(usage_history::Column::UsedAt)
-            // `id` breaks ties so rows sharing a millisecond timestamp have a
-            // stable, deterministic order under `LIMIT`.
-            .order_by_desc(usage_history::Column::Id)
-            .limit(limit)
-            .all(&self.db)
-            .await?;
-        Ok(rows.into_iter().map(|r| r.branch_id as i64).collect())
+        #[derive(FromQueryResult)]
+        struct RecentBranch {
+            branch_id: i64,
+        }
+        // `MAX(id)` breaks ties so branches sharing a millisecond timestamp
+        // have a stable, deterministic order under `LIMIT`.
+        let rows = RecentBranch::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT branch_id FROM usage_history GROUP BY branch_id \
+             ORDER BY MAX(used_at) DESC, MAX(id) DESC LIMIT ?",
+            [i64::try_from(limit).unwrap_or(i64::MAX).into()],
+        ))
+        .all(&self.db)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.branch_id).collect())
     }
 
     /// Usage count and last-used timestamp for many branches.
@@ -139,21 +151,25 @@ impl HistoryRepository for SeaOrmHistoryRepository {
 
         let mut summaries = HashMap::new();
         for chunk in branch_ids.chunks(CHUNK) {
-            // Bind the ids as parameters rather than interpolating them: one `?`
-            // placeholder per id keeps the values out of the SQL text entirely.
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!(
-                "SELECT branch_id, COUNT(*) AS count, MAX(used_at) AS last_used \
-                 FROM usage_history WHERE branch_id IN ({placeholders}) GROUP BY branch_id"
-            );
-            let values = chunk.iter().map(|&id| id.into());
-            let rows = UsageRow::find_by_statement(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                sql,
-                values,
-            ))
-            .all(&self.db)
-            .await?;
+            // Built with the query builder (ids become bound parameters) so
+            // this aggregate reads like the crate's other queries.
+            let stmt = SeaQuery::select()
+                .column(usage_history::Column::BranchId)
+                .expr_as(
+                    Expr::col(usage_history::Column::BranchId).count(),
+                    Alias::new("count"),
+                )
+                .expr_as(
+                    Expr::col(usage_history::Column::UsedAt).max(),
+                    Alias::new("last_used"),
+                )
+                .from(usage_history::Entity)
+                .and_where(usage_history::Column::BranchId.is_in(chunk.iter().copied()))
+                .group_by_col(usage_history::Column::BranchId)
+                .to_owned();
+            let rows = UsageRow::find_by_statement(DbBackend::Sqlite.build(&stmt))
+                .all(&self.db)
+                .await?;
             summaries.extend(rows.into_iter().map(|r| {
                 (
                     r.branch_id,

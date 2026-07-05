@@ -240,9 +240,11 @@ pub fn validate_branch(slot: &Slot, branch: &Branch) -> Vec<String> {
         }
     }
 
-    for (name, value) in &slot.avoid_o2o {
-        if branch.o2o.get(name) == Some(value) {
-            violations.push(format!("o2o `{name}={value}` is excluded"));
+    for (name, avoided) in &slot.avoid_o2o {
+        for value in avoided {
+            if branch.o2o.get(name) == Some(value) {
+                violations.push(format!("o2o `{name}={value}` is excluded"));
+            }
         }
     }
 
@@ -294,12 +296,26 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
         ));
     }
 
+    // A slot's `count` asks for that many *distinct* branches; sampling draws
+    // without replacement, so a repeated path within one slot can only come
+    // from a hand-edited packet and is a violation even when the count matches.
+    let mut seen_per_slot: std::collections::HashSet<(&str, &str)> =
+        std::collections::HashSet::new();
+
     for selection in &packet.selections {
         if let Err(error) = validate_branch_record(&selection.branch) {
             violations.push(format!(
                 "selection `{}` contains an invalid branch: {error}",
                 selection.branch.path
             ));
+        }
+        if let Some(slot_name) = &selection.slot {
+            if !seen_per_slot.insert((slot_name.as_str(), selection.branch.path.as_str())) {
+                violations.push(format!(
+                    "slot `{slot_name}` selects `{}` more than once",
+                    selection.branch.path
+                ));
+            }
         }
         let Some(slot_name) = &selection.slot else {
             violations.push(format!(

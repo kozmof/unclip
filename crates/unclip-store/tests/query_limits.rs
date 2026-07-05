@@ -1,6 +1,6 @@
 use sea_orm::ConnectionTrait;
 use unclip_core::SampleQuery;
-use unclip_store::{BranchRepository, BranchRepositoryError, SeaOrmBranchRepository};
+use unclip_store::{BranchReader, BranchRepositoryError, SeaOrmBranchRepository};
 
 #[tokio::test]
 async fn broad_find_fails_before_hydrating_an_excessive_archive() {

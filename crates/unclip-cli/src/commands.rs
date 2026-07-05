@@ -9,7 +9,7 @@ use unclip_core::{
     Reference, SampleQuery, SelectionPacket, Slot,
 };
 use unclip_io::split_frame_selector;
-use unclip_store::{BranchRepository, FrameRepository, IndexedValue};
+use unclip_store::{BranchReader, BranchRepository, BranchWriter, FrameRepository, IndexedValue};
 
 /// Parse a `name=value` pair, used for `--o2o` / `--o2m` flags.
 pub fn parse_kv(raw: &str) -> anyhow::Result<(String, String)> {
@@ -69,7 +69,7 @@ pub struct AddInput {
     pub o2m: Vec<(String, String)>,
 }
 
-pub async fn add(repo: &impl BranchRepository, input: AddInput) -> anyhow::Result<()> {
+pub async fn add(repo: &impl BranchWriter, input: AddInput) -> anyhow::Result<()> {
     validate_path(&input.path)?;
     // The repository validates the full record (finite weight, o2o/o2m value
     // shape) and reports a duplicate path atomically at the insert itself.
@@ -211,7 +211,54 @@ pub async fn edit(repo: &impl BranchRepository, input: EditInput) -> anyhow::Res
     Ok(())
 }
 
-pub async fn show(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
+/// `unclip rm <path> [--recursive]` — delete a branch or its whole subtree.
+pub async fn rm(repo: &impl BranchRepository, path: &str, recursive: bool) -> anyhow::Result<()> {
+    let path = path.trim_end_matches('/');
+
+    // A recursive target is a *scope*: it need not exist as a branch itself
+    // (`/tokyo` may only exist through `/tokyo/...` descendants). Deleting is
+    // still explicit, so an empty scope is an error rather than a no-op.
+    if recursive {
+        let deleted = repo.delete_subtree(path).await?;
+        if deleted == 0 {
+            bail!("no branches under {path}");
+        }
+        crate::output::outln!("deleted {path} ({deleted} branch(es))");
+        return Ok(());
+    }
+
+    // A non-recursive target is exact, so a missing branch is an error
+    // (unlike the repository's idempotent `delete`), matching `edit`.
+    if repo.get(path).await?.is_none() {
+        bail!("branch not found: {path}");
+    }
+
+    // Paths are independent rows (`/a/b/c` can exist without `/a/b`), so probe
+    // the scope for any strictly-descendant row rather than only children.
+    let query = SampleQuery {
+        under: Some(path.to_string()),
+        ..Default::default()
+    };
+    let descendant = repo.find_page(&query, Some(path), 1).await?;
+    if !descendant.is_empty() {
+        bail!("branch {path} has descendants; pass --recursive to delete the subtree");
+    }
+    repo.delete(path).await?;
+    crate::output::outln!("deleted {path}");
+    Ok(())
+}
+
+/// `unclip rm-frame <name>` — delete a frame and its slots.
+pub async fn rm_frame(repo: &impl FrameRepository, name: &str) -> anyhow::Result<()> {
+    if repo.get_frame(name).await?.is_none() {
+        bail!("frame not found: {name}");
+    }
+    repo.delete_frame(name).await?;
+    crate::output::outln!("deleted frame {name}");
+    Ok(())
+}
+
+pub async fn show(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
     match repo.get(path).await? {
         Some(branch) => {
             crate::output::out!("{}", serde_norway::to_string(&branch)?);
@@ -221,7 +268,10 @@ pub async fn show(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()
     }
 }
 
-pub async fn ls(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
+pub async fn ls(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
+    // Accept a trailing slash the same way `tree` does; children are keyed by
+    // the exact parent path, so `/a/` would otherwise silently match nothing.
+    let path = path.trim_end_matches('/');
     let mut children = repo.children(path).await?;
     children.sort_by(|a, b| a.path.cmp(&b.path));
     if children.is_empty() {
@@ -237,7 +287,7 @@ pub async fn ls(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub async fn tree(repo: &impl BranchRepository, root: &str) -> anyhow::Result<()> {
+pub async fn tree(repo: &impl BranchReader, root: &str) -> anyhow::Result<()> {
     let root = root.trim_end_matches('/');
     let mut nodes = repo.descendants(root).await?;
     if let Some(node) = repo.get(root).await? {
@@ -273,7 +323,7 @@ pub struct QueryInput {
     pub avoid_o2m: Vec<(String, String)>,
 }
 
-pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::Result<()> {
+pub async fn query(repo: &impl BranchReader, input: QueryInput) -> anyhow::Result<()> {
     if let Some(under) = &input.under {
         validate_path(under).with_context(|| format!("invalid --under scope `{under}`"))?;
     }
@@ -298,20 +348,34 @@ pub async fn query(repo: &impl BranchRepository, input: QueryInput) -> anyhow::R
         q.avoid_o2m.entry(name).or_default().push(value);
     }
 
-    let mut found = repo.find_all(q).await?;
-    found.sort_by(|a, b| a.path.cmp(&b.path));
-    if found.is_empty() {
-        crate::output::errln!("(no matching branches)");
-        return Ok(());
+    // Stream one page at a time instead of retaining the full result set, so
+    // a broad query is bounded by the page size, not the archive size. Pages
+    // arrive in path order, so no re-sort is needed.
+    const QUERY_PAGE_SIZE: u64 = 1_000;
+    let mut after_path: Option<String> = None;
+    let mut any = false;
+    loop {
+        let page = repo
+            .find_page(&q, after_path.as_deref(), QUERY_PAGE_SIZE)
+            .await?;
+        let done = (page.len() as u64) < QUERY_PAGE_SIZE;
+        after_path = page.last().map(|branch| branch.path.clone());
+        for branch in &page {
+            any = true;
+            print_path_line(branch)?;
+        }
+        if done {
+            break;
+        }
     }
-    for branch in found {
-        print_path_line(&branch)?;
+    if !any {
+        crate::output::errln!("(no matching branches)");
     }
     Ok(())
 }
 
 /// `unclip o2o [name | name=value]` — catalog or branch lookup over o2o.
-pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
+pub async fn o2o(repo: &impl BranchReader, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2o_catalog(None).await?)?,
         Selector::Name(name) => print_catalog(repo.o2o_catalog(Some(&name)).await?)?,
@@ -323,7 +387,7 @@ pub async fn o2o(repo: &impl BranchRepository, selector: Option<String>) -> anyh
 }
 
 /// `unclip o2m [name | name=value]` — catalog or branch lookup over o2m.
-pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyhow::Result<()> {
+pub async fn o2m(repo: &impl BranchReader, selector: Option<String>) -> anyhow::Result<()> {
     match parse_selector(selector)? {
         Selector::All => print_catalog(repo.o2m_catalog(None).await?)?,
         Selector::Name(name) => print_catalog(repo.o2m_catalog(Some(&name)).await?)?,
@@ -335,7 +399,7 @@ pub async fn o2m(repo: &impl BranchRepository, selector: Option<String>) -> anyh
 }
 
 /// `unclip import <file>` — bulk import branches (upsert by path).
-pub async fn import(repo: &impl BranchRepository, branches: Vec<Branch>) -> anyhow::Result<()> {
+pub async fn import(repo: &impl BranchWriter, branches: Vec<Branch>) -> anyhow::Result<()> {
     if branches.is_empty() {
         crate::output::errln!("(no branches in file)");
         return Ok(());
@@ -355,7 +419,7 @@ pub async fn import(repo: &impl BranchRepository, branches: Vec<Branch>) -> anyh
 
 /// `unclip attach <path> <value>` — attach a reference to a branch.
 pub async fn attach(
-    repo: &impl BranchRepository,
+    repo: &impl BranchWriter,
     path: &str,
     value: String,
     kind: Option<String>,
@@ -373,7 +437,7 @@ pub async fn attach(
 }
 
 /// `unclip refs <path>` — list a branch's references.
-pub async fn refs(repo: &impl BranchRepository, path: &str) -> anyhow::Result<()> {
+pub async fn refs(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
     let branch = repo
         .get(path)
         .await?
@@ -458,7 +522,7 @@ pub async fn frame_show(repo: &impl FrameRepository, selector: &str) -> anyhow::
 
 /// `unclip create <path> --frame <name.slot>` — create a skeleton branch.
 pub async fn create(
-    branch_repo: &impl BranchRepository,
+    branch_repo: &impl BranchWriter,
     frame_repo: &impl FrameRepository,
     path: String,
     selector: &str,
@@ -489,7 +553,7 @@ pub async fn create(
 /// `name.slot` validates a stored branch (by path); a frame-only selector
 /// validates a packet file (by path on disk).
 pub async fn validate(
-    branch_repo: &impl BranchRepository,
+    branch_repo: &impl BranchReader,
     frame_repo: &impl FrameRepository,
     target: &str,
     selector: &str,

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::frame::Slot;
 
@@ -11,8 +11,13 @@ use crate::frame::Slot;
 ///
 /// `Serialize` is derived so a query can be embedded verbatim in a packet's
 /// `query` field; new fields are then carried automatically (no hand-written
-/// JSON projection to keep in sync).
-#[derive(Debug, Clone, Default, Serialize)]
+/// JSON projection to keep in sync). `Deserialize` (with `serde(default)`, so
+/// packets written before a field existed still parse) is what lets `replay`
+/// reconstruct the filter from that provenance. Unknown keys are deliberately
+/// tolerated: the packet's `query` object also carries the flattened
+/// [`SampleParams`] fields.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SampleQuery {
     pub under: Option<String>,
 
@@ -32,11 +37,7 @@ impl SampleQuery {
         Self {
             under: under_override.or_else(|| slot.under.clone()),
             require_o2o: slot.require_o2o.clone(),
-            avoid_o2o: slot
-                .avoid_o2o
-                .iter()
-                .map(|(name, value)| (name.clone(), vec![value.clone()]))
-                .collect(),
+            avoid_o2o: slot.avoid_o2o.clone(),
             require_o2m: slot.require_o2m.clone(),
             prefer_o2m: slot.prefer_o2m.clone(),
             avoid_o2m: slot.avoid_o2m.clone(),
@@ -47,8 +48,10 @@ impl SampleQuery {
 /// How to draw from the filtered candidates: how many, whether to weight by
 /// `weight`, and whether to penalize recently-used branches. Separate from
 /// [`SampleQuery`] so filter-only callers (`find`, `stats`, `stale`, `export`)
-/// never have to invent a count.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
+/// never have to invent a count. Deserializable for the same reason as
+/// [`SampleQuery`]: `replay` parses both from one packet-provenance object.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SampleParams {
     pub count: usize,
     pub weighted: bool,

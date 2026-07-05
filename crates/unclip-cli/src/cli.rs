@@ -53,6 +53,18 @@ pub(crate) enum Command {
     /// Edit fields, o2o, and o2m on an existing branch.
     Edit(EditInput),
 
+    /// Delete a branch (with --recursive, its whole subtree).
+    Rm {
+        path: String,
+        /// Also delete every descendant branch.
+        #[arg(long)]
+        recursive: bool,
+    },
+
+    /// Delete a frame and its slots.
+    #[command(name = "rm-frame")]
+    RmFrame { name: String },
+
     /// Show a branch as YAML.
     Show { path: String },
 
@@ -141,6 +153,19 @@ pub(crate) enum Command {
         /// Number of packets to generate (batch).
         #[arg(long, default_value_t = 1)]
         count: usize,
+        #[arg(long)]
+        seed: Option<u64>,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+
+    /// Re-run the sampling recorded in a packet file.
+    Replay {
+        /// Packet file (YAML or JSON) produced by `sample` or `compose`.
+        file: PathBuf,
+        /// Override the packet's seed (a fresh one is drawn if neither exists).
         #[arg(long)]
         seed: Option<u64>,
         #[arg(long, default_value = "yaml", value_parser = parse_format)]

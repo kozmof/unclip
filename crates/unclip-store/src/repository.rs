@@ -54,14 +54,12 @@ pub struct IndexedValue {
     pub count: i64,
 }
 
-/// Persistence boundary for branches. Application logic depends on this trait,
-/// not on SeaORM entities directly.
+/// Read half of the branch persistence boundary: navigation, filtered reads,
+/// and catalog projections. Query-only commands depend on this alone, so a
+/// handler's signature shows whether it can mutate the archive.
 #[async_trait]
-pub trait BranchRepository: Sync {
-    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()>;
+pub trait BranchReader: Sync {
     async fn get(&self, path: &str) -> BranchRepositoryResult<Option<Branch>>;
-    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()>;
-    async fn delete(&self, path: &str) -> BranchRepositoryResult<()>;
 
     async fn children(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
     async fn descendants(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
@@ -120,6 +118,17 @@ pub trait BranchRepository: Sync {
 
     /// `(path, title)` for every branch that has a title.
     async fn titles(&self) -> BranchRepositoryResult<Vec<(String, String)>>;
+}
+
+/// Write half of the branch persistence boundary.
+#[async_trait]
+pub trait BranchWriter: Sync {
+    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()>;
+    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()>;
+    async fn delete(&self, path: &str) -> BranchRepositoryResult<()>;
+    /// Delete a branch and every descendant atomically, returning how many
+    /// branches were removed (0 when nothing matched the scope).
+    async fn delete_subtree(&self, path: &str) -> BranchRepositoryResult<usize>;
 
     /// Attach a single reference to an existing branch.
     async fn attach_reference(
@@ -134,6 +143,13 @@ pub trait BranchRepository: Sync {
     /// Implementations must run the whole batch atomically.
     async fn upsert_many(&self, branches: Vec<Branch>) -> BranchRepositoryResult<(usize, usize)>;
 }
+
+/// The full persistence boundary for branches. Application logic depends on
+/// these traits, not on SeaORM entities directly; blanket-implemented for any
+/// type providing both halves.
+pub trait BranchRepository: BranchReader + BranchWriter {}
+
+impl<T: BranchReader + BranchWriter> BranchRepository for T {}
 
 /// SeaORM implementation backed by SQLite.
 pub struct SeaOrmBranchRepository {
@@ -357,126 +373,12 @@ impl SeaOrmBranchRepository {
 }
 
 #[async_trait]
-impl BranchRepository for SeaOrmBranchRepository {
-    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()> {
-        validate_branch_record(&branch)?;
-        let now = crate::history::now();
-        let txn = self.db.begin().await?;
-
-        let am = mapper::branch_active_model(&branch, &now, &now)?;
-        // Map the unique-path violation to a typed error at the insert itself,
-        // so two concurrent `add`s cannot race a check-then-insert window.
-        let res = branches::Entity::insert(am)
-            .exec(&txn)
-            .await
-            .map_err(|err| {
-                if matches!(
-                    err.sql_err(),
-                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-                ) {
-                    BranchRepositoryError::AlreadyExists {
-                        path: branch.path.clone(),
-                    }
-                } else {
-                    BranchRepositoryError::Database(err)
-                }
-            })?;
-        let branch_id = res.last_insert_id;
-
-        Self::insert_children(&txn, branch_id, &branch).await?;
-        txn.commit().await?;
-        Ok(())
-    }
-
+impl BranchReader for SeaOrmBranchRepository {
     async fn get(&self, path: &str) -> BranchRepositoryResult<Option<Branch>> {
         match self.model_by_path(path).await? {
             Some(model) => Ok(Some(self.hydrate(model).await?)),
             None => Ok(None),
         }
-    }
-
-    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()> {
-        validate_branch_record(&branch)?;
-        let expected_id = sqlite_branch_id(
-            branch
-                .id
-                .context("branch has no persistence id; reload it before updating")?,
-        )?;
-        let expected_revision = branch
-            .revision
-            .clone()
-            .context("branch has no persistence revision; reload it before updating")?;
-        let existing = self.model_by_path(&branch.path).await?.ok_or_else(|| {
-            BranchRepositoryError::NotFound {
-                path: branch.path.clone(),
-            }
-        })?;
-        if existing.id != expected_id {
-            return Err(BranchRepositoryError::Conflict {
-                path: branch.path.clone(),
-            });
-        }
-        let branch_id = expected_id;
-        let created_at = existing.created_at.clone();
-        let next_revision = next_revision(&expected_revision)?;
-
-        let txn = self.db.begin().await?;
-
-        // Compare-and-swap the opaque revision before replacing child rows.
-        // A concurrent editor that committed after this branch was loaded makes
-        // the predicate match zero rows, preventing a silent lost update.
-        let mut branch = branch;
-        branch.id = Some(branch_id as i64);
-        branch.revision = Some(next_revision.clone());
-        let mut am = mapper::branch_active_model(&branch, &created_at, &next_revision)?;
-        am.id = NotSet;
-        let result = branches::Entity::update_many()
-            .set(am)
-            .filter(branches::Column::Id.eq(branch_id))
-            .filter(branches::Column::UpdatedAt.eq(&expected_revision))
-            .exec(&txn)
-            .await?;
-        if result.rows_affected != 1 {
-            return Err(BranchRepositoryError::Conflict {
-                path: branch.path.clone(),
-            });
-        }
-
-        Self::replace_children(&txn, branch_id, &branch).await?;
-
-        txn.commit().await?;
-        Ok(())
-    }
-
-    async fn delete(&self, path: &str) -> BranchRepositoryResult<()> {
-        let Some(model) = self.model_by_path(path).await? else {
-            return Ok(());
-        };
-        let branch_id = model.id;
-        let txn = self.db.begin().await?;
-
-        // Explicit child deletes so behavior does not depend on the
-        // foreign_keys pragma being set on every pooled connection.
-        branch_o2o_values::Entity::delete_many()
-            .filter(branch_o2o_values::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        branch_o2m_values::Entity::delete_many()
-            .filter(branch_o2m_values::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        branch_references::Entity::delete_many()
-            .filter(branch_references::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        usage_history::Entity::delete_many()
-            .filter(usage_history::Column::BranchId.eq(branch_id))
-            .exec(&txn)
-            .await?;
-        branches::Entity::delete_by_id(branch_id).exec(&txn).await?;
-
-        txn.commit().await?;
-        Ok(())
     }
 
     async fn children(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
@@ -634,6 +536,175 @@ impl BranchRepository for SeaOrmBranchRepository {
             .into_iter()
             .filter_map(|r| r.title.map(|t| (r.path, t)))
             .collect())
+    }
+}
+
+#[async_trait]
+impl BranchWriter for SeaOrmBranchRepository {
+    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()> {
+        validate_branch_record(&branch)?;
+        let now = crate::history::now();
+        let txn = self.db.begin().await?;
+
+        let am = mapper::branch_active_model(&branch, &now, &now)?;
+        // Map the unique-path violation to a typed error at the insert itself,
+        // so two concurrent `add`s cannot race a check-then-insert window.
+        let res = branches::Entity::insert(am)
+            .exec(&txn)
+            .await
+            .map_err(|err| {
+                if matches!(
+                    err.sql_err(),
+                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                ) {
+                    BranchRepositoryError::AlreadyExists {
+                        path: branch.path.clone(),
+                    }
+                } else {
+                    BranchRepositoryError::Database(err)
+                }
+            })?;
+        let branch_id = res.last_insert_id;
+
+        Self::insert_children(&txn, branch_id, &branch).await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()> {
+        validate_branch_record(&branch)?;
+        let expected_id = sqlite_branch_id(
+            branch
+                .id
+                .context("branch has no persistence id; reload it before updating")?,
+        )?;
+        let expected_revision = branch
+            .revision
+            .clone()
+            .context("branch has no persistence revision; reload it before updating")?;
+        let existing = self.model_by_path(&branch.path).await?.ok_or_else(|| {
+            BranchRepositoryError::NotFound {
+                path: branch.path.clone(),
+            }
+        })?;
+        if existing.id != expected_id {
+            return Err(BranchRepositoryError::Conflict {
+                path: branch.path.clone(),
+            });
+        }
+        let branch_id = expected_id;
+        let created_at = existing.created_at.clone();
+        let next_revision = next_revision(&expected_revision)?;
+
+        let txn = self.db.begin().await?;
+
+        // Compare-and-swap the opaque revision before replacing child rows.
+        // A concurrent editor that committed after this branch was loaded makes
+        // the predicate match zero rows, preventing a silent lost update.
+        let mut branch = branch;
+        branch.id = Some(branch_id as i64);
+        branch.revision = Some(next_revision.clone());
+        let mut am = mapper::branch_active_model(&branch, &created_at, &next_revision)?;
+        am.id = NotSet;
+        let result = branches::Entity::update_many()
+            .set(am)
+            .filter(branches::Column::Id.eq(branch_id))
+            .filter(branches::Column::UpdatedAt.eq(&expected_revision))
+            .exec(&txn)
+            .await?;
+        if result.rows_affected != 1 {
+            return Err(BranchRepositoryError::Conflict {
+                path: branch.path.clone(),
+            });
+        }
+
+        Self::replace_children(&txn, branch_id, &branch).await?;
+
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn delete(&self, path: &str) -> BranchRepositoryResult<()> {
+        let Some(model) = self.model_by_path(path).await? else {
+            return Ok(());
+        };
+        let branch_id = model.id;
+        let txn = self.db.begin().await?;
+
+        // Explicit child deletes so behavior does not depend on the
+        // foreign_keys pragma being set on every pooled connection.
+        branch_o2o_values::Entity::delete_many()
+            .filter(branch_o2o_values::Column::BranchId.eq(branch_id))
+            .exec(&txn)
+            .await?;
+        branch_o2m_values::Entity::delete_many()
+            .filter(branch_o2m_values::Column::BranchId.eq(branch_id))
+            .exec(&txn)
+            .await?;
+        branch_references::Entity::delete_many()
+            .filter(branch_references::Column::BranchId.eq(branch_id))
+            .exec(&txn)
+            .await?;
+        usage_history::Entity::delete_many()
+            .filter(usage_history::Column::BranchId.eq(branch_id))
+            .exec(&txn)
+            .await?;
+        branches::Entity::delete_by_id(branch_id).exec(&txn).await?;
+
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Delete a branch and its whole subtree in one transaction.
+    ///
+    /// The id scan runs inside the same transaction as the deletes, so a
+    /// branch added under the scope by a concurrent writer either survives
+    /// (it committed first and is part of the scan) or fails to commit — it
+    /// cannot be half-orphaned.
+    async fn delete_subtree(&self, path: &str) -> BranchRepositoryResult<usize> {
+        let txn = self.db.begin().await?;
+        let ids: Vec<i32> = branches::Entity::find()
+            .select_only()
+            .column(branches::Column::Id)
+            .filter(
+                branches::Column::Path
+                    .eq(path)
+                    .or(branches::Column::Path.like(descendant_like(path))),
+            )
+            .limit((MAX_BULK_RESULTS + 1) as u64)
+            .into_tuple::<i32>()
+            .all(&txn)
+            .await?;
+        ensure_bulk_result_limit(ids.len())?;
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        for chunk in ids.chunks(ID_CHUNK) {
+            branch_o2o_values::Entity::delete_many()
+                .filter(branch_o2o_values::Column::BranchId.is_in(chunk.iter().copied()))
+                .exec(&txn)
+                .await?;
+            branch_o2m_values::Entity::delete_many()
+                .filter(branch_o2m_values::Column::BranchId.is_in(chunk.iter().copied()))
+                .exec(&txn)
+                .await?;
+            branch_references::Entity::delete_many()
+                .filter(branch_references::Column::BranchId.is_in(chunk.iter().copied()))
+                .exec(&txn)
+                .await?;
+            usage_history::Entity::delete_many()
+                .filter(usage_history::Column::BranchId.is_in(chunk.iter().copied()))
+                .exec(&txn)
+                .await?;
+            branches::Entity::delete_many()
+                .filter(branches::Column::Id.is_in(chunk.iter().copied()))
+                .exec(&txn)
+                .await?;
+        }
+
+        txn.commit().await?;
+        Ok(ids.len())
     }
 
     async fn attach_reference(

@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use unclip_core::Branch;
 
-use crate::packet::Format;
+use crate::format::Format;
 use crate::text::{read_text_file, MAX_TEXT_BYTES};
 
 /// Maximum serialized import size.
