@@ -530,6 +530,24 @@ fn pattern_add_and_scan() {
     assert!(stdout(&scan).contains("coin locker"));
 }
 
+/// `scan` matches CJK patterns embedded in running Japanese prose, where the
+/// neighbouring characters are kana/kanji rather than spaces or punctuation.
+#[test]
+fn scan_matches_inside_japanese_prose() {
+    let db = TempDb::new();
+    let path = db.path();
+    unclip(&path, &["init"]);
+    unclip(&path, &["add", "/池袋/駅前"]);
+
+    let add = unclip(&path, &["pattern", "add", "駅前", "--branch", "/池袋/駅前"]);
+    assert!(add.status.success(), "pattern add failed: {}", stderr(&add));
+
+    let text = db.write("scene_ja.txt", "夕方の駅前は人であふれていた。");
+    let scan = unclip(&path, &["scan", text.to_str().unwrap()]);
+    assert!(scan.status.success());
+    assert!(stdout(&scan).contains("駅前"));
+}
+
 /// `suggest-o2m` proposes a catalog o2m value present in a branch's text but
 /// not yet set on it.
 #[test]
@@ -589,6 +607,44 @@ fn import_upserts_from_file() {
     assert!(report.contains("1 updated"));
     // Both paths are now present.
     assert!(unclip(&path, &["show", "/b"]).status.success());
+}
+
+/// `ls` and `tree` surface path segments that only exist as scopes of deeper
+/// branches, marked with a trailing slash, so the hierarchy can be walked
+/// top-down without knowing full paths.
+#[test]
+fn ls_and_tree_surface_scope_only_segments() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    // `/a` and `/a/b` are never added as branches — they exist only as scopes.
+    assert!(unclip(&path, &["add", "/a/b/c", "--title", "C"]).status.success());
+    assert!(unclip(&path, &["add", "/a/d", "--title", "D"]).status.success());
+
+    // `ls /` lists the scope-only top-level segment.
+    let ls_root = unclip(&path, &["ls", "/"]);
+    assert!(ls_root.status.success());
+    assert_eq!(stdout(&ls_root), "/a/\n");
+
+    // Under `/a`: one scope-only child, one branch child.
+    let ls = unclip(&path, &["ls", "/a"]);
+    assert!(ls.status.success());
+    assert_eq!(stdout(&ls), "/a/b/\n/a/d\tD\n");
+
+    // `tree` gives the scope-only segment its own row, so `c` nests under
+    // `b/` instead of appearing to be a sibling of `d`.
+    let tree = unclip(&path, &["tree", "/a"]);
+    assert!(tree.status.success());
+    assert_eq!(stdout(&tree), "  b/\n    c\tC\n  d\tD\n");
+
+    // The empty-scope message names the root instead of an empty string.
+    let empty = unclip(&path, &["ls", "/nothing"]);
+    assert!(stderr(&empty).contains("(no children under /nothing)"));
+    let fresh = TempDb::new();
+    let fresh_path = fresh.path();
+    assert!(unclip(&fresh_path, &["init"]).status.success());
+    let empty_root = unclip(&fresh_path, &["ls", "/"]);
+    assert!(stderr(&empty_root).contains("(no children under /)"));
 }
 
 /// `ls` tolerates a trailing slash, and `stale` reports last-used timestamps.

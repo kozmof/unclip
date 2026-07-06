@@ -4,6 +4,8 @@
 //! daachorse automata from database state. Do not make daachorse the
 //! database."). Matching is case-insensitive (patterns and haystack are
 //! lowercased), so reported offsets always refer to the original text.
+//! Hits are word-boundary constrained, except next to CJK characters, whose
+//! scripts have no word delimiters.
 
 use std::collections::HashMap;
 
@@ -75,11 +77,14 @@ impl Matcher {
 
     /// Find all (overlapping) pattern hits in `text`.
     ///
-    /// Matches are constrained to word boundaries: a hit counts only when the
-    /// characters immediately before and after it are non-alphanumeric (or the
-    /// string edge). This stops short values from matching inside larger words
-    /// (e.g. `red` inside `predator`, `tense` inside `intense`) while still
-    /// allowing multi-word patterns and values separated by punctuation.
+    /// Matches are constrained to word boundaries: a hit is rejected only when
+    /// a neighbouring character and the adjacent pattern-edge character are
+    /// both spaced-word characters (alphanumeric and not CJK). This stops
+    /// short values from matching inside larger words (e.g. `red` inside
+    /// `predator`, `tense` inside `intense`) while still allowing multi-word
+    /// patterns and values separated by punctuation. CJK scripts have no
+    /// spaces between words, so no boundary is required next to a CJK
+    /// character — CJK patterns match as substrings of running text.
     /// Returned byte offsets are valid boundaries in the original input, even
     /// when Unicode lowercasing changes the haystack byte length.
     pub fn scan(&self, text: &str) -> Vec<PatternHit> {
@@ -152,17 +157,42 @@ fn lowercase_with_original_boundaries(text: &str) -> (String, Vec<Option<usize>>
 }
 
 /// Whether the `[start, end)` byte range in `haystack` is delimited by word
-/// boundaries — i.e. the neighbouring characters are not alphanumeric.
+/// boundaries. A side fails only when the neighbouring character and the
+/// pattern-edge character next to it are both spaced-word characters; the
+/// string edge is always a boundary.
 fn at_word_boundary(haystack: &str, start: usize, end: usize) -> bool {
-    let before_ok = haystack[..start]
-        .chars()
-        .next_back()
-        .is_none_or(|c| !c.is_alphanumeric());
-    let after_ok = haystack[end..]
-        .chars()
-        .next()
-        .is_none_or(|c| !c.is_alphanumeric());
-    before_ok && after_ok
+    let matched = &haystack[start..end];
+    let boundary = |neighbour: Option<char>, edge: Option<char>| match (neighbour, edge) {
+        (Some(n), Some(e)) => !(needs_word_boundary(n) && needs_word_boundary(e)),
+        _ => true,
+    };
+    boundary(haystack[..start].chars().next_back(), matched.chars().next())
+        && boundary(haystack[end..].chars().next(), matched.chars().next_back())
+}
+
+/// Whether `c` belongs to a script that separates words with delimiters, so a
+/// match edge touching it must fall on a word boundary. CJK characters do not
+/// qualify: those scripts run words together, and requiring a boundary there
+/// would reject every match inside CJK prose.
+fn needs_word_boundary(c: char) -> bool {
+    c.is_alphanumeric() && !is_cjk(c)
+}
+
+/// Heuristic membership test for the major CJK blocks (Han, kana, Hangul).
+/// Not exhaustive — rare historic blocks are omitted — but misclassifying one
+/// only re-imposes the word-boundary rule on that character.
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3040}'..='\u{309F}'   // Hiragana
+        | '\u{30A0}'..='\u{30FF}' // Katakana
+        | '\u{31F0}'..='\u{31FF}' // Katakana Phonetic Extensions
+        | '\u{FF66}'..='\u{FF9D}' // Halfwidth Katakana
+        | '\u{4E00}'..='\u{9FFF}' // CJK Unified Ideographs
+        | '\u{3400}'..='\u{4DBF}' // CJK Extension A
+        | '\u{20000}'..='\u{2FA1F}' // CJK Extension B and beyond
+        | '\u{F900}'..='\u{FAFF}' // CJK Compatibility Ideographs
+        | '\u{AC00}'..='\u{D7AF}' // Hangul Syllables
+    )
 }
 
 #[cfg(test)]
@@ -227,6 +257,54 @@ mod tests {
 
         // Whole words, and words bounded by punctuation, do match.
         assert_eq!(m.scan("a RED, tense room").len(), 2);
+    }
+
+    #[test]
+    fn cjk_patterns_match_inside_running_text() {
+        let entries = vec![PatternEntry::new(
+            "駅前",
+            PatternTarget::O2m {
+                name: "話題".into(),
+                value: "交通".into(),
+            },
+        )];
+        let m = Matcher::build(entries).unwrap();
+
+        // Kana/kanji neighbours are not word boundaries in the ASCII sense;
+        // the pattern must still match, and offsets must slice the original.
+        let text = "夕方の駅前は混雑していた";
+        let hits = m.scan(text);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].start..hits[0].end], "駅前");
+    }
+
+    #[test]
+    fn script_change_counts_as_a_boundary() {
+        let entries = vec![
+            PatternEntry::new(
+                "red",
+                PatternTarget::O2m {
+                    name: "color".into(),
+                    value: "red".into(),
+                },
+            ),
+            PatternEntry::new(
+                "駅前",
+                PatternTarget::O2m {
+                    name: "話題".into(),
+                    value: "交通".into(),
+                },
+            ),
+        ];
+        let m = Matcher::build(entries).unwrap();
+
+        // An ASCII pattern flanked by CJK, and a CJK pattern flanked by
+        // ASCII, both match: the script change is the boundary.
+        assert_eq!(m.scan("その日redを見た").len(), 1);
+        assert_eq!(m.scan("a駅前b").len(), 1);
+
+        // ASCII-in-ASCII substrings stay rejected.
+        assert!(m.scan("predator").is_empty());
     }
 
     #[test]

@@ -269,19 +269,43 @@ pub async fn show(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
 }
 
 pub async fn ls(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
-    // Accept a trailing slash the same way `tree` does; children are keyed by
-    // the exact parent path, so `/a/` would otherwise silently match nothing.
+    // Accept a trailing slash the same way `tree` does; paths are compared
+    // without it, so `/a/` would otherwise silently match nothing.
     let path = path.trim_end_matches('/');
-    let mut children = repo.children(path).await?;
-    children.sort_by(|a, b| a.path.cmp(&b.path));
-    if children.is_empty() {
-        crate::output::errln!("(no children under {path})");
+    // Scan the whole subtree (sharing `tree`'s bulk bound) rather than the
+    // exact-parent index: a path segment that was never added as a branch
+    // still scopes deeper branches, and must be listed to be discoverable.
+    let descendants = repo.descendants(path).await?;
+
+    // One entry per immediate child path; a child that is itself a branch
+    // carries it, a child that only exists as a scope stays `None`.
+    let mut entries: BTreeMap<String, Option<Branch>> = BTreeMap::new();
+    for branch in descendants {
+        let segment_end = branch.path[path.len() + 1..]
+            .find('/')
+            .map(|i| path.len() + 1 + i)
+            .unwrap_or(branch.path.len());
+        let child_path = branch.path[..segment_end].to_string();
+        let is_direct_child = segment_end == branch.path.len();
+        let entry = entries.entry(child_path).or_insert(None);
+        if is_direct_child {
+            *entry = Some(branch);
+        }
+    }
+
+    if entries.is_empty() {
+        crate::output::errln!("(no children under {})", display_scope(path));
         return Ok(());
     }
-    for child in children {
-        match &child.title {
-            Some(title) => crate::output::outln!("{}\t{}", child.path, title),
-            None => crate::output::outln!("{}", child.path),
+    for (child_path, branch) in entries {
+        match branch {
+            Some(Branch {
+                title: Some(title), ..
+            }) => crate::output::outln!("{child_path}\t{title}"),
+            Some(_) => crate::output::outln!("{child_path}"),
+            // Scope-only segment: the trailing slash marks a path that can be
+            // listed further but not shown as a branch.
+            None => crate::output::outln!("{child_path}/"),
         }
     }
     Ok(())
@@ -294,22 +318,47 @@ pub async fn tree(repo: &impl BranchReader, root: &str) -> anyhow::Result<()> {
         nodes.push(node);
     }
     if nodes.is_empty() {
-        crate::output::errln!("(no branches under {root})");
+        crate::output::errln!("(no branches under {})", display_scope(root));
         return Ok(());
     }
-    nodes.sort_by(|a, b| a.path.cmp(&b.path));
+
+    // One display row per path, including scope-only segments between the
+    // root and each branch — without them, siblings under different implicit
+    // parents would render as if nested under the previous branch.
+    let mut rows: BTreeMap<String, Option<Branch>> = BTreeMap::new();
+    for node in nodes {
+        for (i, _) in node.path.match_indices('/') {
+            if i > root.len() {
+                rows.entry(node.path[..i].to_string()).or_insert(None);
+            }
+        }
+        rows.insert(node.path.clone(), Some(node));
+    }
 
     let root_depth = segment_count(root);
-    for node in nodes {
-        let depth = segment_count(&node.path).saturating_sub(root_depth);
+    for (path, node) in rows {
+        let depth = segment_count(&path).saturating_sub(root_depth);
         let indent = "  ".repeat(depth);
-        let label = last_segment(&node.path);
-        match &node.title {
-            Some(title) => crate::output::outln!("{indent}{label}\t{title}"),
-            None => crate::output::outln!("{indent}{label}"),
+        let label = last_segment(&path);
+        match node {
+            Some(Branch {
+                title: Some(title), ..
+            }) => crate::output::outln!("{indent}{label}\t{title}"),
+            Some(_) => crate::output::outln!("{indent}{label}"),
+            None => crate::output::outln!("{indent}{label}/"),
         }
     }
     Ok(())
+}
+
+/// A scope path for messages: the bare root trims to an empty string and
+/// would otherwise print as nothing.
+fn display_scope(path: &str) -> &str {
+    if path.is_empty() {
+        "/"
+    } else {
+        path
+    }
 }
 
 /// Arguments for `query`, assembled by clap in `main`.
