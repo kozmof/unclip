@@ -166,8 +166,10 @@ fn at_word_boundary(haystack: &str, start: usize, end: usize) -> bool {
         (Some(n), Some(e)) => !(needs_word_boundary(n) && needs_word_boundary(e)),
         _ => true,
     };
-    boundary(haystack[..start].chars().next_back(), matched.chars().next())
-        && boundary(haystack[end..].chars().next(), matched.chars().next_back())
+    boundary(
+        haystack[..start].chars().next_back(),
+        matched.chars().next(),
+    ) && boundary(haystack[end..].chars().next(), matched.chars().next_back())
 }
 
 /// Whether `c` belongs to a script that separates words with delimiters, so a

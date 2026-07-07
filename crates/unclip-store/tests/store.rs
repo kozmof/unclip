@@ -822,9 +822,15 @@ async fn recent_branch_ids_counts_distinct_branches_not_usage_rows() {
 
     // One older usage of `/old`, then a burst of rows all hitting `/hot`
     // (as one big packet would produce).
-    history.record_usage(old, "sample", None, None).await.unwrap();
+    history
+        .record_usage(old, "sample", None, None)
+        .await
+        .unwrap();
     for _ in 0..5 {
-        history.record_usage(hot, "sample", None, None).await.unwrap();
+        history
+            .record_usage(hot, "sample", None, None)
+            .await
+            .unwrap();
     }
 
     // A window of 2 distinct branches must still cover `/old`; under the old
@@ -1143,8 +1149,7 @@ async fn frame_save_rejects_contradictory_constraints() {
         ..Default::default()
     };
     slot.require_o2o.insert("axis".into(), "place".into());
-    slot.avoid_o2o
-        .insert("axis".into(), vec!["place".into()]);
+    slot.avoid_o2o.insert("axis".into(), vec!["place".into()]);
     let frame = Frame {
         name: "story".into(),
         description: None,

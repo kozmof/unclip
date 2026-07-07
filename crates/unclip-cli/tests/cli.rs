@@ -618,8 +618,12 @@ fn ls_and_tree_surface_scope_only_segments() {
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
     // `/a` and `/a/b` are never added as branches — they exist only as scopes.
-    assert!(unclip(&path, &["add", "/a/b/c", "--title", "C"]).status.success());
-    assert!(unclip(&path, &["add", "/a/d", "--title", "D"]).status.success());
+    assert!(unclip(&path, &["add", "/a/b/c", "--title", "C"])
+        .status
+        .success());
+    assert!(unclip(&path, &["add", "/a/d", "--title", "D"])
+        .status
+        .success());
 
     // `ls /` lists the scope-only top-level segment.
     let ls_root = unclip(&path, &["ls", "/"]);
@@ -653,7 +657,9 @@ fn ls_accepts_trailing_slash_and_stale_reports_last_used() {
     let db = TempDb::new();
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
-    assert!(unclip(&path, &["add", "/a/b", "--title", "B"]).status.success());
+    assert!(unclip(&path, &["add", "/a/b", "--title", "B"])
+        .status
+        .success());
 
     // `/a/` must list the same children as `/a`.
     let ls = unclip(&path, &["ls", "/a/"]);
@@ -671,7 +677,11 @@ fn ls_accepts_trailing_slash_and_stale_reports_last_used() {
 
     // After a sample records usage, the timestamp appears.
     let sample = unclip(&path, &["sample", "--under", "/a", "--seed", "1"]);
-    assert!(sample.status.success(), "sample failed: {}", stderr(&sample));
+    assert!(
+        sample.status.success(),
+        "sample failed: {}",
+        stderr(&sample)
+    );
     let stale = unclip(&path, &["stale", "--under", "/a"]);
     assert!(
         stdout(&stale).contains("uses=1\tlast=20"),
@@ -699,7 +709,11 @@ fn rm_and_rm_frame_delete_explicitly() {
     // A branch with descendants needs --recursive.
     let out = unclip(&path, &["rm", "/a"]);
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("--recursive"), "got: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("--recursive"),
+        "got: {}",
+        stderr(&out)
+    );
 
     let out = unclip(&path, &["rm", "/a", "--recursive"]);
     assert!(out.status.success(), "rm failed: {}", stderr(&out));
@@ -713,7 +727,9 @@ fn rm_and_rm_frame_delete_explicitly() {
 
     // --recursive accepts a pure scope: a path that only exists through its
     // descendants. An empty scope is still an error.
-    assert!(unclip(&path, &["add", "/scope/only/child"]).status.success());
+    assert!(unclip(&path, &["add", "/scope/only/child"])
+        .status
+        .success());
     let out = unclip(&path, &["rm", "/scope", "--recursive"]);
     assert!(out.status.success(), "scope rm failed: {}", stderr(&out));
     assert!(stdout(&out).contains("deleted /scope (1 branch(es))"));
@@ -762,7 +778,15 @@ fn replay_reproduces_sample_and_compose_packets() {
     let sampled = unclip(
         &path,
         &[
-            "sample", "--under", "/r", "--o2o", "domain=story", "--count", "2", "--seed", "42",
+            "sample",
+            "--under",
+            "/r",
+            "--o2o",
+            "domain=story",
+            "--count",
+            "2",
+            "--seed",
+            "42",
             "--dry-run",
         ],
     );
@@ -786,7 +810,14 @@ fn replay_reproduces_sample_and_compose_packets() {
     let composed = unclip(
         &path,
         &[
-            "compose", "--frame", "story", "--under", "place:/r", "--seed", "7", "--dry-run",
+            "compose",
+            "--frame",
+            "story",
+            "--under",
+            "place:/r",
+            "--seed",
+            "7",
+            "--dry-run",
         ],
     );
     assert!(composed.status.success(), "compose: {}", stderr(&composed));
@@ -801,7 +832,13 @@ fn replay_reproduces_sample_and_compose_packets() {
     // A --seed override takes precedence over the packet's seed.
     let reseeded = unclip(
         &path,
-        &["replay", packet.to_str().unwrap(), "--seed", "8", "--dry-run"],
+        &[
+            "replay",
+            packet.to_str().unwrap(),
+            "--seed",
+            "8",
+            "--dry-run",
+        ],
     );
     assert!(reseeded.status.success());
     assert!(stdout(&reseeded).contains("seed: 8"));
