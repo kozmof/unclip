@@ -3,6 +3,11 @@ name = "unclip-io"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "YAML, JSON, and JSONL import and export helpers for unclip."
 
 [dependencies]
 unclip-core.workspace = true

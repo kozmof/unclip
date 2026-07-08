@@ -3,6 +3,11 @@ name = "unclip-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Domain model, validation, frames, packets, and queries for unclip."
 
 [dependencies]
 serde.workspace = true

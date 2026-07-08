@@ -3,6 +3,11 @@ name = "unclip-sample"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Seeded weighted sampling utilities for unclip selections."
 
 [dependencies]
 unclip-core.workspace = true

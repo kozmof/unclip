@@ -17,6 +17,8 @@ edition = "2021"
 license = "MIT"
 authors = ["kozmof"]
 repository = "https://github.com/kozmof/unclip"
+readme = "README.md"
+keywords = ["cli", "llm", "sampling", "sqlite"]
 
 [workspace.dependencies]
 # Internal crates. An explicit `version` (matching workspace.package.version)
