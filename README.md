@@ -1,8 +1,8 @@
 # unclip
 
-unclip is a command-line tool for LLM outputs by building the
-possibility space outside the model. Store ideas as addressable branches, index
-and constrain them, then sample structured selections to feed the model.
+unclip is a command-line tool for getting varied output from LLMs by building
+the possibility space outside the model. Store ideas as addressable branches,
+index and constrain them, then sample structured selections to feed the model.
 
 ## Why
 
@@ -37,7 +37,7 @@ a branch's score. An avoided value excludes it.
 ## Install
 
 unclip is currently distributed from source. The repository pins its Rust
-toolchain in `rust-toolchain.toml`; Cargo will use it automatically when rustup
+toolchain in `rust-toolchain.toml`, and Cargo uses it automatically when rustup
 is installed.
 
 Build the release binary from a checkout.
@@ -162,16 +162,17 @@ Sampling draws candidates by weighted random selection without replacement. Pass
 `--seed` to make the selection reproducible, and `--dry-run` to print a packet
 without recording usage or saving it. A packet still embeds a wall-clock
 `created_at`, so the same seed reproduces the same selection rather than the same
-bytes. Seed reproducibility holds within one unclip version: a release that
+bytes. Seed reproducibility holds within one unclip version. A release that
 changes the sampling algorithm may map the same seed to a different selection.
 
 Every packet embeds the query and sampling controls that produced it, so
-`unclip replay packet.yaml` re-runs that draw — with the recorded seed by
-default, or a fresh one via `--seed`.
+`unclip replay packet.yaml` re-runs that draw. It uses the recorded seed by
+default, or a seed you pass with `--seed`.
 
 ## Quality and release checks
 
-The workspace is set up for release-minded source distribution. CI runs:
+The workspace is set up for release-minded source distribution. CI runs these
+checks.
 
 - `cargo fmt --all --check`
 - `cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings`
