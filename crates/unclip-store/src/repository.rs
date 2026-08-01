@@ -593,7 +593,7 @@ impl BranchWriter for SeaOrmBranchRepository {
             });
         }
         let branch_id = expected_id;
-        let created_at = existing.created_at.clone();
+        let created_at = existing.created_at;
         let next_revision = next_revision(&expected_revision)?;
 
         let txn = self.db.begin().await?;
@@ -723,7 +723,7 @@ impl BranchWriter for SeaOrmBranchRepository {
                 })?;
         let expected_revision = aggregate
             .revision
-            .clone()
+            .take()
             .context("branch has no persistence revision; reload it before attaching")?;
         aggregate.references.push(reference.clone());
         validate_branch_record(&aggregate)?;
