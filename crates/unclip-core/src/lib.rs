@@ -112,6 +112,24 @@ references:
     }
 
     #[test]
+    fn equality_ignores_persistence_bookkeeping() {
+        // `id`/`revision` are `#[serde(skip)]` storage fields, so a branch read
+        // back from the database must still compare equal to the same branch
+        // parsed from a file — that comparison is what import/export and
+        // round-trip tests are actually asserting.
+        let parsed = Branch::new("/ikebukuro/station/exit");
+        let mut stored = parsed.clone();
+        stored.id = Some(42);
+        stored.revision = Some("2026-08-01T00:00:00.000Z".into());
+        assert_eq!(parsed, stored);
+
+        // Domain fields still distinguish branches.
+        let mut different = parsed.clone();
+        different.title = Some("Exit".into());
+        assert_ne!(parsed, different);
+    }
+
+    #[test]
     fn parent_path_navigation() {
         assert_eq!(
             parent_of("/ikebukuro/station/exit").as_deref(),
@@ -391,14 +409,16 @@ count: 1
 avoid_recent: true
 "#;
         let slot: Slot = serde_norway::from_str(yaml).unwrap();
-        let q = SampleQuery::from_slot(&slot, Some("/ikebukuro".into()));
-        assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
-        assert_eq!(q.require_o2o.get("axis").unwrap(), "place");
 
-        // Sampling controls split off into SampleParams.
+        // Sampling controls split off into SampleParams, which reads the slot
+        // before the filter consumes it.
         let p = SampleParams::from_slot(&slot);
         assert!(p.avoid_recent);
         assert_eq!(p.count, 1);
+
+        let q = SampleQuery::from_slot(slot, Some("/ikebukuro".into()));
+        assert_eq!(q.under.as_deref(), Some("/ikebukuro"));
+        assert_eq!(q.require_o2o.get("axis").unwrap(), "place");
     }
 
     #[test]

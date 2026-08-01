@@ -33,23 +33,31 @@ pub fn branch_text(branch: &Branch) -> String {
 
 /// Suggest o2m `(name, value)` pairs found in `text` that `existing` lacks.
 /// Results are de-duplicated and sorted.
+///
+/// Hits are aggregated as borrows of the matcher's own strings; the only
+/// allocation is one owned pair per *distinct* suggestion at the end. Repeated
+/// and overlapping hits — which can far outnumber the scanned text — cost
+/// nothing.
 pub fn suggest_o2m(
     matcher: &Matcher,
     text: &str,
     existing: &BTreeMap<String, Vec<String>>,
 ) -> Vec<(String, String)> {
-    let mut found: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut found: BTreeSet<(&str, &str)> = BTreeSet::new();
     matcher.for_each_hit(text, |hit| {
         if let PatternTarget::O2m { name, value } = hit.target {
             let already = existing
-                .get(name)
+                .get(name.as_str())
                 .is_some_and(|values| values.contains(value));
             if !already {
-                found.insert((name.clone(), value.clone()));
+                found.insert((name, value));
             }
         }
     });
-    found.into_iter().collect()
+    found
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
 }
 
 #[cfg(test)]

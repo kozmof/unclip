@@ -11,7 +11,11 @@ use crate::error::{CoreError, Result};
 use crate::validate::{validate_path, MAX_DOMAIN_STRING_BYTES};
 
 /// Where a matched text pattern maps to in the structured model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Hash`/`Ord` are derived so scan results can be aggregated in a map keyed by
+/// `&PatternTarget` borrowed straight from the matcher, instead of by an owned
+/// `describe()` string rebuilt for every hit.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PatternTarget {
     O2m {

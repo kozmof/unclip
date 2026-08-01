@@ -8,7 +8,10 @@ use crate::reference::Reference;
 ///
 /// `BTreeMap` is used for o2o/o2m so that YAML/JSON output is deterministically
 /// ordered, which keeps round-trips and golden tests stable.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Equality compares the *domain* value and deliberately ignores `id` and
+/// `revision` (see the manual [`PartialEq`] impl below).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Branch {
     /// Database id. Never part of the serialized representation.
@@ -49,6 +52,26 @@ pub struct Branch {
 
 pub(crate) fn default_weight() -> f64 {
     1.0
+}
+
+/// Compare branches by the value they represent, not by where they came from.
+///
+/// `id` and `revision` are storage bookkeeping — they are `#[serde(skip)]`, so a
+/// branch parsed from YAML never carries them. Deriving `PartialEq` would fold
+/// them into equality and make a stored branch unequal to the identical branch
+/// read from a file, which is exactly the comparison import, export, and
+/// round-trip tests need to make.
+impl PartialEq for Branch {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.title == other.title
+            && self.description == other.description
+            && self.o2o == other.o2o
+            && self.o2m == other.o2m
+            && self.weight == other.weight
+            && self.metadata == other.metadata
+            && self.references == other.references
+    }
 }
 
 impl Branch {

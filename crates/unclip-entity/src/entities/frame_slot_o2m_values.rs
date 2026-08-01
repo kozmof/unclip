@@ -9,7 +9,7 @@ pub struct Model {
     // The table has no DB-level primary key; declare a composite
     // key over all columns so SeaORM can treat it as an entity.
     #[sea_orm(primary_key, auto_increment = false)]
-    pub slot_id: i32,
+    pub slot_id: i64,
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
     pub mode: String,
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]

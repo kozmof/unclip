@@ -33,14 +33,19 @@ pub struct SampleQuery {
 
 impl SampleQuery {
     /// Derive the filter from a frame slot, optionally overriding the scope.
-    pub fn from_slot(slot: &Slot, under_override: Option<String>) -> Self {
+    ///
+    /// The slot is consumed so its constraint maps move into the query instead
+    /// of being copied. Callers need [`SampleParams::from_slot`] and the slot
+    /// name before this point; nothing else in a slot survives into a filter,
+    /// so there is no borrowing variant to keep in step.
+    pub fn from_slot(slot: Slot, under_override: Option<String>) -> Self {
         Self {
-            under: under_override.or_else(|| slot.under.clone()),
-            require_o2o: slot.require_o2o.clone(),
-            avoid_o2o: slot.avoid_o2o.clone(),
-            require_o2m: slot.require_o2m.clone(),
-            prefer_o2m: slot.prefer_o2m.clone(),
-            avoid_o2m: slot.avoid_o2m.clone(),
+            under: under_override.or(slot.under),
+            require_o2o: slot.require_o2o,
+            avoid_o2o: slot.avoid_o2o,
+            require_o2m: slot.require_o2m,
+            prefer_o2m: slot.prefer_o2m,
+            avoid_o2m: slot.avoid_o2m,
         }
     }
 }

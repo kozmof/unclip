@@ -14,7 +14,7 @@ use unclip_entity::{frame_slot_o2m_values, frame_slot_o2o_values, frame_slots, f
 
 use crate::frame_mapper;
 use crate::repository::{ensure_bulk_result_limit, MAX_BULK_RESULTS};
-use crate::sqlite_limits::{ID_CHUNK, INSERT_ROW_CHUNK};
+use crate::sqlite_limits::{insert_chunked, ID_CHUNK};
 use crate::{StoreError, StoreResult};
 
 /// Summary of a stored frame, used for `unclip frames`.
@@ -49,8 +49,8 @@ impl SeaOrmFrameRepository {
     }
 
     /// Delete a frame and its slot/value rows within an existing transaction.
-    async fn delete_in_txn(txn: &DatabaseTransaction, frame_id: i32) -> anyhow::Result<()> {
-        let slot_ids: Vec<i32> = frame_slots::Entity::find()
+    async fn delete_in_txn(txn: &DatabaseTransaction, frame_id: i64) -> anyhow::Result<()> {
+        let slot_ids: Vec<i64> = frame_slots::Entity::find()
             .filter(frame_slots::Column::FrameId.eq(frame_id))
             .all(txn)
             .await?
@@ -108,7 +108,7 @@ impl SeaOrmFrameRepository {
 
     async fn insert_slot(
         txn: &DatabaseTransaction,
-        frame_id: i32,
+        frame_id: i64,
         position: i32,
         slot: &Slot,
     ) -> anyhow::Result<()> {
@@ -138,11 +138,7 @@ impl SeaOrmFrameRepository {
                 value: Set(value),
             })
             .collect();
-        for chunk in o2o.chunks(INSERT_ROW_CHUNK) {
-            frame_slot_o2o_values::Entity::insert_many(chunk.iter().cloned())
-                .exec(txn)
-                .await?;
-        }
+        insert_chunked(txn, o2o).await?;
 
         let o2m: Vec<_> = frame_mapper::slot_o2m_rows(slot)
             .into_iter()
@@ -153,11 +149,7 @@ impl SeaOrmFrameRepository {
                 value: Set(value),
             })
             .collect();
-        for chunk in o2m.chunks(INSERT_ROW_CHUNK) {
-            frame_slot_o2m_values::Entity::insert_many(chunk.iter().cloned())
-                .exec(txn)
-                .await?;
-        }
+        insert_chunked(txn, o2m).await?;
         Ok(())
     }
 
@@ -168,7 +160,7 @@ impl SeaOrmFrameRepository {
         if models.is_empty() {
             return Ok(Vec::new());
         }
-        let ids: Vec<i32> = models.iter().map(|m| m.id).collect();
+        let ids: Vec<i64> = models.iter().map(|m| m.id).collect();
 
         let mut o2o = Vec::new();
         let mut o2m = Vec::new();
@@ -187,11 +179,11 @@ impl SeaOrmFrameRepository {
             );
         }
 
-        let mut o2o_by_id: HashMap<i32, Vec<frame_slot_o2o_values::Model>> = HashMap::new();
+        let mut o2o_by_id: HashMap<i64, Vec<frame_slot_o2o_values::Model>> = HashMap::new();
         for row in o2o {
             o2o_by_id.entry(row.slot_id).or_default().push(row);
         }
-        let mut o2m_by_id: HashMap<i32, Vec<frame_slot_o2m_values::Model>> = HashMap::new();
+        let mut o2m_by_id: HashMap<i64, Vec<frame_slot_o2m_values::Model>> = HashMap::new();
         for row in o2m {
             o2m_by_id.entry(row.slot_id).or_default().push(row);
         }
@@ -278,7 +270,7 @@ impl FrameRepository for SeaOrmFrameRepository {
         // Count slots per frame in SQL rather than hydrating every slot row.
         #[derive(FromQueryResult)]
         struct SlotCount {
-            frame_id: i32,
+            frame_id: i64,
             count: i64,
         }
         let rows = SlotCount::find_by_statement(Statement::from_string(
@@ -287,7 +279,7 @@ impl FrameRepository for SeaOrmFrameRepository {
         ))
         .all(&self.db)
         .await?;
-        let slot_counts: HashMap<i32, usize> = rows
+        let slot_counts: HashMap<i64, usize> = rows
             .into_iter()
             .map(|r| (r.frame_id, r.count.max(0) as usize))
             .collect();

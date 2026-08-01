@@ -1,5 +1,7 @@
 //! Conservative batching limits for SQLite statements.
 
+use sea_orm::{ActiveModelTrait, DatabaseTransaction, DbErr, EntityTrait};
+
 /// Keep `IN (...)` lists below SQLite's historical 999-variable limit.
 pub(crate) const ID_CHUNK: usize = 500;
 
@@ -9,11 +11,29 @@ pub(crate) const ID_CHUNK: usize = 500;
 /// 100 rows remain below the historical 999-variable limit with room to spare.
 pub(crate) const INSERT_ROW_CHUNK: usize = 100;
 
-/// Narrow a domain branch id (`i64`) to the `i32` stored in SQLite.
+/// Insert every row in bounded batches, consuming them.
 ///
-/// The domain model deliberately uses `i64` ids; every conversion to the
-/// storage width funnels through here so the failure message stays uniform.
-pub(crate) fn sqlite_branch_id(id: i64) -> anyhow::Result<i32> {
-    use anyhow::Context;
-    i32::try_from(id).context("branch id exceeds SQLite INTEGER range")
+/// Chunking keeps each statement below SQLite's bound-variable limit. The rows
+/// are *drained* rather than borrowed and cloned: `insert_many` takes an
+/// `IntoIterator` of owned models, so passing `chunks(..).iter().cloned()`
+/// would copy every `ActiveModel` on its way into SQL for no reason. Empty
+/// batches are skipped because SeaORM rejects a zero-row insert.
+pub(crate) async fn insert_chunked<E, A>(
+    txn: &DatabaseTransaction,
+    mut rows: Vec<A>,
+) -> Result<(), DbErr>
+where
+    E: EntityTrait,
+    A: ActiveModelTrait<Entity = E>,
+{
+    while !rows.is_empty() {
+        let take = rows.len().min(INSERT_ROW_CHUNK);
+        E::insert_many(rows.drain(..take)).exec(txn).await?;
+    }
+    Ok(())
 }
+
+// Row ids need no width conversion: SQLite's `INTEGER PRIMARY KEY` is a 64-bit
+// rowid, and the entities declare `i64` to match, so a domain `Branch::id` maps
+// straight through. Narrowing to `i32` here used to add a fallible conversion
+// on every read and write path for no storage benefit.

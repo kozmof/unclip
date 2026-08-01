@@ -108,14 +108,13 @@ async fn add_get_update_delete_roundtrip() {
     let branch = sample_branch();
     repo.add(&branch).await.unwrap();
 
-    // get round-trips o2o/o2m/metadata/references (ignoring assigned id).
+    // get round-trips o2o/o2m/metadata/references. Equality is over the domain
+    // value, so a stored branch compares equal to the one that was written
+    // despite carrying persistence bookkeeping the original does not.
     let got = repo.get(&branch.path).await.unwrap().unwrap();
     assert!(got.id.is_some());
     assert!(got.revision.is_some());
-    let mut comparable = got.clone();
-    comparable.id = None;
-    comparable.revision = None;
-    assert_eq!(comparable, branch);
+    assert_eq!(got, branch);
 
     // update mutates indexed values.
     let mut edited = got.clone();
@@ -800,7 +799,7 @@ async fn save_packet_with_usages_persists_both() {
     let b = branches.get("/b").await.unwrap().unwrap().id.unwrap();
 
     history
-        .save_packets_with_usages(&[packet_record("pkt-1", Some(7), vec![a, b])], "sample")
+        .save_packets_with_usages(vec![packet_record("pkt-1", Some(7), vec![a, b])], "sample")
         .await
         .unwrap();
 
@@ -876,11 +875,14 @@ async fn packet_batch_rolls_back_every_packet_and_usage_on_failure() {
     ];
 
     let err = history
-        .save_packets_with_usages(&records, "compose")
+        .save_packets_with_usages(records, "compose")
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("branch id exceeds"), "got: {err}");
+    // A branch id with no matching row is refused by the foreign key, so the
+    // database enforces referential integrity directly rather than the store
+    // pre-screening ids against a narrower storage width.
+    assert!(err.contains("FOREIGN KEY constraint failed"), "got: {err}");
     assert_eq!(history.usage_for(a).await.unwrap().count, 0);
     assert!(selection_packets::Entity::find_by_id("pkt-good")
         .one(&db)
@@ -944,6 +946,48 @@ async fn delete_subtree_removes_branch_descendants_and_history() {
 
     // Nothing left to delete: idempotently reports zero.
     assert_eq!(branches.delete_subtree("/a").await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn delete_leaf_refuses_a_scoping_branch_and_reports_a_missing_one() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let branches = SeaOrmBranchRepository::new(db.clone());
+    let history = SeaOrmHistoryRepository::new(db);
+
+    // `/a/b/c` exists without `/a/b`, so `/a` scopes a descendant it is not
+    // the direct parent of.
+    branches.add(&sample_branch_at("/a")).await.unwrap();
+    branches.add(&sample_branch_at("/a/b/c")).await.unwrap();
+    branches.add(&sample_branch_at("/ab")).await.unwrap();
+    branches.add(&sample_branch_at("/leaf")).await.unwrap();
+
+    // A missing path is an error, unlike the idempotent `delete`.
+    assert!(matches!(
+        branches.delete_leaf("/nope").await,
+        Err(BranchRepositoryError::NotFound { path }) if path == "/nope"
+    ));
+
+    // A branch that still scopes descendants is refused, and survives.
+    assert!(matches!(
+        branches.delete_leaf("/a").await,
+        Err(BranchRepositoryError::HasDescendants { path }) if path == "/a"
+    ));
+    assert!(branches.get("/a").await.unwrap().is_some());
+    assert!(branches.get("/a/b/c").await.unwrap().is_some());
+
+    // `/ab` is a sibling, not a descendant of `/a`, so it does not block it.
+    branches.delete_leaf("/ab").await.unwrap();
+    assert!(branches.get("/ab").await.unwrap().is_none());
+
+    // A true leaf deletes, taking its child rows with it.
+    let leaf = branches.get("/leaf").await.unwrap().unwrap().id.unwrap();
+    history
+        .record_usage(leaf, "sample", None, None)
+        .await
+        .unwrap();
+    branches.delete_leaf("/leaf").await.unwrap();
+    assert!(branches.get("/leaf").await.unwrap().is_none());
+    assert_eq!(history.usage_for(leaf).await.unwrap().count, 0);
 }
 
 /// A `sample_branch` clone re-addressed to `path`, so subtree tests exercise
@@ -1161,7 +1205,7 @@ async fn frame_save_rejects_contradictory_constraints() {
 }
 
 #[tokio::test]
-async fn history_rejects_oversized_ids_and_preserves_full_seed_range() {
+async fn history_rejects_unknown_branch_ids_and_preserves_full_seed_range() {
     use sea_orm::EntityTrait;
     use unclip_entity::selection_packets;
 
@@ -1173,13 +1217,16 @@ async fn history_rejects_oversized_ids_and_preserves_full_seed_range() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("branch id exceeds"), "got: {err}");
+    // A branch id with no matching row is refused by the foreign key, so the
+    // database enforces referential integrity directly rather than the store
+    // pre-screening ids against a narrower storage width.
+    assert!(err.contains("FOREIGN KEY constraint failed"), "got: {err}");
 
     // A seed above i64::MAX is stored bit-preserving (appears negative in the
     // auxiliary column) rather than clamped or rejected.
     history
         .save_packets_with_usages(
-            &[packet_record("pkt-big-seed", Some(u64::MAX), Vec::new())],
+            vec![packet_record("pkt-big-seed", Some(u64::MAX), Vec::new())],
             "sample",
         )
         .await
@@ -1193,29 +1240,28 @@ async fn history_rejects_oversized_ids_and_preserves_full_seed_range() {
 
     let err = history
         .save_packets_with_usages(
-            &[packet_record("pkt-big-branch", None, vec![i64::MAX])],
+            vec![packet_record("pkt-big-branch", None, vec![i64::MAX])],
             "sample",
         )
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("branch id exceeds"), "got: {err}");
+    // A branch id with no matching row is refused by the foreign key, so the
+    // database enforces referential integrity directly rather than the store
+    // pre-screening ids against a narrower storage width.
+    assert!(err.contains("FOREIGN KEY constraint failed"), "got: {err}");
 }
 
 #[tokio::test]
-async fn pattern_mutations_reject_ids_outside_sqlite_range() {
+async fn pattern_mutations_report_an_unmatched_id_as_no_rows() {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let patterns = SeaOrmPatternRepository::new(db);
 
-    let err = patterns.remove(i64::MAX).await.unwrap_err().to_string();
-    assert!(err.contains("pattern id exceeds"), "got: {err}");
-
-    let err = patterns
-        .set_enabled(i64::MAX, true)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("pattern id exceeds"), "got: {err}");
+    // Pattern ids span the full SQLite rowid range, so even `i64::MAX` is a
+    // well-formed id — it simply matches nothing. That is a `false` return
+    // (the CLI turns it into "no pattern entry with id ..."), not an error.
+    assert!(!patterns.remove(i64::MAX).await.unwrap());
+    assert!(!patterns.set_enabled(i64::MAX, true).await.unwrap());
 }
 
 #[tokio::test]

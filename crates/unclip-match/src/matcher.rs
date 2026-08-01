@@ -33,26 +33,36 @@ impl Matcher {
     /// entries that share a pattern string are grouped (daachorse rejects
     /// duplicate patterns).
     pub fn build(entries: Vec<PatternEntry>) -> anyhow::Result<Self> {
-        let mut order: Vec<String> = Vec::new();
+        use std::collections::hash_map::Entry;
+
         let mut groups: Vec<Vec<PatternEntry>> = Vec::new();
+        // The lowercased key is stored exactly once: it lives in this map while
+        // grouping, then moves into `order` for the automaton. Keeping a second
+        // copy would cost a full `String` per distinct pattern, and the
+        // dictionary is bounded only by `MAX_PATTERN_ENTRIES`.
         let mut index: HashMap<String, usize> = HashMap::new();
 
         for entry in entries {
             if entry.pattern.trim().is_empty() {
                 continue;
             }
-            let key = entry.pattern.to_lowercase();
-            let i = match index.get(&key) {
-                Some(&i) => i,
-                None => {
+            let i = match index.entry(entry.pattern.to_lowercase()) {
+                Entry::Occupied(slot) => *slot.get(),
+                Entry::Vacant(slot) => {
                     let i = groups.len();
-                    index.insert(key.clone(), i);
-                    order.push(key);
+                    slot.insert(i);
                     groups.push(Vec::new());
                     i
                 }
             };
             groups[i].push(entry);
+        }
+
+        // Re-materialize the automaton's pattern list in group order by moving
+        // each key out of the index.
+        let mut order: Vec<String> = vec![String::new(); groups.len()];
+        for (key, i) in index {
+            order[i] = key;
         }
 
         anyhow::ensure!(
@@ -106,7 +116,15 @@ impl Matcher {
     /// repeated or overlapping patterns can otherwise make the number of hits
     /// much larger than the scanned text. Hits are borrowed views; a visitor
     /// clones only the parts it keeps.
-    pub fn for_each_hit(&self, text: &str, mut visit: impl FnMut(HitRef<'_>)) {
+    ///
+    /// A hit borrows its pattern and target from `self`, never from `text`, so
+    /// the visitor's lifetime is tied to `&self` alone. Binding it explicitly
+    /// (rather than leaving it elided, which makes the bound higher-ranked)
+    /// lets a visitor *keep* those borrows: aggregating into a map keyed by
+    /// `&str`/`&PatternTarget` then costs no allocation per hit. With an elided
+    /// lifetime every visitor is forced to clone out of the hit, which is the
+    /// cost this method exists to avoid.
+    pub fn for_each_hit<'a>(&'a self, text: &str, mut visit: impl FnMut(HitRef<'a>)) {
         let Some(automaton) = &self.automaton else {
             return;
         };
@@ -373,6 +391,31 @@ mod tests {
             .to_string();
 
         assert!(error.contains("more than 100000 distinct patterns"));
+    }
+
+    #[test]
+    fn hits_can_be_aggregated_without_cloning() {
+        // Guards the bound (non-higher-ranked) lifetime on `for_each_hit`: a
+        // visitor must be able to keep a hit's borrows. If the lifetime is ever
+        // re-elided this stops compiling, rather than silently forcing every
+        // caller back to a clone-per-hit.
+        let matcher = Matcher::build(vec![PatternEntry::new(
+            "locker",
+            PatternTarget::O2m {
+                name: "object".into(),
+                value: "locker".into(),
+            },
+        )])
+        .unwrap();
+
+        let mut counts: std::collections::BTreeMap<(&str, &PatternTarget), usize> =
+            std::collections::BTreeMap::new();
+        matcher.for_each_hit("a locker beside a locker", |hit| {
+            *counts.entry((hit.pattern, hit.target)).or_default() += 1;
+        });
+
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts.into_values().next(), Some(2));
     }
 
     #[test]

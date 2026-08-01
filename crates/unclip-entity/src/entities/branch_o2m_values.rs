@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "branch_o2m_values")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub branch_id: i32,
+    pub branch_id: i64,
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
     pub name: String,
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]

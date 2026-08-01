@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "frame_slots")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
-    pub frame_id: i32,
+    pub id: i64,
+    pub frame_id: i64,
     #[sea_orm(column_type = "Text")]
     pub name: String,
     pub position: i32,

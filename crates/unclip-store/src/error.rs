@@ -19,6 +19,10 @@ pub enum StoreError {
     /// Optimistic concurrency detected a stale branch value.
     #[error("branch was modified by another process; reload and retry: {path}")]
     Conflict { path: String },
+    /// A single-branch delete was refused because the path still scopes
+    /// descendants, which would be orphaned by removing it.
+    #[error("branch {path} has descendants; pass --recursive to delete the subtree")]
+    HasDescendants { path: String },
     /// A bounded query exceeded the safe hydration limit.
     #[error(
         "query matched more than {limit} branches; narrow the filters or use paginated access"

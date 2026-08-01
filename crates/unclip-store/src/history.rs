@@ -11,10 +11,7 @@ use sea_orm::{
 };
 use unclip_entity::{selection_packets, usage_history};
 
-use crate::{
-    sqlite_limits::{sqlite_branch_id, INSERT_ROW_CHUNK},
-    StoreResult,
-};
+use crate::{sqlite_limits::insert_chunked, StoreResult};
 
 /// Aggregate usage info for a single branch.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -51,9 +48,13 @@ pub trait HistoryRepository: Sync {
     async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary>;
     /// Persist packets and their usage rows atomically: a failure on any packet
     /// rolls back the whole batch.
+    ///
+    /// The records are consumed: each carries a fully serialized packet, and
+    /// callers have no use for them afterwards, so borrowing would only force a
+    /// copy of every packet's JSON on the way into SQL.
     async fn save_packets_with_usages(
         &self,
-        records: &[PacketUsageRecord],
+        records: Vec<PacketUsageRecord>,
         command: &str,
     ) -> StoreResult<()>;
 }
@@ -96,7 +97,6 @@ impl SeaOrmHistoryRepository {
         context: Option<&str>,
         packet_id: Option<&str>,
     ) -> StoreResult<()> {
-        let branch_id = sqlite_branch_id(branch_id)?;
         let am = usage_history::ActiveModel {
             id: NotSet,
             branch_id: Set(branch_id),
@@ -204,7 +204,7 @@ impl HistoryRepository for SeaOrmHistoryRepository {
     /// frame imports. Single-packet callers pass a one-element slice.
     async fn save_packets_with_usages(
         &self,
-        records: &[PacketUsageRecord],
+        records: Vec<PacketUsageRecord>,
         command: &str,
     ) -> StoreResult<()> {
         let ts = now();
@@ -213,11 +213,11 @@ impl HistoryRepository for SeaOrmHistoryRepository {
         for record in records {
             let packet = selection_packets::ActiveModel {
                 id: Set(record.id.clone()),
-                frame_name: Set(record.frame_name.clone()),
+                frame_name: Set(record.frame_name),
                 seed: Set(record.seed.map(encode_seed)),
                 created_at: Set(ts.clone()),
-                query_json: Set(record.query_json.clone()),
-                packet_json: Set(record.packet_json.clone()),
+                query_json: Set(record.query_json),
+                packet_json: Set(record.packet_json),
             };
             selection_packets::Entity::insert(packet).exec(&txn).await?;
             insert_usages(&txn, &ts, command, &record.id, &record.branch_ids).await?;
@@ -242,21 +242,15 @@ async fn insert_usages(
     }
     let usages: Vec<usage_history::ActiveModel> = branch_ids
         .iter()
-        .map(|&id| {
-            Ok(usage_history::ActiveModel {
-                id: NotSet,
-                branch_id: Set(sqlite_branch_id(id)?),
-                used_at: Set(ts.to_string()),
-                command: Set(Some(command.to_string())),
-                context: Set(None),
-                packet_id: Set(Some(packet_id.to_string())),
-            })
+        .map(|&id| usage_history::ActiveModel {
+            id: NotSet,
+            branch_id: Set(id),
+            used_at: Set(ts.to_string()),
+            command: Set(Some(command.to_string())),
+            context: Set(None),
+            packet_id: Set(Some(packet_id.to_string())),
         })
-        .collect::<anyhow::Result<_>>()?;
-    for chunk in usages.chunks(INSERT_ROW_CHUNK) {
-        usage_history::Entity::insert_many(chunk.iter().cloned())
-            .exec(txn)
-            .await?;
-    }
+        .collect();
+    insert_chunked(txn, usages).await?;
     Ok(())
 }

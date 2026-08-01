@@ -6,7 +6,7 @@ use unclip_io::split_frame_selector;
 use unclip_store::FrameRepository;
 
 use crate::cli::{Cli, Command, PatternAction};
-use crate::{commands, db, matching, sampling};
+use crate::{commands, db, matching, sampling, usage};
 
 use commands::QueryInput;
 use sampling::{ComposeInput, FilterInput, SampleInput};
@@ -128,10 +128,10 @@ pub async fn run() -> anyhow::Result<()> {
             .await?;
         }
         Command::Used { path } => {
-            sampling::used_cmd(&repos.branches, &repos.history, &path).await?;
+            usage::used_cmd(&repos.branches, &repos.history, &path).await?;
         }
         Command::Stats { filter } => {
-            sampling::stats_cmd(
+            usage::stats_cmd(
                 &repos.branches,
                 &repos.history,
                 FilterInput::from_args(filter, Vec::new()),
@@ -139,7 +139,7 @@ pub async fn run() -> anyhow::Result<()> {
             .await?;
         }
         Command::Stale { filter } => {
-            sampling::stale_cmd(
+            usage::stale_cmd(
                 &repos.branches,
                 &repos.history,
                 FilterInput::from_args(filter, Vec::new()),
@@ -219,12 +219,17 @@ async fn resolve_query_slot(
     };
     let (frame_name, slot_name) = split_frame_selector(selector);
     let slot_name = slot_name.context("query --frame requires name.slot, e.g. story.place")?;
-    let frame = frames
+    let mut frame = frames
         .get_frame(frame_name)
         .await?
         .with_context(|| format!("frame not found: {frame_name}"))?;
-    let slot = frame
-        .slot(slot_name)
+    // Take the slot out of the frame rather than cloning it: the frame is a
+    // local that nothing else reads, and the caller consumes the slot to build
+    // a query, so a copy would be discarded immediately either way.
+    let position = frame
+        .slots
+        .iter()
+        .position(|slot| slot.name == slot_name)
         .with_context(|| format!("frame `{frame_name}` has no slot `{slot_name}`"))?;
-    Ok(Some(slot.clone()))
+    Ok(Some(frame.slots.swap_remove(position)))
 }

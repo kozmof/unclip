@@ -9,25 +9,24 @@ use sea_orm::ActiveValue::{NotSet, Set};
 use unclip_core::{parent_of, Branch, Reference};
 use unclip_entity::{branch_o2m_values, branch_o2o_values, branch_references, branches};
 
-use crate::sqlite_limits::sqlite_branch_id;
-
 /// Build a `branches` active model for insertion/update.
 ///
-/// `id` is left unset when `None` so SQLite assigns it.
+/// `id` is left unset when `None` so SQLite assigns it. Infallible: the domain
+/// and storage id widths now match, so there is nothing left here that can fail.
 pub fn branch_active_model(
     branch: &Branch,
     created_at: &str,
     updated_at: &str,
-) -> anyhow::Result<branches::ActiveModel> {
+) -> branches::ActiveModel {
     let metadata_json = if branch.metadata.is_null() {
         None
     } else {
         Some(branch.metadata.to_string())
     };
 
-    Ok(branches::ActiveModel {
+    branches::ActiveModel {
         id: match branch.id {
-            Some(id) => Set(sqlite_branch_id(id)?),
+            Some(id) => Set(id),
             None => NotSet,
         },
         path: Set(branch.path.clone()),
@@ -38,11 +37,11 @@ pub fn branch_active_model(
         metadata_json: Set(metadata_json),
         created_at: Set(created_at.to_string()),
         updated_at: Set(updated_at.to_string()),
-    })
+    }
 }
 
 /// o2o active-model rows for a branch.
-pub fn o2o_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2o_values::ActiveModel> {
+pub fn o2o_active_models(branch_id: i64, branch: &Branch) -> Vec<branch_o2o_values::ActiveModel> {
     branch
         .o2o
         .iter()
@@ -59,7 +58,7 @@ pub fn o2o_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2o_valu
 /// o2m is a set: duplicate values under one name are dropped here so an
 /// imported branch carrying e.g. `topic: [locker, locker]` cannot violate the
 /// `(branch_id, name, value)` primary key.
-pub fn o2m_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2m_values::ActiveModel> {
+pub fn o2m_active_models(branch_id: i64, branch: &Branch) -> Vec<branch_o2m_values::ActiveModel> {
     let mut rows = Vec::new();
     for (name, values) in &branch.o2m {
         let mut seen = HashSet::new();
@@ -78,7 +77,7 @@ pub fn o2m_active_models(branch_id: i32, branch: &Branch) -> Vec<branch_o2m_valu
 
 /// Reference active-model rows for a branch.
 pub fn reference_active_models(
-    branch_id: i32,
+    branch_id: i64,
     branch: &Branch,
 ) -> Vec<branch_references::ActiveModel> {
     branch
@@ -130,7 +129,7 @@ pub fn assemble_branch(
         .collect();
 
     Ok(Branch {
-        id: Some(model.id as i64),
+        id: Some(model.id),
         revision: Some(model.updated_at),
         path: model.path,
         title: model.title,

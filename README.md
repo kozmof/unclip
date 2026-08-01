@@ -169,6 +169,14 @@ Every packet embeds the query and sampling controls that produced it, so
 `unclip replay packet.yaml` re-runs that draw. It uses the recorded seed by
 default, or a seed you pass with `--seed`.
 
+`sample` and `compose` differ in how much they hold at once. `sample` streams
+candidates page by page into a fixed-size reservoir, so its memory depends on
+`--count`, not on how many branches match. `compose` builds one candidate set
+per frame slot up front — it has to draw from the same pool for every packet in
+a batch — so each slot's scope must match no more than 10,000 branches. Narrow a
+slot's `under` scope, or its filters, if `compose` reports that a query matched
+too many branches.
+
 ## Quality and release checks
 
 The workspace is set up for release-minded source distribution. CI runs these
@@ -199,6 +207,12 @@ crates/
   unclip-match/     daachorse-based pattern matcher.
   unclip-cli/       The `unclip` command-line interface.
 ```
+
+Inside `unclip-cli`, handlers are grouped by what they act on: `commands/branch`
+(add, edit, rm, import, attach), `commands/navigate` (show, ls, tree, query,
+o2o, o2m), `commands/frames` (frame definitions and the commands built on them),
+`sampling` (sample, compose, replay, export), `usage` (used, stats, stale), and
+`matching` (scan, suggest-o2m, patterns).
 
 ## License
 

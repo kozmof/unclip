@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "pattern_entries")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
+    pub id: i64,
     #[sea_orm(column_type = "Text")]
     pub pattern: String,
     #[sea_orm(column_type = "Text")]
@@ -18,7 +18,7 @@ pub struct Model {
     pub target_name: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub target_value: Option<String>,
-    pub branch_id: Option<i32>,
+    pub branch_id: Option<i64>,
     pub enabled: i32,
 }
 

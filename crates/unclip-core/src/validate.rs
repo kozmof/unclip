@@ -310,7 +310,7 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
             ));
         }
         if let Some(slot_name) = &selection.slot {
-            if !seen_per_slot.insert((slot_name.as_str(), selection.branch.path.as_str())) {
+            if !seen_per_slot.insert((&**slot_name, selection.branch.path.as_str())) {
                 violations.push(format!(
                     "slot `{slot_name}` selects `{}` more than once",
                     selection.branch.path

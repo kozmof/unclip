@@ -32,11 +32,21 @@ pub struct SelectionPacket {
 /// pool shared across many packets (e.g. `compose`'s per-slot candidate set)
 /// can be attached to each packet with a cheap refcount bump instead of a
 /// deep clone of the whole aggregate.
+///
+/// This is a deliberate one-way door: `Rc` makes `SelectionPacket` `!Send`,
+/// which is why the CLI pins a current-thread Tokio runtime. Sampling is
+/// sequential, so nothing needs to cross a thread today — but moving any of it
+/// onto `tokio::spawn` would mean changing `Rc` to `Arc` here and in every
+/// crate that touches a packet (core, sample, io, cli), not just at the call
+/// site that wants the concurrency.
+///
+/// `slot` is an `Rc<str>` for the same reason: `compose` labels every selection
+/// of a slot, in every packet of a batch, with one name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Selection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slot: Option<String>,
+    pub slot: Option<Rc<str>>,
     pub branch: Rc<Branch>,
 }
 

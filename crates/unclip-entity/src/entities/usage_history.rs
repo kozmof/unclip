@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "usage_history")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
-    pub branch_id: i32,
+    pub id: i64,
+    pub branch_id: i64,
     #[sea_orm(column_type = "Text")]
     pub used_at: String,
     #[sea_orm(column_type = "Text", nullable)]

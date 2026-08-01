@@ -4,7 +4,6 @@ use crate::{
     repository::{ensure_bulk_result_limit, MAX_BULK_RESULTS},
     StoreResult,
 };
-use anyhow::Context;
 use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -44,7 +43,7 @@ impl SeaOrmPatternRepository {
             enabled: Set(1),
         };
         let res = pattern_entries::Entity::insert(am).exec(&self.db).await?;
-        Ok(res.last_insert_id as i64)
+        Ok(res.last_insert_id)
     }
 
     /// List all stored patterns, ordered by id.
@@ -62,8 +61,10 @@ impl SeaOrmPatternRepository {
     }
 
     /// Remove a pattern entry by id. Returns whether a row was deleted.
+    ///
+    /// An id that matches no row is reported as `false`, not an error; the id
+    /// spans the full rowid range, so there is no width to reject.
     pub async fn remove(&self, id: i64) -> StoreResult<bool> {
-        let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
         let res = pattern_entries::Entity::delete_by_id(id)
             .exec(&self.db)
             .await?;
@@ -72,7 +73,6 @@ impl SeaOrmPatternRepository {
 
     /// Enable or disable a pattern entry by id. Returns whether a row matched.
     pub async fn set_enabled(&self, id: i64, enabled: bool) -> StoreResult<bool> {
-        let id = i32::try_from(id).context("pattern id exceeds SQLite INTEGER range")?;
         let am = pattern_entries::ActiveModel {
             enabled: Set(enabled as i32),
             ..Default::default()
@@ -134,7 +134,7 @@ fn row_to_stored(row: pattern_entries::Model) -> anyhow::Result<StoredPattern> {
         other => anyhow::bail!("unknown pattern target_kind `{other}`"),
     };
     Ok(StoredPattern {
-        id: row.id as i64,
+        id: row.id,
         entry: PatternEntry {
             pattern: row.pattern,
             target,

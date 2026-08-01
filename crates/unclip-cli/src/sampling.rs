@@ -1,4 +1,7 @@
-//! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
+//! The sampling pipeline: `sample`, `compose`, `replay`, and `export`.
+//!
+//! Usage reporting over the history these commands write lives in
+//! [`crate::usage`], which shares this module's [`FilterInput`].
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -9,14 +12,10 @@ use unclip_core::{
 };
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample, score, Reservoir};
-use unclip_store::{now, BranchReader, HistoryRepository, PacketUsageRecord};
+use unclip_store::{now, BranchReader, HistoryRepository, PacketUsageRecord, PageCursor};
 
 /// How many recent usage rows define the "recently used" set.
 const RECENT_LIMIT: u64 = 50;
-
-/// Page size for streaming commands (`export`, `stats`, `sample`); keeps each
-/// SQL page bounded while results are consumed instead of accumulated.
-const STREAM_PAGE_SIZE: u64 = 1_000;
 
 /// Prevent a typo or hostile input from preallocating an unbounded packet
 /// batch. Larger jobs can be split across invocations with explicit seeds.
@@ -142,19 +141,11 @@ async fn run_sample(
     let seed = seed.unwrap_or_else(random_seed);
     let mut rng = rng_from_seed(seed);
     let mut reservoir = Reservoir::new(params.count);
-    let mut after_path: Option<String> = None;
-    loop {
-        let page = branches
-            .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
-            .await?;
-        let done = (page.len() as u64) < STREAM_PAGE_SIZE;
-        after_path = page.last().map(|branch| branch.path.clone());
+    let mut pages = PageCursor::new();
+    while let Some(page) = pages.next(branches, &query).await? {
         for branch in page {
             let s = score(&branch, &query, &params, &recent);
             reservoir.offer(branch, s, &mut rng);
-        }
-        if done {
-            break;
         }
     }
 
@@ -179,7 +170,7 @@ async fn run_sample(
     if !dry_run {
         let record = packet_usage_record(None, &packet)?;
         history
-            .save_packets_with_usages(std::slice::from_ref(&record), "sample")
+            .save_packets_with_usages(vec![record], "sample")
             .await?;
     }
     crate::output::write_stdout(&rendered)?;
@@ -263,11 +254,25 @@ pub async fn compose_cmd(
 
     // Candidate sets depend only on the slot and its `under` scope, both fixed
     // across the batch — fetch them once per slot rather than per packet.
-    let mut slot_plans = Vec::with_capacity(frame.slots.len());
-    for slot in &frame.slots {
-        let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
+    //
+    // The frame is destructured so each slot's constraint maps *move* into its
+    // query. Nothing reads the frame's slots afterwards, so cloning them would
+    // only produce copies to drop.
+    let Frame {
+        name: frame_name,
+        slots,
+        ..
+    } = frame;
+    let mut slot_plans = Vec::with_capacity(slots.len());
+    for slot in slots {
+        let under = override_for(&slot.name, &input.under)
+            .map(str::to_string)
+            .or_else(|| slot.under.clone());
+        let params = SampleParams::from_slot(&slot);
+        // The name outlives the slot: it labels every selection this slot
+        // contributes, to every packet in the batch.
+        let slot_name: Rc<str> = Rc::from(slot.name.as_str());
         let query = SampleQuery::from_slot(slot, under);
-        let params = SampleParams::from_slot(slot);
         let candidates: Vec<Rc<Branch>> = branches
             .find(&query)
             .await?
@@ -277,23 +282,23 @@ pub async fn compose_cmd(
         ensure!(
             candidates.len() >= params.count,
             "slot `{}` requires {} selection(s), but only {} candidate(s) match",
-            slot.name,
+            slot_name,
             params.count,
             candidates.len()
         );
-        slot_plans.push((slot, query, params, candidates));
+        slot_plans.push((slot_name, query, params, candidates));
     }
 
     for k in 0..input.count {
         let seed = base_seed.wrapping_add(k as u64);
         let mut rng = rng_from_seed(seed);
 
-        let mut packet = SelectionPacket::new(Some(frame.name.clone()), Some(seed));
+        let mut packet = SelectionPacket::new(Some(frame_name.clone()), Some(seed));
         packet.created_at = Some(now());
-        packet.query = Some(compose_provenance(&frame.name, &input.under));
+        packet.query = Some(compose_provenance(&frame_name, &input.under));
 
-        for (slot, query, params, candidates) in &slot_plans {
-            let slot_recent = if slot.avoid_recent {
+        for (slot_name, query, params, candidates) in &slot_plans {
+            let slot_recent = if params.avoid_recent {
                 &recent
             } else {
                 &empty_recent
@@ -301,7 +306,9 @@ pub async fn compose_cmd(
             let chosen = sample(candidates, query, params, slot_recent, &mut rng);
             for branch in chosen {
                 packet.selections.push(Selection {
-                    slot: Some(slot.name.clone()),
+                    // A refcount bump per selection: the same slot name labels
+                    // every packet in the batch.
+                    slot: Some(Rc::clone(slot_name)),
                     branch,
                 });
             }
@@ -317,11 +324,9 @@ pub async fn compose_cmd(
     if !input.dry_run {
         let records = packets
             .iter()
-            .map(|packet| packet_usage_record(Some(&frame.name), packet))
+            .map(|packet| packet_usage_record(Some(&frame_name), packet))
             .collect::<anyhow::Result<Vec<_>>>()?;
-        history
-            .save_packets_with_usages(&records, "compose")
-            .await?;
+        history.save_packets_with_usages(records, "compose").await?;
     }
     crate::output::write_stdout(&rendered)?;
     Ok(())
@@ -423,13 +428,13 @@ pub async fn replay_cmd(
     }
 }
 
-fn override_for(slot_name: &str, overrides: &[UnderOverride]) -> Option<String> {
+fn override_for<'a>(slot_name: &str, overrides: &'a [UnderOverride]) -> Option<&'a str> {
     // Slot-specific override wins; otherwise the first global override.
     overrides
         .iter()
         .find(|o| o.slot.as_deref() == Some(slot_name))
         .or_else(|| overrides.iter().find(|o| o.slot.is_none()))
-        .map(|o| o.path.clone())
+        .map(|o| o.path.as_str())
 }
 
 fn validate_under_overrides(frame: &Frame, overrides: &[UnderOverride]) -> anyhow::Result<()> {
@@ -472,18 +477,11 @@ pub async fn export_cmd(
     let query = filter.into_query()?;
     match format {
         Format::Jsonl => {
-            let mut after_path: Option<String> = None;
-            loop {
-                let page = branches
-                    .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
-                    .await?;
-                let done = (page.len() as u64) < STREAM_PAGE_SIZE;
-                after_path = page.last().map(|branch| branch.path.clone());
+            let mut pages = PageCursor::new();
+            while let Some(page) = pages.next(branches, &query).await? {
                 crate::output::write_stdout(&unclip_io::render_branches(&page, format)?)?;
-                if done {
-                    return Ok(());
-                }
             }
+            Ok(())
         }
         Format::Yaml | Format::Json => {
             // `find_all` pages in path order, so the result needs no re-sort.
@@ -492,102 +490,6 @@ pub async fn export_cmd(
             Ok(())
         }
     }
-}
-
-/// `unclip used <path>`.
-pub async fn used_cmd(
-    branches: &impl BranchReader,
-    history: &impl HistoryRepository,
-    path: &str,
-) -> anyhow::Result<()> {
-    let branch = branches
-        .get(path)
-        .await?
-        .with_context(|| format!("branch not found: {path}"))?;
-    let id = branch.id.context("branch has no id")?;
-    let summary = history.usage_for(id).await?;
-    crate::output::outln!("{path}\tused {} time(s)", summary.count);
-    if let Some(last) = summary.last_used {
-        crate::output::outln!("last used: {last}");
-    }
-    Ok(())
-}
-
-/// `unclip stats` — aggregate usage over a filter.
-pub async fn stats_cmd(
-    branches: &impl BranchReader,
-    history: &impl HistoryRepository,
-    filter: FilterInput,
-) -> anyhow::Result<()> {
-    let query = filter.into_query()?;
-
-    // Aggregate page by page: the counters are all that is retained, so the
-    // command is bounded by the page size rather than the bulk-result ceiling.
-    let mut matched = 0u64;
-    let mut total_uses = 0u64;
-    let mut unused = 0u64;
-    let mut after_path: Option<String> = None;
-    loop {
-        let page = branches
-            .find_page(&query, after_path.as_deref(), STREAM_PAGE_SIZE)
-            .await?;
-        let done = (page.len() as u64) < STREAM_PAGE_SIZE;
-        after_path = page.last().map(|branch| branch.path.clone());
-        matched += page.len() as u64;
-
-        let ids: Vec<i64> = page.iter().filter_map(|b| b.id).collect();
-        let summaries = history.usage_summaries(&ids).await?;
-        for id in &ids {
-            let count = summaries.get(id).map(|s| s.count).unwrap_or(0);
-            total_uses += count;
-            if count == 0 {
-                unused += 1;
-            }
-        }
-        if done {
-            break;
-        }
-    }
-    crate::output::outln!("branches: {matched}");
-    crate::output::outln!("total uses: {total_uses}");
-    crate::output::outln!("unused: {unused}");
-    Ok(())
-}
-
-/// `unclip stale` — branches matching a filter, least-used first.
-pub async fn stale_cmd(
-    branches: &impl BranchReader,
-    history: &impl HistoryRepository,
-    filter: FilterInput,
-) -> anyhow::Result<()> {
-    let query = filter.into_query()?;
-    let matched = branches.find_all(query).await?;
-
-    let ids: Vec<i64> = matched.iter().filter_map(|b| b.id).collect();
-    let summaries = history.usage_summaries(&ids).await?;
-
-    let mut rows = Vec::with_capacity(matched.len());
-    for branch in matched {
-        let summary = branch
-            .id
-            .and_then(|id| summaries.get(&id).cloned())
-            .unwrap_or_default();
-        rows.push((branch.path, summary.count, summary.last_used));
-    }
-    // Least used first; ties broken by oldest last-used (None sorts first).
-    rows.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
-
-    if rows.is_empty() {
-        crate::output::errln!("(no matching branches)");
-        return Ok(());
-    }
-    for (path, count, last_used) in rows {
-        crate::output::outln!(
-            "{path}\tuses={count}\tlast={}",
-            last_used.as_deref().unwrap_or("-")
-        );
-    }
-    Ok(())
 }
 
 /// Build the packet `query` provenance value: the filter plus the sampling
@@ -729,12 +631,9 @@ mod tests {
             },
         ];
         // A slot-specific override wins over the global one.
-        assert_eq!(
-            override_for("place", &overrides).as_deref(),
-            Some("/place-scope")
-        );
+        assert_eq!(override_for("place", &overrides), Some("/place-scope"));
         // A slot with no specific override falls back to the global.
-        assert_eq!(override_for("mood", &overrides).as_deref(), Some("/global"));
+        assert_eq!(override_for("mood", &overrides), Some("/global"));
         // No overrides at all yields None.
         assert_eq!(override_for("place", &[]), None);
     }

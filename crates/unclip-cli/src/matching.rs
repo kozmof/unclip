@@ -52,12 +52,13 @@ pub async fn scan_cmd(
     let text = unclip_io::read_text_file(file, "scan file")?;
     let matcher = build_matcher(branches, patterns).await?;
 
-    // Aggregate identical (pattern → target) hits with a count.
-    let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
+    // Aggregate identical (pattern → target) hits with a count, keyed by
+    // borrows of the matcher's own strings. Overlapping patterns can produce
+    // far more hits than the text is long, so the counting path must not
+    // allocate; `describe()` runs once per distinct pair, at output.
+    let mut counts: BTreeMap<(&str, &PatternTarget), usize> = BTreeMap::new();
     matcher.for_each_hit(&text, |hit| {
-        *counts
-            .entry((hit.pattern.to_string(), hit.target.describe()))
-            .or_default() += 1;
+        *counts.entry((hit.pattern, hit.target)).or_default() += 1;
     });
 
     if counts.is_empty() {
@@ -65,7 +66,7 @@ pub async fn scan_cmd(
         return Ok(());
     }
     for ((pattern, target), n) in counts {
-        crate::output::outln!("{pattern}\t→ {target}\t({n})");
+        crate::output::outln!("{pattern}\t→ {}\t({n})", target.describe());
     }
     Ok(())
 }
