@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -141,14 +142,17 @@ impl Reservoir {
 }
 
 /// Select up to `params.count` branches from `candidates` by weighted random
-/// selection without replacement. Returns references into `candidates`.
-pub fn sample<'a>(
-    candidates: &'a [Branch],
+/// selection without replacement. Returns `Rc` clones of the chosen
+/// candidates (a refcount bump, not a deep copy), so a caller that draws
+/// repeatedly from the same shared pool — e.g. `compose`, once per output
+/// packet — does not pay for a full `Branch` clone on every selection.
+pub fn sample(
+    candidates: &[Rc<Branch>],
     query: &SampleQuery,
     params: &SampleParams,
     recent_ids: &HashSet<i64>,
     rng: &mut StdRng,
-) -> Vec<&'a Branch> {
+) -> Vec<Rc<Branch>> {
     let take = params.count.min(candidates.len());
     if take == 0 {
         return Vec::new();
@@ -182,7 +186,7 @@ pub fn sample<'a>(
             r -= *s;
         }
         let (branch_index, _) = pool.swap_remove(picked);
-        chosen.push(&candidates[branch_index]);
+        chosen.push(Rc::clone(&candidates[branch_index]));
     }
     chosen
 }
@@ -208,7 +212,9 @@ mod tests {
 
     #[test]
     fn deterministic_for_same_seed() {
-        let candidates: Vec<Branch> = (0..10).map(|i| branch(&format!("/b{i}"), i, 1.0)).collect();
+        let candidates: Vec<Rc<Branch>> = (0..10)
+            .map(|i| Rc::new(branch(&format!("/b{i}"), i, 1.0)))
+            .collect();
         let q = SampleQuery::default();
         let p = params(3);
         let recent = HashSet::new();
@@ -281,7 +287,7 @@ mod tests {
 
     #[test]
     fn count_capped_at_candidates() {
-        let candidates = vec![branch("/a", 1, 1.0), branch("/b", 2, 1.0)];
+        let candidates = vec![Rc::new(branch("/a", 1, 1.0)), Rc::new(branch("/b", 2, 1.0))];
         let mut rng = rng_from_seed(1);
         let chosen = sample(
             &candidates,
@@ -313,7 +319,10 @@ mod tests {
 
     #[test]
     fn extreme_finite_weights_do_not_overflow_sampling() {
-        let candidates = vec![branch("/a", 1, f64::MAX), branch("/b", 2, f64::MAX)];
+        let candidates = vec![
+            Rc::new(branch("/a", 1, f64::MAX)),
+            Rc::new(branch("/b", 2, f64::MAX)),
+        ];
         let mut rng = rng_from_seed(1);
         let mut weighted = params(1);
         weighted.weighted = true;

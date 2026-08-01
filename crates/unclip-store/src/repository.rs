@@ -571,7 +571,7 @@ impl BranchWriter for SeaOrmBranchRepository {
         Ok(())
     }
 
-    async fn update(&self, branch: Branch) -> BranchRepositoryResult<()> {
+    async fn update(&self, mut branch: Branch) -> BranchRepositoryResult<()> {
         validate_branch_record(&branch)?;
         let expected_id = sqlite_branch_id(
             branch
@@ -580,7 +580,7 @@ impl BranchWriter for SeaOrmBranchRepository {
         )?;
         let expected_revision = branch
             .revision
-            .clone()
+            .take()
             .context("branch has no persistence revision; reload it before updating")?;
         let existing = self.model_by_path(&branch.path).await?.ok_or_else(|| {
             BranchRepositoryError::NotFound {
@@ -601,11 +601,10 @@ impl BranchWriter for SeaOrmBranchRepository {
         // Compare-and-swap the opaque revision before replacing child rows.
         // A concurrent editor that committed after this branch was loaded makes
         // the predicate match zero rows, preventing a silent lost update.
-        let mut branch = branch;
         branch.id = Some(branch_id as i64);
-        branch.revision = Some(next_revision.clone());
         let mut am = mapper::branch_active_model(&branch, &created_at, &next_revision)?;
         am.id = NotSet;
+        branch.revision = Some(next_revision);
         let result = branches::Entity::update_many()
             .set(am)
             .filter(branches::Column::Id.eq(branch_id))

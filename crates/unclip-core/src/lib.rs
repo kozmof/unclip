@@ -34,6 +34,8 @@ pub use validate::{
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::*;
 
     /// The "recommended branch" YAML.
@@ -124,7 +126,7 @@ references:
         let mut packet = SelectionPacket::new(Some("story".into()), Some(123456));
         packet.selections.push(Selection {
             slot: Some("place".into()),
-            branch: Branch::new("/ikebukuro/station/coin-locker"),
+            branch: Rc::new(Branch::new("/ikebukuro/station/coin-locker")),
         });
 
         assert_eq!(packet.version, PACKET_VERSION);
@@ -226,7 +228,7 @@ metadata_suggest:
         let mut unslotted = SelectionPacket::new(Some("story".into()), None);
         unslotted.selections.push(Selection {
             slot: None,
-            branch: Branch::new("/ikebukuro/station/coin-locker"),
+            branch: Rc::new(Branch::new("/ikebukuro/station/coin-locker")),
         });
         let v = validate_packet(&frame, &unslotted);
         assert!(v.iter().any(|reason| reason.contains("has no slot")));
@@ -238,7 +240,7 @@ metadata_suggest:
         branch.o2o.insert("axis".into(), "place".into());
         packet.selections.push(Selection {
             slot: Some("place".into()),
-            branch,
+            branch: Rc::new(branch),
         });
         assert!(validate_packet(&frame, &packet).is_empty());
 
@@ -275,7 +277,7 @@ metadata_suggest:
         for _ in 0..2 {
             packet.selections.push(Selection {
                 slot: Some("place".into()),
-                branch: Branch::new("/ikebukuro/station/coin-locker"),
+                branch: Rc::new(Branch::new("/ikebukuro/station/coin-locker")),
             });
         }
         let violations = validate_packet(&frame, &packet);
@@ -301,7 +303,7 @@ metadata_suggest:
         for slot in ["place", "mood"] {
             cross_slot.selections.push(Selection {
                 slot: Some(slot.into()),
-                branch: Branch::new("/ikebukuro/station/coin-locker"),
+                branch: Rc::new(Branch::new("/ikebukuro/station/coin-locker")),
             });
         }
         assert!(validate_packet(&frame_two_slots, &cross_slot).is_empty());
@@ -458,7 +460,7 @@ avoid_recent: true
         let mut packet = SelectionPacket::new(Some("story".into()), None);
         packet.selections.push(Selection {
             slot: Some("place".into()),
-            branch: Branch::new("relative-path"),
+            branch: Rc::new(Branch::new("relative-path")),
         });
 
         let violations = validate_packet(&frame, &packet);

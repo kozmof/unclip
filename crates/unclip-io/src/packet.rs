@@ -44,6 +44,8 @@ pub fn render_packets(packets: &[SelectionPacket], format: Format) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::*;
     use unclip_core::{Branch, Selection, SelectionPacket};
 
@@ -51,7 +53,7 @@ mod tests {
         let mut p = SelectionPacket::new(Some("story".into()), Some(seed));
         p.selections.push(Selection {
             slot: Some("place".into()),
-            branch: Branch::new("/ikebukuro/station/coin-locker"),
+            branch: Rc::new(Branch::new("/ikebukuro/station/coin-locker")),
         });
         p
     }

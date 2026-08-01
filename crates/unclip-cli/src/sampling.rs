@@ -1,9 +1,12 @@
 //! `sample`, `compose`, and usage-reporting (`used`/`stats`/`stale`) handlers.
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use anyhow::{ensure, Context};
-use unclip_core::{validate_path, Frame, SampleParams, SampleQuery, Selection, SelectionPacket};
+use unclip_core::{
+    validate_path, Branch, Frame, SampleParams, SampleQuery, Selection, SelectionPacket,
+};
 use unclip_io::Format;
 use unclip_sample::{random_packet_id, random_seed, rng_from_seed, sample, score, Reservoir};
 use unclip_store::{now, BranchReader, HistoryRepository, PacketUsageRecord};
@@ -161,7 +164,10 @@ async fn run_sample(
     packet.selections = reservoir
         .into_branches()
         .into_iter()
-        .map(|branch| Selection { slot: None, branch })
+        .map(|branch| Selection {
+            slot: None,
+            branch: Rc::new(branch),
+        })
         .collect();
 
     let rendered = unclip_io::render_packet(&packet, format)?;
@@ -262,7 +268,12 @@ pub async fn compose_cmd(
         let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
         let query = SampleQuery::from_slot(slot, under);
         let params = SampleParams::from_slot(slot);
-        let candidates = branches.find(&query).await?;
+        let candidates: Vec<Rc<Branch>> = branches
+            .find(&query)
+            .await?
+            .into_iter()
+            .map(Rc::new)
+            .collect();
         ensure!(
             candidates.len() >= params.count,
             "slot `{}` requires {} selection(s), but only {} candidate(s) match",
@@ -291,7 +302,7 @@ pub async fn compose_cmd(
             for branch in chosen {
                 packet.selections.push(Selection {
                     slot: Some(slot.name.clone()),
-                    branch: branch.clone(),
+                    branch,
                 });
             }
         }

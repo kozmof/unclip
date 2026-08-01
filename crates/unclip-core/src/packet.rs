@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::branch::Branch;
@@ -25,12 +27,17 @@ pub struct SelectionPacket {
 }
 
 /// A single selected branch, optionally bound to a frame slot.
+///
+/// `branch` is `Rc<Branch>` rather than `Branch` so a candidate drawn from a
+/// pool shared across many packets (e.g. `compose`'s per-slot candidate set)
+/// can be attached to each packet with a cheap refcount bump instead of a
+/// deep clone of the whole aggregate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Selection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<String>,
-    pub branch: Branch,
+    pub branch: Rc<Branch>,
 }
 
 impl SelectionPacket {
