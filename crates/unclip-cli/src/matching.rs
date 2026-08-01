@@ -134,12 +134,12 @@ pub async fn pattern_add_cmd(
         bail!("provide exactly one of --o2m, --o2o, --branch, --collapse");
     };
 
-    let entry = PatternEntry::new(input.pattern.clone(), target);
+    let entry = PatternEntry::new(input.pattern, target);
     validate_pattern_entry(&entry)?;
     let id = patterns.add(&entry).await?;
     crate::output::outln!(
         "added pattern #{id}: {} → {}",
-        input.pattern,
+        entry.pattern,
         entry.target.describe()
     );
     Ok(())

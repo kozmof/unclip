@@ -88,7 +88,7 @@ pub async fn add(repo: &impl BranchWriter, input: AddInput) -> anyhow::Result<()
     }
     branch.o2m = o2m;
 
-    repo.add(branch).await?;
+    repo.add(&branch).await?;
     crate::output::outln!("added {}", input.path);
     Ok(())
 }
@@ -378,9 +378,9 @@ pub async fn query(repo: &impl BranchReader, input: QueryInput) -> anyhow::Resul
     }
     // A frame slot supplies the base query; explicit flags merge on top.
     let mut q = match &input.frame_slot {
-        Some(slot) => SampleQuery::from_slot(slot, input.under.clone()),
+        Some(slot) => SampleQuery::from_slot(slot, input.under),
         None => SampleQuery {
-            under: input.under.clone(),
+            under: input.under,
             ..Default::default()
         },
     };
@@ -475,13 +475,13 @@ pub async fn attach(
     note: Option<String>,
 ) -> anyhow::Result<()> {
     let kind = kind.unwrap_or_else(|| infer_reference_kind(&value));
-    let reference = Reference {
-        kind: kind.clone(),
-        value: value.clone(),
-        note,
-    };
+    let reference = Reference { kind, value, note };
     repo.attach_reference(path, &reference).await?;
-    crate::output::outln!("attached {kind} `{value}` to {path}");
+    crate::output::outln!(
+        "attached {} `{}` to {path}",
+        reference.kind,
+        reference.value
+    );
     Ok(())
 }
 
@@ -591,7 +591,7 @@ pub async fn create(
 
     // A duplicate path is reported atomically by the repository insert.
     let branch = slot.skeleton(&path);
-    branch_repo.add(branch.clone()).await?;
+    branch_repo.add(&branch).await?;
     crate::output::outln!("created {path} from {selector}");
     crate::output::out!("{}", serde_norway::to_string(&branch)?);
     Ok(())

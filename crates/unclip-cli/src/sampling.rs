@@ -262,7 +262,7 @@ pub async fn compose_cmd(
         let under = override_for(&slot.name, &input.under).or_else(|| slot.under.clone());
         let query = SampleQuery::from_slot(slot, under);
         let params = SampleParams::from_slot(slot);
-        let candidates = branches.find(query.clone()).await?;
+        let candidates = branches.find(&query).await?;
         ensure!(
             candidates.len() >= params.count,
             "slot `{}` requires {} selection(s), but only {} candidate(s) match",

@@ -12,17 +12,23 @@ use crate::matcher::Matcher;
 /// o2o/o2m values are intentionally excluded — we want to discover qualities
 /// mentioned in prose, not echo the existing index.
 pub fn branch_text(branch: &Branch) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    let mut text = String::new();
+    let mut push = |part: &str| {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(part);
+    };
     if let Some(title) = &branch.title {
-        parts.push(title.clone());
+        push(title);
     }
     if let Some(description) = &branch.description {
-        parts.push(description.clone());
+        push(description);
     }
     if !branch.metadata.is_null() {
-        parts.push(branch.metadata.to_string());
+        push(&branch.metadata.to_string());
     }
-    parts.join("\n")
+    text
 }
 
 /// Suggest o2m `(name, value)` pairs found in `text` that `existing` lacks.

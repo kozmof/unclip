@@ -59,18 +59,18 @@ async fn rejects_invalid_branch_state_at_repository_boundary() {
     let mut branch = Branch::new("/bad");
     branch.weight = f64::NAN;
 
-    let err = repo.add(branch).await.unwrap_err().to_string();
+    let err = repo.add(&branch).await.unwrap_err().to_string();
     assert!(err.contains("weight must be finite"), "got: {err}");
 }
 
 #[tokio::test]
 async fn add_reports_a_duplicate_path_as_a_typed_error() {
     let repo = repo().await;
-    repo.add(Branch::new("/dup")).await.unwrap();
+    repo.add(&Branch::new("/dup")).await.unwrap();
 
     // The duplicate is detected at the insert itself (unique path constraint),
     // not by a separate lookup, so concurrent `add`s cannot race past it.
-    let err = repo.add(Branch::new("/dup")).await.unwrap_err();
+    let err = repo.add(&Branch::new("/dup")).await.unwrap_err();
     assert!(
         matches!(err, BranchRepositoryError::AlreadyExists { ref path } if path == "/dup"),
         "got: {err}"
@@ -86,14 +86,14 @@ async fn find_excludes_every_avoided_o2o_value_of_one_name() {
         if let Some(axis) = axis {
             branch.o2o.insert("axis".into(), axis.into());
         }
-        repo.add(branch).await.unwrap();
+        repo.add(&branch).await.unwrap();
     }
 
     let mut q = SampleQuery::default();
     q.avoid_o2o
         .insert("axis".into(), vec!["place".into(), "time".into()]);
     let found: Vec<_> = repo
-        .find(q)
+        .find(&q)
         .await
         .unwrap()
         .into_iter()
@@ -106,7 +106,7 @@ async fn find_excludes_every_avoided_o2o_value_of_one_name() {
 async fn add_get_update_delete_roundtrip() {
     let repo = repo().await;
     let branch = sample_branch();
-    repo.add(branch.clone()).await.unwrap();
+    repo.add(&branch).await.unwrap();
 
     // get round-trips o2o/o2m/metadata/references (ignoring assigned id).
     let got = repo.get(&branch.path).await.unwrap().unwrap();
@@ -136,7 +136,7 @@ async fn add_get_update_delete_roundtrip() {
 #[tokio::test]
 async fn stale_branch_update_is_rejected() {
     let repo = repo().await;
-    repo.add(Branch::new("/concurrent")).await.unwrap();
+    repo.add(&Branch::new("/concurrent")).await.unwrap();
 
     let mut first = repo.get("/concurrent").await.unwrap().unwrap();
     let mut stale = first.clone();
@@ -180,7 +180,7 @@ async fn reference_attachment_invalidates_stale_edits_across_connections() {
     let repo_a = SeaOrmBranchRepository::new(db_a.clone());
     let repo_b = SeaOrmBranchRepository::new(db_b.clone());
 
-    repo_a.add(Branch::new("/shared")).await.unwrap();
+    repo_a.add(&Branch::new("/shared")).await.unwrap();
     let mut stale = repo_a.get("/shared").await.unwrap().unwrap();
     let old_revision = stale.revision.clone();
 
@@ -229,7 +229,7 @@ async fn duplicate_o2m_values_do_not_violate_pk() {
         "topic".into(),
         vec!["locker".into(), "locker".into(), "transit".into()],
     );
-    repo.add(b).await.unwrap();
+    repo.add(&b).await.unwrap();
 
     let got = repo.get("/dup").await.unwrap().unwrap();
     assert_eq!(
@@ -256,7 +256,7 @@ async fn hydrates_archives_across_sqlite_parameter_chunks() {
         .collect();
 
     repo.upsert_many(branches).await.unwrap();
-    let loaded = repo.find(SampleQuery::default()).await.unwrap();
+    let loaded = repo.find(&SampleQuery::default()).await.unwrap();
 
     assert_eq!(loaded.len(), 501);
     assert!(loaded.iter().all(|branch| {
@@ -282,7 +282,7 @@ async fn persists_large_child_sets_in_sqlite_safe_batches() {
         });
     }
 
-    repo.add(branch).await.unwrap();
+    repo.add(&branch).await.unwrap();
     let loaded = repo.get("/many-children").await.unwrap().unwrap();
     assert_eq!(loaded.o2o.len(), 400);
     assert_eq!(loaded.o2m.len(), 400);
@@ -303,7 +303,7 @@ async fn navigation_and_find() {
         if path.ends_with("exit") {
             b.o2o.insert("axis".into(), "place".into());
         }
-        repo.add(b).await.unwrap();
+        repo.add(&b).await.unwrap();
     }
 
     let children = repo.children("/ikebukuro").await.unwrap();
@@ -324,7 +324,7 @@ async fn navigation_and_find() {
         ..Default::default()
     };
     q.require_o2o.insert("axis".into(), "place".into());
-    let found = repo.find(q).await.unwrap();
+    let found = repo.find(&q).await.unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].path, "/ikebukuro/station/exit");
 }
@@ -333,11 +333,11 @@ async fn navigation_and_find() {
 async fn find_returns_paths_in_stable_order() {
     let repo = repo().await;
     for path in ["/z", "/a", "/m"] {
-        repo.add(Branch::new(path)).await.unwrap();
+        repo.add(&Branch::new(path)).await.unwrap();
     }
 
     let paths: Vec<_> = repo
-        .find(SampleQuery::default())
+        .find(&SampleQuery::default())
         .await
         .unwrap()
         .into_iter()
@@ -352,24 +352,24 @@ async fn find_applies_avoid_o2o_and_o2m_in_sql() {
 
     // /keep: plain. /skip_o2o: excluded by avoid_o2o. /skip_o2m: excluded
     // by avoid_o2m.
-    repo.add(Branch::new("/keep")).await.unwrap();
+    repo.add(&Branch::new("/keep")).await.unwrap();
 
     let mut skip_o2o = Branch::new("/skip-o2o");
     skip_o2o.o2o.insert("mood".into(), "tense".into());
-    repo.add(skip_o2o).await.unwrap();
+    repo.add(&skip_o2o).await.unwrap();
 
     let mut skip_o2m = Branch::new("/skip-o2m");
     skip_o2m
         .o2m
         .insert("topic".into(), vec!["cafe".into(), "transit".into()]);
-    repo.add(skip_o2m).await.unwrap();
+    repo.add(&skip_o2m).await.unwrap();
 
     let mut q = SampleQuery::default();
     q.avoid_o2o.insert("mood".into(), vec!["tense".into()]);
     q.avoid_o2m.insert("topic".into(), vec!["cafe".into()]);
 
     let found: Vec<_> = repo
-        .find(q)
+        .find(&q)
         .await
         .unwrap()
         .into_iter()
@@ -387,20 +387,20 @@ async fn find_applies_require_o2m_in_sql() {
     let mut both = Branch::new("/both");
     both.o2m
         .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
-    repo.add(both).await.unwrap();
+    repo.add(&both).await.unwrap();
 
     let mut partial = Branch::new("/partial");
     partial.o2m.insert("mood".into(), vec!["tense".into()]);
-    repo.add(partial).await.unwrap();
+    repo.add(&partial).await.unwrap();
 
-    repo.add(Branch::new("/none")).await.unwrap();
+    repo.add(&Branch::new("/none")).await.unwrap();
 
     let mut q = SampleQuery::default();
     q.require_o2m
         .insert("mood".into(), vec!["tense".into(), "hidden".into()]);
 
     let found: Vec<_> = repo
-        .find(q)
+        .find(&q)
         .await
         .unwrap()
         .into_iter()
@@ -414,8 +414,8 @@ async fn titles_projects_path_and_title_only() {
     let repo = repo().await;
     let mut titled = Branch::new("/a");
     titled.title = Some("Alpha".into());
-    repo.add(titled).await.unwrap();
-    repo.add(Branch::new("/b")).await.unwrap(); // no title
+    repo.add(&titled).await.unwrap();
+    repo.add(&Branch::new("/b")).await.unwrap(); // no title
 
     let titles = repo.titles().await.unwrap();
     assert_eq!(titles, vec![("/a".to_string(), "Alpha".to_string())]);
@@ -426,7 +426,7 @@ async fn scope_matching_treats_underscore_literally() {
     // `_` is a SQL LIKE wildcard; a scope like `/a_b` must not match `/axb`.
     let repo = repo().await;
     for path in ["/a_b", "/a_b/child", "/axb", "/axb/child"] {
-        repo.add(Branch::new(path)).await.unwrap();
+        repo.add(&Branch::new(path)).await.unwrap();
     }
 
     let mut descendants: Vec<_> = repo
@@ -445,7 +445,7 @@ async fn scope_matching_treats_underscore_literally() {
         ..Default::default()
     };
     let mut found: Vec<_> = repo
-        .find(q)
+        .find(&q)
         .await
         .unwrap()
         .into_iter()
@@ -463,7 +463,7 @@ async fn catalog_and_value_lookup() {
         br.o2o.insert("domain".into(), "story".into());
         br.o2o.insert("axis".into(), axis.into());
         br.o2m.insert("topic".into(), vec!["transit".into()]);
-        repo.add(br).await.unwrap();
+        repo.add(&br).await.unwrap();
     }
 
     // Full o2o catalog: domain=story(3), axis=place(2), axis=time(1).
@@ -692,7 +692,7 @@ async fn upsert_many_always_advances_the_revision() {
     use sea_orm::ConnectionTrait;
 
     let repo = repo().await;
-    repo.add(Branch::new("/revision")).await.unwrap();
+    repo.add(&Branch::new("/revision")).await.unwrap();
 
     // Put the stored revision ahead of the wall clock. The import path
     // must advance from the persisted token instead of replacing it with
@@ -745,7 +745,7 @@ async fn upsert_many_rejects_duplicate_paths_without_writing() {
 #[tokio::test]
 async fn attach_reference_appends() {
     let repo = repo().await;
-    repo.add(Branch::new("/ueno/cafe")).await.unwrap();
+    repo.add(&Branch::new("/ueno/cafe")).await.unwrap();
 
     repo.attach_reference(
         "/ueno/cafe",
@@ -794,8 +794,8 @@ async fn save_packet_with_usages_persists_both() {
     let history = SeaOrmHistoryRepository::new(db);
 
     // Two branches to record usage against.
-    branches.add(Branch::new("/a")).await.unwrap();
-    branches.add(Branch::new("/b")).await.unwrap();
+    branches.add(&Branch::new("/a")).await.unwrap();
+    branches.add(&Branch::new("/b")).await.unwrap();
     let a = branches.get("/a").await.unwrap().unwrap().id.unwrap();
     let b = branches.get("/b").await.unwrap().unwrap().id.unwrap();
 
@@ -815,8 +815,8 @@ async fn recent_branch_ids_counts_distinct_branches_not_usage_rows() {
     let branches = SeaOrmBranchRepository::new(db.clone());
     let history = SeaOrmHistoryRepository::new(db);
 
-    branches.add(Branch::new("/old")).await.unwrap();
-    branches.add(Branch::new("/hot")).await.unwrap();
+    branches.add(&Branch::new("/old")).await.unwrap();
+    branches.add(&Branch::new("/hot")).await.unwrap();
     let old = branches.get("/old").await.unwrap().unwrap().id.unwrap();
     let hot = branches.get("/hot").await.unwrap().unwrap().id.unwrap();
 
@@ -854,7 +854,7 @@ async fn packet_batch_rolls_back_every_packet_and_usage_on_failure() {
     let branches = SeaOrmBranchRepository::new(db.clone());
     let history = SeaOrmHistoryRepository::new(db.clone());
 
-    branches.add(Branch::new("/a")).await.unwrap();
+    branches.add(&Branch::new("/a")).await.unwrap();
     let a = branches.get("/a").await.unwrap().unwrap().id.unwrap();
     let records = vec![
         PacketUsageRecord {
@@ -902,7 +902,7 @@ async fn branch_delete_removes_history_without_foreign_key_cascades() {
     let branches = SeaOrmBranchRepository::new(db.clone());
     let history = SeaOrmHistoryRepository::new(db.clone());
 
-    branches.add(Branch::new("/used")).await.unwrap();
+    branches.add(&Branch::new("/used")).await.unwrap();
     let id = branches.get("/used").await.unwrap().unwrap().id.unwrap();
     history
         .record_usage(id, "sample", None, None)
@@ -925,9 +925,9 @@ async fn delete_subtree_removes_branch_descendants_and_history() {
     let history = SeaOrmHistoryRepository::new(db);
 
     // `/a/b/c` exists without `/a/b`: descendants are not a chain of children.
-    branches.add(sample_branch_at("/a")).await.unwrap();
-    branches.add(sample_branch_at("/a/b/c")).await.unwrap();
-    branches.add(Branch::new("/ab")).await.unwrap(); // sibling, must survive
+    branches.add(&sample_branch_at("/a")).await.unwrap();
+    branches.add(&sample_branch_at("/a/b/c")).await.unwrap();
+    branches.add(&Branch::new("/ab")).await.unwrap(); // sibling, must survive
 
     let c = branches.get("/a/b/c").await.unwrap().unwrap().id.unwrap();
     history.record_usage(c, "sample", None, None).await.unwrap();
@@ -1060,7 +1060,7 @@ async fn attach_reference_rejects_an_oversized_resulting_branch() {
     branch.metadata = json!({
         "payload": "x".repeat(MAX_BRANCH_RECORD_BYTES - 100),
     });
-    repo.add(branch).await.unwrap();
+    repo.add(&branch).await.unwrap();
 
     let reference = Reference {
         kind: "file".into(),
@@ -1086,7 +1086,7 @@ async fn attach_reference_rejects_an_oversized_resulting_branch() {
 #[tokio::test]
 async fn attach_reference_rejects_invalid_reference() {
     let repo = repo().await;
-    repo.add(Branch::new("/ueno/cafe")).await.unwrap();
+    repo.add(&Branch::new("/ueno/cafe")).await.unwrap();
 
     let err = repo
         .attach_reference(
@@ -1246,7 +1246,7 @@ async fn repositories_reject_overly_complex_queries_before_sql() {
     );
 
     assert!(matches!(
-        repo.find(query).await,
+        repo.find(&query).await,
         Err(StoreError::InvalidDomain(CoreError::InvalidQuery(_)))
     ));
 }
@@ -1258,7 +1258,7 @@ async fn displayed_branch_text_is_rejected_at_the_store_boundary() {
     branch.title = Some("safe\u{1b}[31mred".into());
 
     assert!(matches!(
-        repo.add(branch).await,
+        repo.add(&branch).await,
         Err(StoreError::InvalidDomain(CoreError::InvalidBranch { .. }))
     ));
 }

@@ -21,7 +21,7 @@ async fn broad_find_fails_before_hydrating_an_excessive_archive() {
     .unwrap();
 
     let repo = SeaOrmBranchRepository::new(db);
-    let error = repo.find(SampleQuery::default()).await.unwrap_err();
+    let error = repo.find(&SampleQuery::default()).await.unwrap_err();
     assert!(
         matches!(
             error,

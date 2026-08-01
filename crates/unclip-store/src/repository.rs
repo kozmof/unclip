@@ -65,7 +65,7 @@ pub trait BranchReader: Sync {
     async fn descendants(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
     async fn ancestors(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>>;
 
-    async fn find(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>>;
+    async fn find(&self, query: &SampleQuery) -> BranchRepositoryResult<Vec<Branch>>;
     /// Return one stable path-ordered page. `after_path` is an exclusive cursor.
     async fn find_page(
         &self,
@@ -123,7 +123,7 @@ pub trait BranchReader: Sync {
 /// Write half of the branch persistence boundary.
 #[async_trait]
 pub trait BranchWriter: Sync {
-    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()>;
+    async fn add(&self, branch: &Branch) -> BranchRepositoryResult<()>;
     async fn update(&self, branch: Branch) -> BranchRepositoryResult<()>;
     async fn delete(&self, path: &str) -> BranchRepositoryResult<()>;
     /// Delete a branch and every descendant atomically, returning how many
@@ -418,12 +418,12 @@ impl BranchReader for SeaOrmBranchRepository {
         self.hydrate_all(models).await.map_err(Into::into)
     }
 
-    async fn find(&self, query: SampleQuery) -> BranchRepositoryResult<Vec<Branch>> {
-        validate_sample_query(&query)?;
+    async fn find(&self, query: &SampleQuery) -> BranchRepositoryResult<Vec<Branch>> {
+        validate_sample_query(query)?;
         // Sampling is seeded, so candidate order is part of its reproducibility
         // contract. SQL row order is undefined without ORDER BY and may change
         // with SQLite versions, indexes, or query plans.
-        let models = Self::filtered_select(&query)
+        let models = Self::filtered_select(query)
             .order_by_asc(branches::Column::Path)
             .limit(MAX_FIND_RESULTS + 1)
             .all(&self.db)
@@ -541,12 +541,12 @@ impl BranchReader for SeaOrmBranchRepository {
 
 #[async_trait]
 impl BranchWriter for SeaOrmBranchRepository {
-    async fn add(&self, branch: Branch) -> BranchRepositoryResult<()> {
-        validate_branch_record(&branch)?;
+    async fn add(&self, branch: &Branch) -> BranchRepositoryResult<()> {
+        validate_branch_record(branch)?;
         let now = crate::history::now();
         let txn = self.db.begin().await?;
 
-        let am = mapper::branch_active_model(&branch, &now, &now)?;
+        let am = mapper::branch_active_model(branch, &now, &now)?;
         // Map the unique-path violation to a typed error at the insert itself,
         // so two concurrent `add`s cannot race a check-then-insert window.
         let res = branches::Entity::insert(am)
@@ -566,7 +566,7 @@ impl BranchWriter for SeaOrmBranchRepository {
             })?;
         let branch_id = res.last_insert_id;
 
-        Self::insert_children(&txn, branch_id, &branch).await?;
+        Self::insert_children(&txn, branch_id, branch).await?;
         txn.commit().await?;
         Ok(())
     }
