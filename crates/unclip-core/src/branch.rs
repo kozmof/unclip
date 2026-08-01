@@ -94,7 +94,7 @@ impl Branch {
     /// The parent scope of this branch, if any.
     ///
     /// `/a/b/c` -> `/a/b`; a top-level branch like `/a` has no parent.
-    pub fn parent_path(&self) -> Option<String> {
+    pub fn parent_path(&self) -> Option<&str> {
         parent_of(&self.path)
     }
 }
@@ -110,13 +110,35 @@ pub fn is_under(path: &str, scope: &str) -> bool {
 }
 
 /// Compute the parent path of a slash-separated scope address.
-pub fn parent_of(path: &str) -> Option<String> {
+///
+/// A borrow of the input: every parent is a prefix of the path it came from, so
+/// nothing here needs to allocate. Callers that must own the result — the store
+/// mapper, writing a `parent_path` column — convert at that point.
+pub fn parent_of(path: &str) -> Option<&str> {
     let trimmed = path.trim_end_matches('/');
     let idx = trimmed.rfind('/')?;
     if idx == 0 {
         // e.g. "/a" -> top level, no parent.
         None
     } else {
-        Some(trimmed[..idx].to_string())
+        Some(&trimmed[..idx])
     }
+}
+
+/// Every ancestor scope of `path`, shallowest first, excluding `path` itself.
+///
+/// `/a/b/c` yields `/a` then `/a/b`; a top-level path yields nothing.
+///
+/// Each item is a prefix of `path`, so walking a whole chain allocates nothing.
+/// Deriving the ancestors from the input rather than from an accumulator is
+/// also what keeps them borrowable: repeatedly calling [`parent_of`] on the
+/// last element of a growing `Vec` would borrow that `Vec` while pushing to it.
+pub fn ancestor_paths(path: &str) -> impl Iterator<Item = &str> {
+    let trimmed = path.trim_end_matches('/');
+    // Skip the leading separator: `&trimmed[..0]` is the empty path, not an
+    // ancestor.
+    trimmed
+        .match_indices('/')
+        .skip(1)
+        .map(move |(index, _)| &trimmed[..index])
 }

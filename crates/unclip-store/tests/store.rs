@@ -10,8 +10,9 @@ use unclip_core::{
 };
 use unclip_store::{
     connect_and_migrate, connect_and_migrate_with_options, BranchReader, BranchRepositoryError,
-    BranchWriter, FrameRepository, HistoryRepository, PacketUsageRecord, SeaOrmBranchRepository,
-    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmPatternRepository, StoreError,
+    BranchWriter, FrameRepository, HistoryRepository, PacketUsageRecord, PageCursor,
+    SeaOrmBranchRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository,
+    SeaOrmPatternRepository, StoreError,
 };
 
 async fn repo() -> SeaOrmBranchRepository {
@@ -235,6 +236,86 @@ async fn duplicate_o2m_values_do_not_violate_pk() {
         got.o2m.get("topic").unwrap(),
         &vec!["locker".to_string(), "transit".to_string()]
     );
+}
+
+#[tokio::test]
+async fn duplicate_o2m_values_are_dropped_on_every_write_path() {
+    // `add` borrows its branch; `upsert_many` and `update` own theirs and map
+    // it through a separate owned path that drops duplicates a different way.
+    // All three must agree, or an import could collide on the
+    // (branch_id, name, value) primary key that `add` is already safe against.
+    let repo = repo().await;
+    let expected = vec!["locker".to_string(), "transit".to_string()];
+
+    let mut inserted = Branch::new("/dup-insert");
+    inserted.o2m.insert(
+        "topic".into(),
+        vec!["transit".into(), "locker".into(), "locker".into()],
+    );
+    repo.upsert_many(vec![inserted]).await.unwrap();
+    let got = repo.get("/dup-insert").await.unwrap().unwrap();
+    assert_eq!(got.o2m.get("topic").unwrap(), &expected);
+
+    // The same path again, now taking `upsert_many`'s update branch.
+    let mut replaced = Branch::new("/dup-insert");
+    replaced.o2m.insert(
+        "topic".into(),
+        vec!["locker".into(), "transit".into(), "transit".into()],
+    );
+    repo.upsert_many(vec![replaced]).await.unwrap();
+    let got = repo.get("/dup-insert").await.unwrap().unwrap();
+    assert_eq!(got.o2m.get("topic").unwrap(), &expected);
+
+    // And `update`, which carries the loaded branch's id/revision.
+    let mut edited = repo.get("/dup-insert").await.unwrap().unwrap();
+    edited.o2m.insert(
+        "topic".into(),
+        vec!["transit".into(), "transit".into(), "locker".into()],
+    );
+    repo.update(edited).await.unwrap();
+    let got = repo.get("/dup-insert").await.unwrap().unwrap();
+    assert_eq!(got.o2m.get("topic").unwrap(), &expected);
+}
+
+#[tokio::test]
+async fn headers_page_walks_a_scope_in_order_across_page_boundaries() {
+    // `ls` and `tree` page through this projection, so a wrong resume key or
+    // short-page rule would silently drop or repeat rows. Real pages hold 1000
+    // rows, which no test archive reaches; an explicit small page size is what
+    // puts the boundary under test at all.
+    let repo = repo().await;
+    for path in ["/a", "/a/b", "/a/b/c", "/a/d", "/a/e", "/a/f", "/ab", "/z"] {
+        let mut branch = Branch::new(path);
+        branch.title = Some(format!("title {path}"));
+        repo.add(&branch).await.unwrap();
+    }
+    // An untitled branch must come back as `None`, not be filtered out.
+    repo.add(&Branch::new("/a/g")).await.unwrap();
+
+    let mut pages = PageCursor::with_page_size(2);
+    let mut seen: Vec<(String, Option<String>)> = Vec::new();
+    while let Some(page) = pages.next_headers(&repo, "/a").await.unwrap() {
+        assert!(page.len() <= 2, "page overran the requested size");
+        seen.extend(page.into_iter().map(|h| (h.path, h.title)));
+    }
+
+    let paths: Vec<&str> = seen.iter().map(|(path, _)| path.as_str()).collect();
+    // Scope-inclusive and path-ordered, with every row exactly once. `/ab` is
+    // a prefix neighbour, not a descendant, so it stays out.
+    assert_eq!(
+        paths,
+        vec!["/a", "/a/b", "/a/b/c", "/a/d", "/a/e", "/a/f", "/a/g"]
+    );
+    assert_eq!(seen[0].1.as_deref(), Some("title /a"));
+    assert_eq!(seen.last().unwrap().1, None);
+
+    // A trailing slash names the same scope.
+    let mut pages = PageCursor::with_page_size(2);
+    let mut trailing = Vec::new();
+    while let Some(page) = pages.next_headers(&repo, "/a/").await.unwrap() {
+        trailing.extend(page.into_iter().map(|h| h.path));
+    }
+    assert_eq!(trailing, paths);
 }
 
 #[tokio::test]

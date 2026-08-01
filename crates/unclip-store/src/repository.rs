@@ -11,7 +11,7 @@ use sea_orm::{
     QueryFilter, QueryOrder, QuerySelect, Select, Statement, TransactionTrait,
 };
 use unclip_core::{
-    parent_of, validate_branch_record, validate_reference, validate_sample_query, Branch,
+    ancestor_paths, validate_branch_record, validate_reference, validate_sample_query, Branch,
     Reference, SampleQuery,
 };
 use unclip_entity::{
@@ -34,7 +34,11 @@ const MAX_FIND_RESULTS: u64 = 10_000;
 /// Pagination keeps individual SQL queries bounded, but returning a `Vec`
 /// still retains the entire hydrated archive. Callers that need to exceed this
 /// ceiling require a streaming API.
-pub(crate) const MAX_BULK_RESULTS: usize = 100_000;
+///
+/// Public because it also bounds what a caller may accumulate across pages:
+/// `tree` renders one row per path in a subtree and so must hold them all,
+/// and it caps that at the same number rather than inventing a second one.
+pub const MAX_BULK_RESULTS: usize = 100_000;
 
 /// Page size used by every paginated caller.
 ///
@@ -87,7 +91,8 @@ impl PageCursor {
         }
     }
 
-    /// The next non-empty page, or `None` once every match has been returned.
+    /// The next non-empty page of matching branches, or `None` once every
+    /// match has been returned.
     pub async fn next(
         &mut self,
         reader: &(impl BranchReader + ?Sized),
@@ -99,6 +104,33 @@ impl PageCursor {
         let page = reader
             .find_page(query, self.after_path.as_deref(), self.page_size)
             .await?;
+        Ok(self.accept(page, |branch| branch.path.as_str()))
+    }
+
+    /// The next non-empty page of `(path, title)` headers under `scope`, or
+    /// `None` once the scope is exhausted.
+    ///
+    /// The projection counterpart of [`Self::next`], for navigation commands
+    /// that render paths and titles and never look at a branch's payload.
+    pub async fn next_headers(
+        &mut self,
+        reader: &(impl BranchReader + ?Sized),
+        scope: &str,
+    ) -> BranchRepositoryResult<Option<Vec<BranchHeader>>> {
+        if self.exhausted {
+            return Ok(None);
+        }
+        let page = reader
+            .headers_page(scope, self.after_path.as_deref(), self.page_size)
+            .await?;
+        Ok(self.accept(page, |header| header.path.as_str()))
+    }
+
+    /// Fold a freshly fetched page into the cursor state.
+    ///
+    /// Every `next_*` method routes through here so the short-page rule and the
+    /// resume key are stated exactly once, whatever a page is made of.
+    fn accept<T>(&mut self, page: Vec<T>, path_of: impl Fn(&T) -> &str) -> Option<Vec<T>> {
         // A short page cannot be followed by more matches. A page that is
         // exactly full may be the last one, so the cursor advances and lets the
         // next call return an empty page.
@@ -106,11 +138,11 @@ impl PageCursor {
             self.exhausted = true;
         }
         // Take the resume key before handing the page to the caller.
-        self.after_path = page.last().map(|branch| branch.path.clone());
+        self.after_path = page.last().map(|item| path_of(item).to_string());
         if page.is_empty() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(page))
+        Some(page)
     }
 }
 
@@ -119,6 +151,18 @@ pub type BranchRepositoryError = StoreError;
 
 /// Typed result returned by the branch persistence boundary.
 pub type BranchRepositoryResult<T> = Result<T, BranchRepositoryError>;
+
+/// The two columns the navigation commands render: a branch's path and title.
+///
+/// `ls` and `tree` display nothing else, so they read headers rather than
+/// branches. Hydrating a `Branch` costs its metadata payload plus three
+/// additional chunked queries for its o2o/o2m/reference rows — all of it
+/// loaded, and dropped, without ever being printed.
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct BranchHeader {
+    pub path: String,
+    pub title: Option<String>,
+}
 
 /// A distinct indexed value with how many branches carry it. Used to build
 /// o2o/o2m catalogs (`unclip o2o`, `unclip o2m`).
@@ -186,6 +230,19 @@ pub trait BranchReader: Sync {
 
     /// `(path, title)` for every branch that has a title.
     async fn titles(&self) -> BranchRepositoryResult<Vec<(String, String)>>;
+
+    /// One stable path-ordered page of headers for `scope` and everything
+    /// under it. `after_path` is an exclusive cursor, as in [`Self::find_page`].
+    ///
+    /// Scope-inclusive so `tree`, which renders the scope's own branch
+    /// alongside its subtree, needs a single query. `ls` skips the scope row
+    /// naturally, since it has no child segment.
+    async fn headers_page(
+        &self,
+        scope: &str,
+        after_path: Option<&str>,
+        limit: u64,
+    ) -> BranchRepositoryResult<Vec<BranchHeader>>;
 }
 
 /// Write half of the branch persistence boundary.
@@ -255,13 +312,33 @@ impl SeaOrmBranchRepository {
         Ok(())
     }
 
-    /// Replace a branch's child rows wholesale (delete then re-insert) within a
-    /// transaction.
-    async fn replace_children(
+    /// Insert a branch's child rows from owned collections.
+    ///
+    /// The counterpart of [`Self::insert_children`] for callers that own the
+    /// branch they are writing (`update`, `upsert_many`), so its indexed values
+    /// move into the rows instead of being copied.
+    async fn insert_owned_children(
         txn: &DatabaseTransaction,
         branch_id: i64,
-        branch: &Branch,
+        children: mapper::BranchChildren,
     ) -> anyhow::Result<()> {
+        let mapper::BranchChildren {
+            o2o,
+            o2m,
+            references,
+        } = children;
+        insert_chunked(txn, mapper::into_o2o_active_models(branch_id, o2o)).await?;
+        insert_chunked(txn, mapper::into_o2m_active_models(branch_id, o2m)).await?;
+        insert_chunked(
+            txn,
+            mapper::into_reference_active_models(branch_id, references),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Drop every child row of a branch within a transaction.
+    async fn delete_children(txn: &DatabaseTransaction, branch_id: i64) -> anyhow::Result<()> {
         branch_o2o_values::Entity::delete_many()
             .filter(branch_o2o_values::Column::BranchId.eq(branch_id))
             .exec(txn)
@@ -274,7 +351,19 @@ impl SeaOrmBranchRepository {
             .filter(branch_references::Column::BranchId.eq(branch_id))
             .exec(txn)
             .await?;
-        Self::insert_children(txn, branch_id, branch).await
+        Ok(())
+    }
+
+    /// Replace a branch's child rows wholesale (delete then re-insert) within a
+    /// transaction. Both callers own their branch, so this takes the child
+    /// collections by value.
+    async fn replace_owned_children(
+        txn: &DatabaseTransaction,
+        branch_id: i64,
+        children: mapper::BranchChildren,
+    ) -> anyhow::Result<()> {
+        Self::delete_children(txn, branch_id).await?;
+        Self::insert_owned_children(txn, branch_id, children).await
     }
 
     /// Load a branch's child rows and assemble the full domain value.
@@ -465,12 +554,9 @@ impl BranchReader for SeaOrmBranchRepository {
     }
 
     async fn ancestors(&self, path: &str) -> BranchRepositoryResult<Vec<Branch>> {
-        // Walk up once, keeping each parent only in `paths`; the loop reads the
-        // last entry rather than holding a second copy as a cursor.
-        let mut paths: Vec<String> = Vec::new();
-        while let Some(parent) = parent_of(paths.last().map_or(path, String::as_str)) {
-            paths.push(parent);
-        }
+        // Every ancestor is a prefix of `path`, so the whole chain is borrowed
+        // from the argument and goes straight into the query as bound values.
+        let paths: Vec<&str> = ancestor_paths(path).collect();
         if paths.is_empty() {
             return Ok(Vec::new());
         }
@@ -600,6 +686,43 @@ impl BranchReader for SeaOrmBranchRepository {
             .filter_map(|r| r.title.map(|t| (r.path, t)))
             .collect())
     }
+
+    async fn headers_page(
+        &self,
+        scope: &str,
+        after_path: Option<&str>,
+        limit: u64,
+    ) -> BranchRepositoryResult<Vec<BranchHeader>> {
+        if limit == 0 {
+            return Err(BranchRepositoryError::InvalidRequest {
+                message: "page limit must be greater than zero".to_string(),
+            });
+        }
+        if limit > MAX_FIND_RESULTS {
+            return Err(BranchRepositoryError::InvalidRequest {
+                message: format!("page limit must not exceed {MAX_FIND_RESULTS}"),
+            });
+        }
+        let scope = scope.trim_end_matches('/');
+        let mut select = branches::Entity::find()
+            .select_only()
+            .column(branches::Column::Path)
+            .column(branches::Column::Title)
+            .filter(
+                branches::Column::Path
+                    .eq(scope)
+                    .or(branches::Column::Path.like(descendant_like(scope))),
+            );
+        if let Some(path) = after_path {
+            select = select.filter(branches::Column::Path.gt(path));
+        }
+        Ok(select
+            .order_by_asc(branches::Column::Path)
+            .limit(limit)
+            .into_model::<BranchHeader>()
+            .all(&self.db)
+            .await?)
+    }
 }
 
 #[async_trait]
@@ -654,7 +777,12 @@ impl BranchWriter for SeaOrmBranchRepository {
             });
         }
         let branch_id = expected_id;
-        let created_at = existing.created_at;
+        // `existing` was looked up by this branch's path, so it carries the
+        // same value. Taking it here lets the conflict error below name the
+        // path after the branch's own fields have moved into the row.
+        let branches::Model {
+            path, created_at, ..
+        } = existing;
         let next_revision = next_revision(&expected_revision)?;
 
         let txn = self.db.begin().await?;
@@ -662,10 +790,14 @@ impl BranchWriter for SeaOrmBranchRepository {
         // Compare-and-swap the opaque revision before replacing child rows.
         // A concurrent editor that committed after this branch was loaded makes
         // the predicate match zero rows, preventing a silent lost update.
-        branch.id = Some(branch_id);
-        let mut am = mapper::branch_active_model(&branch, &created_at, &next_revision);
+        //
+        // The branch is consumed here: `update` owns it, and nothing reads it
+        // afterwards, so its fields move into the parent row and the child
+        // collections rather than being copied into them.
+        let (mut am, children) =
+            mapper::into_branch_active_model(branch, &created_at, &next_revision);
+        // The id travels in the filter below, not in the SET clause.
         am.id = NotSet;
-        branch.revision = Some(next_revision);
         let result = branches::Entity::update_many()
             .set(am)
             .filter(branches::Column::Id.eq(branch_id))
@@ -673,12 +805,10 @@ impl BranchWriter for SeaOrmBranchRepository {
             .exec(&txn)
             .await?;
         if result.rows_affected != 1 {
-            return Err(BranchRepositoryError::Conflict {
-                path: branch.path.clone(),
-            });
+            return Err(BranchRepositoryError::Conflict { path });
         }
 
-        Self::replace_children(&txn, branch_id, &branch).await?;
+        Self::replace_owned_children(&txn, branch_id, children).await?;
 
         txn.commit().await?;
         Ok(())
@@ -889,19 +1019,20 @@ impl BranchWriter for SeaOrmBranchRepository {
                     // millisecond precision can equal (or precede) the stored
                     // revision.
                     let revision = next_revision(&model.updated_at)?;
-                    let am = mapper::branch_active_model(&branch, &model.created_at, &revision);
+                    let (am, children) =
+                        mapper::into_branch_active_model(branch, &model.created_at, &revision);
                     branches::Entity::update(am).exec(&txn).await?;
-                    Self::replace_children(&txn, branch_id, &branch).await?;
+                    Self::replace_owned_children(&txn, branch_id, children).await?;
                     updated += 1;
                 }
                 None => {
                     branch.id = None;
-                    let am = mapper::branch_active_model(&branch, &now, &now);
+                    let (am, children) = mapper::into_branch_active_model(branch, &now, &now);
                     let branch_id = branches::Entity::insert(am)
                         .exec(&txn)
                         .await?
                         .last_insert_id;
-                    Self::insert_children(&txn, branch_id, &branch).await?;
+                    Self::insert_owned_children(&txn, branch_id, children).await?;
                     added += 1;
                 }
             }

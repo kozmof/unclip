@@ -651,6 +651,29 @@ fn ls_and_tree_surface_scope_only_segments() {
     assert!(stderr(&empty_root).contains("(no children under /)"));
 }
 
+/// `tree` renders the scope's own branch alongside its subtree; `ls` lists
+/// only what is under the scope.
+#[test]
+fn tree_includes_the_scope_branch_itself() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    assert!(unclip(&path, &["add", "/a", "--title", "A"])
+        .status
+        .success());
+    assert!(unclip(&path, &["add", "/a/b", "--title", "B"])
+        .status
+        .success());
+
+    let tree = unclip(&path, &["tree", "/a"]);
+    assert!(tree.status.success());
+    assert_eq!(stdout(&tree), "a\tA\n  b\tB\n");
+
+    let ls = unclip(&path, &["ls", "/a"]);
+    assert!(ls.status.success());
+    assert_eq!(stdout(&ls), "/a/b\tB\n");
+}
+
 /// `ls` tolerates a trailing slash, and `stale` reports last-used timestamps.
 #[test]
 fn ls_accepts_trailing_slash_and_stale_reports_last_used() {

@@ -17,7 +17,7 @@ mod query_validation;
 pub mod reference;
 pub mod validate;
 
-pub use branch::{is_under, parent_of, Branch};
+pub use branch::{ancestor_paths, is_under, parent_of, Branch};
 pub use error::{CoreError, Result};
 pub use frame::{Frame, Slot};
 pub use frame_validation::validate_frame;
@@ -132,11 +132,36 @@ references:
     #[test]
     fn parent_path_navigation() {
         assert_eq!(
-            parent_of("/ikebukuro/station/exit").as_deref(),
+            parent_of("/ikebukuro/station/exit"),
             Some("/ikebukuro/station")
         );
-        assert_eq!(parent_of("/ikebukuro").as_deref(), None);
-        assert_eq!(parent_of("/").as_deref(), None);
+        assert_eq!(parent_of("/ikebukuro"), None);
+        assert_eq!(parent_of("/"), None);
+    }
+
+    #[test]
+    fn ancestor_paths_walks_the_whole_chain() {
+        assert_eq!(
+            ancestor_paths("/ikebukuro/station/exit").collect::<Vec<_>>(),
+            vec!["/ikebukuro", "/ikebukuro/station"]
+        );
+        // A top-level path and the bare root have no ancestors.
+        assert!(ancestor_paths("/ikebukuro").next().is_none());
+        assert!(ancestor_paths("/").next().is_none());
+        // A trailing slash is trimmed first, matching `parent_of`.
+        assert_eq!(
+            ancestor_paths("/a/b/c/").collect::<Vec<_>>(),
+            vec!["/a", "/a/b"]
+        );
+        // The chain is exactly what repeated `parent_of` produces.
+        let mut walked = Vec::new();
+        let mut cursor = Some("/a/b/c");
+        while let Some(path) = cursor.and_then(parent_of) {
+            walked.push(path);
+            cursor = Some(path);
+        }
+        walked.reverse();
+        assert_eq!(walked, ancestor_paths("/a/b/c").collect::<Vec<_>>());
     }
 
     #[test]

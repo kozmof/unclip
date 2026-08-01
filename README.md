@@ -177,6 +177,11 @@ a batch — so each slot's scope must match no more than 10,000 branches. Narrow
 slot's `under` scope, or its filters, if `compose` reports that a query matched
 too many branches.
 
+`query`, `export --format jsonl`, and `ls` stream too, and read only the columns
+they print. `tree` streams as well but renders a row per path in the subtree, so
+it holds them all and stops at 100,000 paths — pick a deeper root if it reports
+a scope that matched too many.
+
 ## Quality and release checks
 
 The workspace is set up for release-minded source distribution. CI runs these

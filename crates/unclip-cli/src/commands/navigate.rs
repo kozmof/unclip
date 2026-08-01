@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{bail, Context};
 use unclip_core::{validate_path, Branch, SampleQuery, Slot};
-use unclip_store::{BranchReader, IndexedValue, PageCursor};
+use unclip_store::{BranchReader, IndexedValue, PageCursor, MAX_BULK_RESULTS};
 
 use super::{merge_o2o, print_path_line};
 
@@ -18,38 +18,59 @@ pub async fn show(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
     }
 }
 
+/// A displayed row: `Some(title)` for a titled branch, `Some(None)` for an
+/// untitled one, and `None` for a path that exists only as a scope.
+type Row = Option<Option<String>>;
+
+/// Render one navigation row. A scope-only segment gets a trailing slash to
+/// mark a path that can be listed further but not shown as a branch.
+fn print_row(indent: &str, label: &str, row: &Row) -> anyhow::Result<()> {
+    match row {
+        Some(Some(title)) => crate::output::outln!("{indent}{label}\t{title}"),
+        Some(None) => crate::output::outln!("{indent}{label}"),
+        None => crate::output::outln!("{indent}{label}/"),
+    }
+    Ok(())
+}
+
 pub async fn ls(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
     // Accept a trailing slash the same way `tree` does; paths are compared
     // without it, so `/a/` would otherwise silently match nothing.
     let path = path.trim_end_matches('/');
-    // Scan the whole subtree (sharing `tree`'s bulk bound) rather than the
-    // exact-parent index: a path segment that was never added as a branch
-    // still scopes deeper branches, and must be listed to be discoverable.
-    let descendants = repo.descendants(path).await?;
 
     // One entry per immediate child path; a child that is itself a branch
-    // carries it, a child that only exists as a scope stays `None`.
+    // carries its title, a child that only exists as a scope stays `None`.
     //
-    // The scope is stripped rather than sliced by byte offset: `descendants`
-    // only ever returns strict descendants today, but an indexing bug here
-    // would be a panic, and `strip_prefix` keeps that invariant local.
-    let mut entries: BTreeMap<String, Option<Branch>> = BTreeMap::new();
-    for branch in descendants {
-        let Some(rest) = branch
-            .path
-            .strip_prefix(path)
-            .and_then(|rest| rest.strip_prefix('/'))
-        else {
-            continue;
-        };
-        let segment_end = rest
-            .find('/')
-            .map_or(branch.path.len(), |i| branch.path.len() - rest.len() + i);
-        let child_path = branch.path[..segment_end].to_string();
-        let is_direct_child = segment_end == branch.path.len();
-        let entry = entries.entry(child_path).or_insert(None);
-        if is_direct_child {
-            *entry = Some(branch);
+    // The whole subtree is scanned rather than the exact-parent index: a path
+    // segment that was never added as a branch still scopes deeper branches,
+    // and must be listed to be discoverable. It is scanned a page of headers
+    // at a time and collapsed to immediate children as it arrives, so what is
+    // held is proportional to the number of children, not to the subtree.
+    //
+    // The scope is stripped rather than sliced by byte offset: an indexing bug
+    // here would be a panic, and `strip_prefix` keeps that invariant local. It
+    // also skips the scope's own row, which has no child segment.
+    let mut entries: BTreeMap<String, Row> = BTreeMap::new();
+    let mut pages = PageCursor::new();
+    while let Some(page) = pages.next_headers(repo, path).await? {
+        for header in page {
+            let Some(rest) = header
+                .path
+                .strip_prefix(path)
+                .and_then(|rest| rest.strip_prefix('/'))
+            else {
+                continue;
+            };
+            let segment_end = rest
+                .find('/')
+                .map_or(header.path.len(), |i| header.path.len() - rest.len() + i);
+            let is_direct_child = segment_end == header.path.len();
+            let entry = entries
+                .entry(header.path[..segment_end].to_string())
+                .or_insert(None);
+            if is_direct_child {
+                *entry = Some(header.title);
+            }
         }
     }
 
@@ -57,56 +78,49 @@ pub async fn ls(repo: &impl BranchReader, path: &str) -> anyhow::Result<()> {
         crate::output::errln!("(no children under {})", display_scope(path));
         return Ok(());
     }
-    for (child_path, branch) in entries {
-        match branch {
-            Some(Branch {
-                title: Some(title), ..
-            }) => crate::output::outln!("{child_path}\t{title}"),
-            Some(_) => crate::output::outln!("{child_path}"),
-            // Scope-only segment: the trailing slash marks a path that can be
-            // listed further but not shown as a branch.
-            None => crate::output::outln!("{child_path}/"),
-        }
+    for (child_path, row) in &entries {
+        print_row("", child_path, row)?;
     }
     Ok(())
 }
 
 pub async fn tree(repo: &impl BranchReader, root: &str) -> anyhow::Result<()> {
     let root = root.trim_end_matches('/');
-    let mut nodes = repo.descendants(root).await?;
-    if let Some(node) = repo.get(root).await? {
-        nodes.push(node);
-    }
-    if nodes.is_empty() {
-        crate::output::errln!("(no branches under {})", display_scope(root));
-        return Ok(());
-    }
 
     // One display row per path, including scope-only segments between the
     // root and each branch — without them, siblings under different implicit
     // parents would render as if nested under the previous branch.
-    let mut rows: BTreeMap<String, Option<Branch>> = BTreeMap::new();
-    for node in nodes {
-        for (i, _) in node.path.match_indices('/') {
-            if i > root.len() {
-                rows.entry(node.path[..i].to_string()).or_insert(None);
+    //
+    // Headers stream in a page at a time, but every row in the subtree is
+    // rendered, so they all have to be held to sort them. That is a path and a
+    // title per row rather than a whole hydrated branch; the ceiling is what
+    // this command previously inherited from a bulk `descendants` read.
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    let mut pages = PageCursor::new();
+    while let Some(page) = pages.next_headers(repo, root).await? {
+        for header in page {
+            for (i, _) in header.path.match_indices('/') {
+                if i > root.len() {
+                    rows.entry(header.path[..i].to_string()).or_insert(None);
+                }
             }
+            rows.insert(header.path, Some(header.title));
         }
-        rows.insert(node.path.clone(), Some(node));
+        anyhow::ensure!(
+            rows.len() <= MAX_BULK_RESULTS,
+            "scope matched more than {MAX_BULK_RESULTS} paths; narrow it with a deeper root"
+        );
+    }
+
+    if rows.is_empty() {
+        crate::output::errln!("(no branches under {})", display_scope(root));
+        return Ok(());
     }
 
     let root_depth = segment_count(root);
-    for (path, node) in rows {
-        let depth = segment_count(&path).saturating_sub(root_depth);
-        let indent = "  ".repeat(depth);
-        let label = last_segment(&path);
-        match node {
-            Some(Branch {
-                title: Some(title), ..
-            }) => crate::output::outln!("{indent}{label}\t{title}"),
-            Some(_) => crate::output::outln!("{indent}{label}"),
-            None => crate::output::outln!("{indent}{label}/"),
-        }
+    for (path, row) in &rows {
+        let depth = segment_count(path).saturating_sub(root_depth);
+        print_row(&"  ".repeat(depth), last_segment(path), row)?;
     }
     Ok(())
 }

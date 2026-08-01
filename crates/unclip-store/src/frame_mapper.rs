@@ -82,42 +82,60 @@ pub fn assemble_slot(
     })
 }
 
-/// Flatten a slot's o2o maps into `(mode, name, value)` rows.
-pub fn slot_o2o_rows(slot: &Slot) -> Vec<(&'static str, String, String)> {
-    let mut rows = Vec::new();
-    for (name, value) in &slot.require_o2o {
-        rows.push((O2O_REQUIRE, name.clone(), value.clone()));
-    }
-    for (name, value) in &slot.default_o2o {
-        rows.push((O2O_DEFAULT, name.clone(), value.clone()));
-    }
-    for (name, values) in &slot.avoid_o2o {
-        for value in values {
-            rows.push((O2O_AVOID, name.clone(), value.clone()));
-        }
-    }
-    rows
+/// A flattened slot constraint: `(mode, name, value)`.
+pub type ValueRow = (&'static str, String, String);
+
+/// The constraint maps of a slot, split off from its row.
+///
+/// Mirrors [`crate::mapper::BranchChildren`]: `save_frame_in_txn` is handed the
+/// frame it writes, so [`SlotValues::into_rows`] moves every name and value
+/// into the value-table rows instead of copying them out of a borrow.
+pub struct SlotValues {
+    pub require_o2o: BTreeMap<String, String>,
+    pub default_o2o: BTreeMap<String, String>,
+    pub avoid_o2o: BTreeMap<String, Vec<String>>,
+    pub require_o2m: BTreeMap<String, Vec<String>>,
+    pub prefer_o2m: BTreeMap<String, Vec<String>>,
+    pub avoid_o2m: BTreeMap<String, Vec<String>>,
 }
 
-/// Flatten a slot's o2m maps into `(mode, name, value)` rows.
-pub fn slot_o2m_rows(slot: &Slot) -> Vec<(&'static str, String, String)> {
-    let mut rows = Vec::new();
-    for (name, values) in &slot.require_o2m {
-        for value in values {
-            rows.push((O2M_REQUIRE, name.clone(), value.clone()));
+impl SlotValues {
+    /// Flatten into `(o2o rows, o2m rows)`, consuming the maps.
+    ///
+    /// Both halves are returned from one call so the two row sets cannot be
+    /// built from mismatched slots.
+    pub fn into_rows(self) -> (Vec<ValueRow>, Vec<ValueRow>) {
+        let mut o2o = Vec::new();
+        for (name, value) in self.require_o2o {
+            o2o.push((O2O_REQUIRE, name, value));
         }
-    }
-    for (name, values) in &slot.prefer_o2m {
-        for value in values {
-            rows.push((O2M_PREFER, name.clone(), value.clone()));
+        for (name, value) in self.default_o2o {
+            o2o.push((O2O_DEFAULT, name, value));
         }
+        push_multi(&mut o2o, O2O_AVOID, self.avoid_o2o);
+
+        let mut o2m = Vec::new();
+        push_multi(&mut o2m, O2M_REQUIRE, self.require_o2m);
+        push_multi(&mut o2m, O2M_PREFER, self.prefer_o2m);
+        push_multi(&mut o2m, O2M_AVOID, self.avoid_o2m);
+
+        (o2o, o2m)
     }
-    for (name, values) in &slot.avoid_o2m {
+}
+
+/// Flatten one multi-value constraint map under a single mode. Each row needs
+/// its own owned name, so the name is cloned for every row but the last, which
+/// takes the name itself.
+fn push_multi(rows: &mut Vec<ValueRow>, mode: &'static str, map: BTreeMap<String, Vec<String>>) {
+    for (name, mut values) in map {
+        let Some(last) = values.pop() else {
+            continue;
+        };
         for value in values {
-            rows.push((O2M_AVOID, name.clone(), value.clone()));
+            rows.push((mode, name.clone(), value));
         }
+        rows.push((mode, name, last));
     }
-    rows
 }
 
 /// Serialize `metadata_suggest` to JSON, or `None` when empty.

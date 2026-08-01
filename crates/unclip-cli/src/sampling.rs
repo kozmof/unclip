@@ -263,11 +263,13 @@ pub async fn compose_cmd(
         slots,
         ..
     } = frame;
+    // The name outlives every packet in the batch, which all carry it.
+    let frame_name: Rc<str> = frame_name.into();
     let mut slot_plans = Vec::with_capacity(slots.len());
     for slot in slots {
-        let under = override_for(&slot.name, &input.under)
-            .map(str::to_string)
-            .or_else(|| slot.under.clone());
+        // No fallback to `slot.under` here: `SampleQuery::from_slot` already
+        // applies it, and does so by moving the slot's own value.
+        let under = override_for(&slot.name, &input.under).map(str::to_string);
         let params = SampleParams::from_slot(&slot);
         // The name outlives the slot: it labels every selection this slot
         // contributes, to every packet in the batch.
@@ -293,7 +295,8 @@ pub async fn compose_cmd(
         let seed = base_seed.wrapping_add(k as u64);
         let mut rng = rng_from_seed(seed);
 
-        let mut packet = SelectionPacket::new(Some(frame_name.clone()), Some(seed));
+        // A refcount bump per packet: one frame names the whole batch.
+        let mut packet = SelectionPacket::new(Some(Rc::clone(&frame_name)), Some(seed));
         packet.created_at = Some(now());
         packet.query = Some(compose_provenance(&frame_name, &input.under));
 
@@ -324,7 +327,7 @@ pub async fn compose_cmd(
     if !input.dry_run {
         let records = packets
             .iter()
-            .map(|packet| packet_usage_record(Some(&frame_name), packet))
+            .map(|packet| packet_usage_record(Some(frame_name.as_ref()), packet))
             .collect::<anyhow::Result<Vec<_>>>()?;
         history.save_packets_with_usages(records, "compose").await?;
     }
@@ -394,7 +397,7 @@ pub async fn replay_cmd(
                 frames,
                 history,
                 ComposeInput {
-                    frame: frame_name,
+                    frame: frame_name.to_string(),
                     under,
                     count: 1,
                     seed,

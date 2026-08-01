@@ -99,7 +99,10 @@ impl SeaOrmFrameRepository {
         };
         let frame_id = frames::Entity::insert(am).exec(txn).await?.last_insert_id;
 
-        for (position, slot) in frame.slots.iter().enumerate() {
+        // The slots are consumed: this function owns the frame, and nothing
+        // reads it after the rows are written, so each slot's name and every
+        // constraint value move into SQL instead of being copied there.
+        for (position, slot) in frame.slots.into_iter().enumerate() {
             let position = i32::try_from(position).context("frame has too many slots")?;
             Self::insert_slot(txn, frame_id, position, slot).await?;
         }
@@ -110,26 +113,53 @@ impl SeaOrmFrameRepository {
         txn: &DatabaseTransaction,
         frame_id: i64,
         position: i32,
-        slot: &Slot,
+        slot: Slot,
     ) -> anyhow::Result<()> {
-        let count = checked_slot_count(slot)?;
+        // Both read the slot whole; take them before it is split apart.
+        let count = checked_slot_count(&slot)?;
+        let metadata_suggest_json = frame_mapper::metadata_suggest_json(&slot)?;
+
+        let Slot {
+            name,
+            under,
+            require_o2o,
+            default_o2o,
+            avoid_o2o,
+            require_o2m,
+            prefer_o2m,
+            avoid_o2m,
+            avoid_recent,
+            weighted,
+            ..
+        } = slot;
+
         let am = frame_slots::ActiveModel {
             id: NotSet,
             frame_id: Set(frame_id),
-            name: Set(slot.name.clone()),
+            name: Set(name),
             position: Set(position),
-            under_path: Set(slot.under.clone()),
+            under_path: Set(under),
             count: Set(count),
-            avoid_recent: Set(slot.avoid_recent as i32),
-            weighted: Set(slot.weighted as i32),
-            metadata_suggest_json: Set(frame_mapper::metadata_suggest_json(slot)?),
+            avoid_recent: Set(avoid_recent as i32),
+            weighted: Set(weighted as i32),
+            metadata_suggest_json: Set(metadata_suggest_json),
         };
         let slot_id = frame_slots::Entity::insert(am)
             .exec(txn)
             .await?
             .last_insert_id;
 
-        let o2o: Vec<_> = frame_mapper::slot_o2o_rows(slot)
+        let (o2o_rows, o2m_rows) = frame_mapper::SlotValues {
+            require_o2o,
+            default_o2o,
+            avoid_o2o,
+            require_o2m,
+            prefer_o2m,
+            avoid_o2m,
+        }
+        .into_rows();
+
+        let o2o: Vec<_> = o2o_rows
             .into_iter()
             .map(|(mode, name, value)| frame_slot_o2o_values::ActiveModel {
                 slot_id: Set(slot_id),
@@ -140,7 +170,7 @@ impl SeaOrmFrameRepository {
             .collect();
         insert_chunked(txn, o2o).await?;
 
-        let o2m: Vec<_> = frame_mapper::slot_o2m_rows(slot)
+        let o2m: Vec<_> = o2m_rows
             .into_iter()
             .map(|(mode, name, value)| frame_slot_o2m_values::ActiveModel {
                 slot_id: Set(slot_id),

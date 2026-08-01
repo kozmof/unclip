@@ -15,8 +15,13 @@ pub const PACKET_KIND: &str = "unclip.selection";
 pub struct SelectionPacket {
     pub version: u32,
     pub kind: String,
+    /// The frame this packet was composed from.
+    ///
+    /// An `Rc<str>` for the same reason as [`Selection::slot`]: `compose` names
+    /// one frame across every packet of a batch, so each packet takes a
+    /// refcount bump rather than a copy of the name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub frame: Option<String>,
+    pub frame: Option<Rc<str>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -52,7 +57,7 @@ pub struct Selection {
 
 impl SelectionPacket {
     /// Construct an empty packet with the current version and kind.
-    pub fn new(frame: Option<String>, seed: Option<u64>) -> Self {
+    pub fn new(frame: Option<Rc<str>>, seed: Option<u64>) -> Self {
         Self {
             version: PACKET_VERSION,
             kind: PACKET_KIND.to_string(),
