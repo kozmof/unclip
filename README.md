@@ -1,26 +1,10 @@
 # unclip
 
-unclip is a command-line tool for getting varied output from LLMs by building
+unclip is a CLI for getting varied output from LLMs by building
 the possibility space outside the model. Store ideas as addressable branches,
 index and constrain them, then sample structured selections to feed the model.
 
-## Why
-
-Ask a small or local LLM to invent a whole search space and it tends to return
-the same safe answers.
-
-```txt
-Tokyo story        → cafe, rain, lonely person
-debug advice       → add logs, check config
-research critique  → baseline, limitation, future work
-```
-
-The problem is usually a narrow search space, not model size. unclip moves that
-search space out of the model. Build a structured archive of possibilities,
-sample from it under constraints, and hand the model concrete material to work
-with instead of asking it to imagine everything.
-
-## Core concepts
+## Data structure
 
 - branch — an addressable node at a slash-separated path, e.g. `/ikebukuro/station/exit`.
 - path — the hierarchical scope a branch lives under.
@@ -198,26 +182,6 @@ checks.
 
 These checks cover formatting, linting, docs, tests, release builds, package
 verification, dependency policy, and line coverage before changes land on main.
-
-## Workspace layout
-
-```txt
-crates/
-  unclip-core/      Domain model and validation, no persistence deps.
-  unclip-entity/    SeaORM entities.
-  unclip-migration/ Database migrations.
-  unclip-store/     Repository traits, SeaORM implementations, and mappers.
-  unclip-sample/    Seeded weighted sampling.
-  unclip-io/        YAML, JSON, and JSONL parsing and rendering.
-  unclip-match/     daachorse-based pattern matcher.
-  unclip-cli/       The `unclip` command-line interface.
-```
-
-Inside `unclip-cli`, handlers are grouped by what they act on: `commands/branch`
-(add, edit, rm, import, attach), `commands/navigate` (show, ls, tree, query,
-o2o, o2m), `commands/frames` (frame definitions and the commands built on them),
-`sampling` (sample, compose, replay, export), `usage` (used, stats, stale), and
-`matching` (scan, suggest-o2m, patterns).
 
 ## License
 
