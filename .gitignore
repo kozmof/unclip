@@ -1,6 +1,7 @@
 .devcontainer/
 .npm-cache/
 .go-cache/
+.cargo-home/
 /target
 *.db
 *.db-shm
