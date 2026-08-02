@@ -167,21 +167,16 @@ it holds them all and stops at 100,000 paths — pick a deeper root if it report
 a scope that matched too many.
 
 ## Quality and release checks
-
-The workspace is set up for release-minded source distribution. CI runs these
-checks.
-
 - `cargo fmt --all --check`
 - `cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings`
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps`
 - `cargo test --locked --workspace --all-targets`
 - `cargo build --release --locked --workspace`
 - `cargo package --locked --workspace`
+
+CI:
 - `cargo deny check advisories bans sources licenses`
 - `cargo llvm-cov --locked --workspace --all-targets --summary-only --fail-under-lines 85`
-
-These checks cover formatting, linting, docs, tests, release builds, package
-verification, dependency policy, and line coverage before changes land on main.
 
 ## License
 
