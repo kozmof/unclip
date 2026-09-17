@@ -169,3 +169,16 @@ async fn invalid_observation_is_rolled_back() {
     assert!(matches!(error, StoreError::InvalidRequest { .. }));
     assert!(repo.get_observation(&invalid.id).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn missing_provenance_prevents_any_observation_rows() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let repo = SeaOrmObservationRepository::new(db);
+    let value = observation();
+
+    repo.insert_observation(value.clone(), &DerivedId::new("missing"))
+        .await
+        .unwrap_err();
+
+    assert!(repo.get_observation(&value.id).await.unwrap().is_none());
+}

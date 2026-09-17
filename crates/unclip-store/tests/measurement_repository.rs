@@ -149,3 +149,25 @@ async fn invalid_nested_measurement_rolls_back_the_profile() {
     assert!(matches!(error, StoreError::InvalidRequest { .. }));
     assert!(repo.get_profile("invalid-profile").await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn missing_nested_provenance_rolls_back_the_profile() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let repo = SeaOrmMeasurementRepository::new(db);
+    repo.insert_sensor_run(sensor_run("value-run", "sensor.value"))
+        .await
+        .unwrap();
+    let mut record = value_record("missing-provenance", 1.0);
+    record.provenance = DerivedId::new("missing");
+
+    repo.insert_profile(header("rolled-back-profile"), vec![record])
+        .await
+        .unwrap_err();
+
+    assert!(repo
+        .get_profile("rolled-back-profile")
+        .await
+        .unwrap()
+        .is_none());
+}
