@@ -11,6 +11,7 @@ mod m20260703_000004_harden_domain_constraints;
 mod m20260703_000005_harden_pattern_paths;
 mod m20260703_000006_harden_branch_records;
 mod m20260705_000007_multi_value_avoid_o2o;
+mod m20260918_000008_create_provenance_and_runs;
 
 struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260703_000005_harden_pattern_paths::Migration),
             Box::new(m20260703_000006_harden_branch_records::Migration),
             Box::new(m20260705_000007_multi_value_avoid_o2o::Migration),
+            Box::new(m20260918_000008_create_provenance_and_runs::Migration),
         ]
     }
 }
@@ -239,5 +241,84 @@ mod tests {
             .is_err(),
             "o2m mode 'default' is not valid and must be rejected"
         );
+    }
+    #[tokio::test]
+    async fn provenance_and_run_constraints_preserve_a_traversable_dag() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, None).await.unwrap();
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            "INSERT INTO engine_runs
+               (id, resolved_plan_json, status, started_at, completed_at)
+             VALUES
+               ('run-1', '{}', 'completed', '2026-09-17T00:00:00Z',
+                '2026-09-17T00:01:00Z');
+             INSERT INTO provenance
+               (derived_id, run_id, operation, producer, algorithm, version,
+                params_json, params_hash, timestamp)
+             VALUES
+               ('input-1', 'run-1', 'inferred', 'infer.fixture', 'fixture',
+                '0.1.0', '{}', 'hash-a', '2026-09-17T00:00:00Z'),
+               ('result-1', 'run-1', 'calculated', 'sensor.fixture', 'fixture',
+                '0.1.0', '{}', 'hash-b', '2026-09-17T00:00:01Z');
+             INSERT INTO provenance_inputs
+               (derived_id, input_derived_id, position)
+             VALUES ('result-1', 'input-1', 0);",
+        )
+        .await
+        .unwrap();
+
+        let edge = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT input_derived_id FROM provenance_inputs
+                 WHERE derived_id = 'result-1'",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            edge.try_get::<String>("", "input_derived_id").unwrap(),
+            "input-1"
+        );
+
+        for invalid in [
+            "INSERT INTO provenance
+               (derived_id, operation, producer, algorithm, version,
+                params_json, params_hash, timestamp)
+             VALUES ('bad-op', 'guessed', 'x', 'x', '0.1.0', '{}', 'h', 't')",
+            "INSERT INTO provenance_inputs
+               (derived_id, input_derived_id, position)
+             VALUES ('result-1', 'missing', 1)",
+            "INSERT INTO provenance_inputs
+               (derived_id, input_derived_id, position)
+             VALUES ('result-1', 'result-1', 1)",
+            "INSERT INTO engine_runs
+               (id, resolved_plan_json, status, started_at)
+             VALUES ('bad-run', '{}', 'completed', 't')",
+        ] {
+            assert!(
+                db.execute_unprepared(invalid).await.is_err(),
+                "invalid row unexpectedly accepted: {invalid}"
+            );
+        }
+
+        db.execute_unprepared("DELETE FROM engine_runs WHERE id = 'run-1'")
+            .await
+            .unwrap();
+        let remaining = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS count FROM provenance",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "count")
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }
