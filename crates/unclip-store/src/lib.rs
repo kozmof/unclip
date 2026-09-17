@@ -14,6 +14,7 @@ mod mapper;
 mod measurement_repository;
 mod observation_repository;
 mod pattern_repository;
+mod provenance_repository;
 mod repository;
 mod seaorm;
 mod sqlite_limits;
@@ -30,6 +31,9 @@ pub use measurement_repository::{
 };
 pub use observation_repository::{ObservationRepository, SeaOrmObservationRepository};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
+pub use provenance_repository::{
+    ProvenanceRepository, SeaOrmProvenanceRepository, StoredProvenance,
+};
 pub use repository::{
     BranchHeader, BranchReader, BranchRepository, BranchRepositoryError, BranchRepositoryResult,
     BranchWriter, IndexedValue, PageCursor, SeaOrmBranchRepository, MAX_BULK_RESULTS,
