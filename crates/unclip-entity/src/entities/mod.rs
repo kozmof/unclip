@@ -2,6 +2,9 @@
 
 pub mod prelude;
 
+pub mod alignment_candidates;
+pub mod alignments;
+
 pub mod branch_o2m_values;
 pub mod branch_o2o_values;
 pub mod branch_references;
@@ -16,9 +19,14 @@ pub mod frame_slots;
 pub mod frame_versions;
 pub mod frames;
 pub mod measurement_frames;
+pub mod observations;
+pub mod observed_relations;
+pub mod observed_units;
 pub mod pattern_entries;
 pub mod provenance;
 pub mod provenance_inputs;
+pub mod ranking_entries;
+pub mod rankings;
 pub mod relation_properties;
 pub mod relations;
 pub mod selection_packets;
