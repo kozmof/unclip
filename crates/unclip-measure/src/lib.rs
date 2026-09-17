@@ -1,4 +1,12 @@
 //! Typed, sparse measurement profiles that preserve sensor disagreement.
+//!
+//! Profiles intentionally have no scalar conversion.
+//!
+//! ```compile_fail
+//! use unclip_measure::MeasurementProfile;
+//!
+//! let score: f64 = MeasurementProfile::default().into();
+//! ```
 
 #![forbid(unsafe_code)]
 

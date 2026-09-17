@@ -1,4 +1,27 @@
 //! Epistemic operation types, tracked inputs, and provenance.
+//!
+//! Derived values cannot be constructed or relabeled directly outside this
+//! crate; operation-specific tokens must emit them.
+//!
+//! ```compile_fail
+//! use std::marker::PhantomData;
+//! use unclip_epistemic::{ops, Derived};
+//!
+//! let _ = Derived::<u32, ops::Calculation> {
+//!     id: todo!(),
+//!     value: 1,
+//!     provenance: todo!(),
+//!     operation: PhantomData,
+//! };
+//! ```
+//!
+//! ```compile_fail
+//! use unclip_epistemic::{Calculated, Inferred};
+//!
+//! fn relabel(value: Inferred<u32>) -> Calculated<u32> {
+//!     value
+//! }
+//! ```
 
 #![forbid(unsafe_code)]
 
@@ -11,6 +34,58 @@ use std::{
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
+
+/// Canonicalize and hash plugin parameters with a stable FNV-1a digest.
+///
+/// Object keys are sorted recursively, so insertion order does not affect the
+/// result. The digest is for reproducibility checks, not cryptographic use.
+pub fn hash_params(params: &serde_json::Value) -> ParameterHash {
+    let mut canonical = String::new();
+    write_canonical_json(params, &mut canonical);
+    let hash = canonical
+        .bytes()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        });
+    ParameterHash::new(format!("fnv1a64:{hash:016x}"))
+}
+
+fn write_canonical_json(value: &serde_json::Value, output: &mut String) {
+    match value {
+        serde_json::Value::Null => output.push_str("null"),
+        serde_json::Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        serde_json::Value::Number(value) => output.push_str(&value.to_string()),
+        serde_json::Value::String(value) => {
+            output
+                .push_str(&serde_json::to_string(value).expect("string serialization cannot fail"));
+        }
+        serde_json::Value::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                write_canonical_json(value, output);
+            }
+            output.push(']');
+        }
+        serde_json::Value::Object(values) => {
+            output.push('{');
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output
+                    .push_str(&serde_json::to_string(key).expect("key serialization cannot fail"));
+                output.push(':');
+                write_canonical_json(value, output);
+            }
+            output.push('}');
+        }
+    }
+}
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -278,6 +353,17 @@ mod tests {
         let result = CalculationToken::from_harness(metadata("result"), dependencies).emit(42);
         assert_eq!(result.provenance().operation, Operation::Calculated);
         assert_eq!(result.provenance().inputs, vec![DerivedId::new("source")]);
+    }
+
+    #[test]
+    fn parameter_hash_is_recursive_and_order_independent() {
+        let left = serde_json::json!({"z": 1, "nested": {"b": 2, "a": [3, 4]}});
+        let right = serde_json::json!({"nested": {"a": [3, 4], "b": 2}, "z": 1});
+        assert_eq!(hash_params(&left), hash_params(&right));
+        assert_ne!(
+            hash_params(&left),
+            hash_params(&serde_json::json!({"z": 2}))
+        );
     }
 
     #[test]

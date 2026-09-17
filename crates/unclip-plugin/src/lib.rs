@@ -5,7 +5,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
-use semver::Version;
+use semver::{Version, VersionReq};
 use thiserror::Error;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
@@ -23,6 +23,12 @@ pub enum PluginError {
     DuplicatePlugin(PluginId),
     #[error("configured plugin is not registered: {0}")]
     MissingPlugin(PluginId),
+    #[error("plugin {plugin} version {actual} does not satisfy {required}")]
+    IncompatibleVersion {
+        plugin: PluginId,
+        required: VersionReq,
+        actual: Version,
+    },
     #[error("plugin {plugin} does not support measurement kind {kind:?}")]
     UnsupportedKind {
         plugin: PluginId,
@@ -236,6 +242,42 @@ pub trait NullModel: Send + Sync {
     fn evaluate(&self, candidate: &serde_json::Value) -> Result<Reading>;
 }
 
+/// Reusable checks for first-party and cooperative third-party sensors.
+pub mod conformance {
+    use super::{Calculated, Measurement, MeasurementKind, Result, Sensor};
+
+    /// Run a sensor twice through the supplied fixture and assert the common
+    /// deterministic and descriptor contracts.
+    pub fn assert_sensor<F>(sensor: &dyn Sensor, mut run: F)
+    where
+        F: FnMut(&dyn Sensor) -> Result<Vec<Calculated<Measurement>>>,
+    {
+        let first = run(sensor).expect("sensor fixture failed on first run");
+        let second = run(sensor).expect("sensor fixture failed on repeated run");
+        assert_eq!(first, second, "sensor output is not deterministic");
+
+        for derived in &first {
+            if let super::Reading::Value { value } = &derived.value().reading {
+                let kind: MeasurementKind = value.kind();
+                assert!(
+                    sensor.descriptor().produces.contains(&kind),
+                    "sensor emitted undeclared measurement kind {kind:?}"
+                );
+            }
+            assert_eq!(
+                derived.value().sensor,
+                sensor.descriptor().id,
+                "measurement carries the wrong sensor id"
+            );
+            assert_eq!(
+                derived.value().sensor_version,
+                sensor.descriptor().version,
+                "measurement carries the wrong sensor version"
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Registry {
     sensors: BTreeMap<PluginId, Arc<dyn Sensor>>,
@@ -295,9 +337,15 @@ impl Registry {
 
     pub fn resolve(&self, profile: &EngineProfile) -> Result<RunPlan> {
         Ok(RunPlan {
-            sensors: resolve_ids(&self.sensors, &profile.sensors)?,
-            inferrers: resolve_ids(&self.inferrers, &profile.inferrers)?,
-            comparators: resolve_ids(&self.comparators, &profile.comparators)?,
+            sensors: resolve_ids(&self.sensors, &profile.sensors, |plugin| {
+                &plugin.descriptor().version
+            })?,
+            inferrers: resolve_ids(&self.inferrers, &profile.inferrers, |plugin| {
+                &plugin.descriptor().version
+            })?,
+            comparators: resolve_ids(&self.comparators, &profile.comparators, |plugin| {
+                &plugin.descriptor().version
+            })?,
         })
     }
 }
@@ -316,23 +364,48 @@ fn insert_unique<T: ?Sized>(
 
 fn resolve_ids<T: ?Sized>(
     entries: &BTreeMap<PluginId, Arc<T>>,
-    ids: &[PluginId],
+    selections: &[PluginSelection],
+    version_of: impl Fn(&T) -> &Version,
 ) -> Result<Vec<Arc<T>>> {
-    ids.iter()
-        .map(|id| {
-            entries
-                .get(id)
-                .cloned()
-                .ok_or_else(|| PluginError::MissingPlugin(id.clone()))
+    selections
+        .iter()
+        .map(|selection| {
+            let plugin = entries
+                .get(&selection.id)
+                .ok_or_else(|| PluginError::MissingPlugin(selection.id.clone()))?;
+            let actual = version_of(plugin);
+            if !selection.version.matches(actual) {
+                return Err(PluginError::IncompatibleVersion {
+                    plugin: selection.id.clone(),
+                    required: selection.version.clone(),
+                    actual: actual.clone(),
+                });
+            }
+            Ok(plugin.clone())
         })
         .collect()
 }
 
+#[derive(Debug, Clone)]
+pub struct PluginSelection {
+    pub id: PluginId,
+    pub version: VersionReq,
+}
+
+impl PluginSelection {
+    pub fn any(id: impl Into<String>) -> Self {
+        Self {
+            id: PluginId::new(id),
+            version: VersionReq::STAR,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EngineProfile {
-    pub sensors: Vec<PluginId>,
-    pub inferrers: Vec<PluginId>,
-    pub comparators: Vec<PluginId>,
+    pub sensors: Vec<PluginSelection>,
+    pub inferrers: Vec<PluginSelection>,
+    pub comparators: Vec<PluginSelection>,
 }
 
 pub struct RunPlan {
@@ -377,6 +450,12 @@ mod tests {
     }
 
     #[test]
+    fn conformance_accepts_a_deterministic_empty_sensor() {
+        let sensor = sensor();
+        conformance::assert_sensor(sensor.as_ref(), |_| Ok(Vec::new()));
+    }
+
+    #[test]
     fn registration_rejects_duplicate_ids() {
         let mut registry = Registry::default();
         registry.register_sensor(sensor()).unwrap();
@@ -387,10 +466,27 @@ mod tests {
     }
 
     #[test]
+    fn resolution_rejects_incompatible_versions() {
+        let mut registry = Registry::default();
+        registry.register_sensor(sensor()).unwrap();
+        let profile = EngineProfile {
+            sensors: vec![PluginSelection {
+                id: PluginId::new("sensor.stub"),
+                version: VersionReq::parse("^2").unwrap(),
+            }],
+            ..EngineProfile::default()
+        };
+        assert!(matches!(
+            registry.resolve(&profile).err().unwrap(),
+            PluginError::IncompatibleVersion { .. }
+        ));
+    }
+
+    #[test]
     fn resolution_reports_missing_plugins() {
         let registry = Registry::default();
         let profile = EngineProfile {
-            sensors: vec![PluginId::new("sensor.missing")],
+            sensors: vec![PluginSelection::any("sensor.missing")],
             ..EngineProfile::default()
         };
         assert_eq!(

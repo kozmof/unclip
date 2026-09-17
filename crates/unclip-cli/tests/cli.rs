@@ -229,6 +229,15 @@ fn level_plugins_does_not_require_a_database() {
     assert!(!db.path().exists());
 }
 
+#[test]
+fn level_help_lists_plugins_command() {
+    let db = TempDb::new();
+    let out = unclip(&db.path(), &["level", "--help"]);
+    assert!(out.status.success(), "help failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("plugins"));
+    assert!(!db.path().exists());
+}
+
 /// Adding the same path twice is a usage error.
 #[test]
 fn duplicate_add_is_rejected() {
