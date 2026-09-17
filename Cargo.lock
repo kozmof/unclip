@@ -2537,6 +2537,7 @@ dependencies = [
 name = "unclip-engine"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "unclip-domain",
  "unclip-epistemic",
  "unclip-infer",

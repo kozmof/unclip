@@ -10,6 +10,7 @@ keywords.workspace = true
 description = "Stage orchestration and replay planning for the Unclip leveling engine."
 
 [dependencies]
+serde_json.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-infer.workspace = true
