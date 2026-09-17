@@ -3,11 +3,12 @@ use serde_json::json;
 use unclip_domain::{FrameId, UnitId};
 use unclip_epistemic::{DerivedId, FrameVersion, ParameterHash, PluginId};
 use unclip_measure::{
-    Measurement, MeasurementContext, MeasurementKind, MeasurementProfile, MeasurementValue, Reading,
+    EmpiricalStructure, Measurement, MeasurementContext, MeasurementKind, MeasurementProfile,
+    MeasurementValue, Reading,
 };
 use unclip_store::{
-    connect_and_migrate, MeasurementProfileHeader, MeasurementRecord, MeasurementRepository,
-    SeaOrmMeasurementRepository, SensorRunRecord, StoreError,
+    connect_and_migrate, EmpiricalStructureRecord, MeasurementProfileHeader, MeasurementRecord,
+    MeasurementRepository, SeaOrmMeasurementRepository, SensorRunRecord, StoreError,
 };
 
 async fn seed_parents(db: &DatabaseConnection) {
@@ -170,4 +171,36 @@ async fn missing_nested_provenance_rolls_back_the_profile() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn empirical_structure_round_trips_with_profile_link() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let repo = SeaOrmMeasurementRepository::new(db);
+    repo.insert_profile(header("structure-profile"), Vec::new())
+        .await
+        .unwrap();
+    let structure = EmpiricalStructureRecord {
+        id: "structure".into(),
+        profile_id: Some("structure-profile".into()),
+        provenance: DerivedId::new("value-prov"),
+        created_at: "now".into(),
+        structure: EmpiricalStructure {
+            kind: "cluster".into(),
+            value: json!({"members": ["a", "b"]}),
+        },
+    };
+
+    repo.insert_empirical_structure(structure.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo.get_empirical_structure("structure")
+            .await
+            .unwrap()
+            .unwrap(),
+        structure
+    );
 }

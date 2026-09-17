@@ -8,10 +8,13 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use unclip_domain::FrameId;
-use unclip_entity::{frame_versions, measurement_profiles, measurements, sensor_runs};
+use unclip_entity::{
+    empirical_structures, frame_versions, measurement_profiles, measurements, sensor_runs,
+};
 use unclip_epistemic::{DerivedId, FrameVersion, ParameterHash, PluginId};
 use unclip_measure::{
-    Measurement, MeasurementContext, MeasurementKind, MeasurementProfile, MeasurementValue, Reading,
+    EmpiricalStructure, Measurement, MeasurementContext, MeasurementKind, MeasurementProfile,
+    MeasurementValue, Reading,
 };
 
 use crate::{StoreError, StoreResult};
@@ -50,6 +53,15 @@ pub struct MeasurementProfileHeader {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmpiricalStructureRecord {
+    pub id: String,
+    pub profile_id: Option<String>,
+    pub provenance: DerivedId,
+    pub created_at: String,
+    pub structure: EmpiricalStructure,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredContext {
     values: MeasurementContext,
@@ -65,6 +77,12 @@ pub trait MeasurementRepository: Sync {
         measurements: Vec<MeasurementRecord>,
     ) -> StoreResult<()>;
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>>;
+    async fn insert_empirical_structure(&self, record: EmpiricalStructureRecord)
+        -> StoreResult<()>;
+    async fn get_empirical_structure(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<EmpiricalStructureRecord>>;
 }
 
 pub struct SeaOrmMeasurementRepository {
@@ -360,5 +378,59 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
         Ok(Some(MeasurementProfile {
             measurements: hydrated,
         }))
+    }
+    async fn insert_empirical_structure(
+        &self,
+        record: EmpiricalStructureRecord,
+    ) -> StoreResult<()> {
+        if record.id.is_empty() {
+            return Err(invalid("empirical structure id must not be empty"));
+        }
+        if record.structure.kind.is_empty() {
+            return Err(invalid("empirical structure kind must not be empty"));
+        }
+        if empirical_structures::Entity::find_by_id(&record.id)
+            .one(&self.db)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::AlreadyExists { path: record.id });
+        }
+        empirical_structures::Entity::insert(empirical_structures::ActiveModel {
+            id: Set(record.id),
+            profile_id: Set(record.profile_id),
+            kind: Set(record.structure.kind),
+            value_json: Set(
+                serde_json::to_string(&record.structure.value).map_err(anyhow::Error::from)?
+            ),
+            provenance_id: Set(record.provenance.0),
+            created_at: Set(record.created_at),
+        })
+        .exec(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_empirical_structure(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<EmpiricalStructureRecord>> {
+        empirical_structures::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .map(|row| {
+                Ok(EmpiricalStructureRecord {
+                    id: row.id,
+                    profile_id: row.profile_id,
+                    provenance: DerivedId::new(row.provenance_id),
+                    created_at: row.created_at,
+                    structure: EmpiricalStructure {
+                        kind: row.kind,
+                        value: serde_json::from_str(&row.value_json)
+                            .context("invalid stored empirical structure")?,
+                    },
+                })
+            })
+            .transpose()
     }
 }

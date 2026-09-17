@@ -31,7 +31,7 @@ pub use history::{
     now, HistoryRepository, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,
 };
 pub use measurement_repository::{
-    MeasurementProfileHeader, MeasurementRecord, MeasurementRepository,
+    EmpiricalStructureRecord, MeasurementProfileHeader, MeasurementRecord, MeasurementRepository,
     SeaOrmMeasurementRepository, SensorRunRecord,
 };
 pub use observation_repository::{ObservationRepository, SeaOrmObservationRepository};
