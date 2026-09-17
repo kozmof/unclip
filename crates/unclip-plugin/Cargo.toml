@@ -1,0 +1,20 @@
+[package]
+name = "unclip-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Plugin contracts, contexts, descriptors, and registry for Unclip."
+
+[dependencies]
+async-trait.workspace = true
+semver.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unclip-domain.workspace = true
+unclip-epistemic.workspace = true
+unclip-measure.workspace = true
+unclip-observe.workspace = true

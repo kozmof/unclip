@@ -229,6 +229,18 @@ pub(crate) enum Command {
 
     /// List stored pattern entries.
     Patterns,
+
+    /// Semantic leveling engine commands.
+    Level {
+        #[command(subcommand)]
+        action: LevelAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum LevelAction {
+    /// List the leveling plugins compiled into this binary.
+    Plugins,
 }
 
 #[derive(Subcommand)]

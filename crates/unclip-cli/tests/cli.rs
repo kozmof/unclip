@@ -220,6 +220,15 @@ fn non_init_requires_existing_db() {
     assert!(stderr(&out).contains("database not found"));
 }
 
+#[test]
+fn level_plugins_does_not_require_a_database() {
+    let db = TempDb::new();
+    let out = unclip(&db.path(), &["level", "plugins"]);
+    assert!(out.status.success(), "plugins failed: {}", stderr(&out));
+    assert!(stdout(&out).contains("no leveling plugins registered"));
+    assert!(!db.path().exists());
+}
+
 /// Adding the same path twice is a usage error.
 #[test]
 fn duplicate_add_is_rejected() {

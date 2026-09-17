@@ -1832,6 +1832,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -2505,6 +2509,7 @@ dependencies = [
  "unclip-core",
  "unclip-io",
  "unclip-match",
+ "unclip-plugin",
  "unclip-sample",
  "unclip-store",
 ]
@@ -2520,11 +2525,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "unclip-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unclip-epistemic",
+]
+
+[[package]]
 name = "unclip-entity"
 version = "0.1.0"
 dependencies = [
  "sea-orm",
  "serde",
+]
+
+[[package]]
+name = "unclip-epistemic"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2550,6 +2573,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "unclip-measure"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "unclip-domain",
+ "unclip-epistemic",
+ "unclip-observe",
+]
+
+[[package]]
 name = "unclip-migration"
 version = "0.1.0"
 dependencies = [
@@ -2557,6 +2592,30 @@ dependencies = [
  "sea-orm",
  "sea-orm-migration",
  "tokio",
+]
+
+[[package]]
+name = "unclip-observe"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unclip-domain",
+ "unclip-epistemic",
+]
+
+[[package]]
+name = "unclip-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "semver",
+ "serde_json",
+ "thiserror",
+ "unclip-domain",
+ "unclip-epistemic",
+ "unclip-measure",
+ "unclip-observe",
 ]
 
 [[package]]

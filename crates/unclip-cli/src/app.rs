@@ -5,7 +5,7 @@ use clap::Parser;
 use unclip_io::split_frame_selector;
 use unclip_store::FrameRepository;
 
-use crate::cli::{Cli, Command, PatternAction};
+use crate::cli::{Cli, Command, LevelAction, PatternAction};
 use crate::{commands, db, matching, sampling, usage};
 
 use commands::QueryInput;
@@ -13,6 +13,14 @@ use sampling::{ComposeInput, FilterInput, SampleInput};
 
 pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if matches!(
+        &cli.command,
+        Command::Level {
+            action: LevelAction::Plugins
+        }
+    ) {
+        return crate::leveling::plugins();
+    }
     // Only `init` may create the database; other commands require it to exist.
     let create = matches!(cli.command, Command::Init);
     let repos = db::open_repos(&cli.db, create).await?;
@@ -204,6 +212,7 @@ pub async fn run() -> anyhow::Result<()> {
             }
         },
         Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,
+        Command::Level { .. } => unreachable!("level commands return before opening repositories"),
     }
 
     Ok(())

@@ -9,6 +9,11 @@ members = [
     "crates/unclip-io",
     "crates/unclip-match",
     "crates/unclip-cli",
+    "crates/unclip-epistemic",
+    "crates/unclip-domain",
+    "crates/unclip-observe",
+    "crates/unclip-measure",
+    "crates/unclip-plugin",
 ]
 
 [workspace.package]
@@ -31,6 +36,11 @@ unclip-store = { path = "crates/unclip-store", version = "0.1.0" }
 unclip-sample = { path = "crates/unclip-sample", version = "0.1.0" }
 unclip-io = { path = "crates/unclip-io", version = "0.1.0" }
 unclip-match = { path = "crates/unclip-match", version = "0.1.0" }
+unclip-epistemic = { path = "crates/unclip-epistemic", version = "0.1.0" }
+unclip-domain = { path = "crates/unclip-domain", version = "0.1.0" }
+unclip-observe = { path = "crates/unclip-observe", version = "0.1.0" }
+unclip-measure = { path = "crates/unclip-measure", version = "0.1.0" }
+unclip-plugin = { path = "crates/unclip-plugin", version = "0.1.0" }
 
 # CLI / async
 clap = { version = "4", features = ["derive"] }
@@ -54,6 +64,7 @@ sea-orm-migration = { version = "1.1", features = [
 serde = { version = "1", features = ["derive", "rc"] }
 serde_norway = "0.9"
 serde_json = "1"
+semver = { version = "1", features = ["serde"] }
 
 # Errors
 anyhow = "1"
