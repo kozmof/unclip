@@ -15,6 +15,7 @@ mod m20260918_000008_create_provenance_and_runs;
 mod m20260918_000009_create_domain;
 mod m20260918_000010_create_measurement_frames;
 mod m20260918_000011_create_observations;
+mod m20260918_000012_create_measurements;
 
 struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260918_000009_create_domain::Migration),
             Box::new(m20260918_000010_create_measurement_frames::Migration),
             Box::new(m20260918_000011_create_observations::Migration),
+            Box::new(m20260918_000012_create_measurements::Migration),
         ]
     }
 }
@@ -563,6 +565,107 @@ mod tests {
             assert!(
                 db.execute_unprepared(invalid).await.is_err(),
                 "invalid observation row unexpectedly succeeded: {invalid}"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn measurements_keep_typed_values_and_sparse_statuses_distinct() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, None).await.unwrap();
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            r#"INSERT INTO engine_runs
+               (id, resolved_plan_json, status, started_at, completed_at)
+             VALUES ('run-m', '{}', 'completed', 't', 't2');
+             INSERT INTO provenance
+               (derived_id, run_id, operation, producer, algorithm, version,
+                params_json, params_hash, timestamp) VALUES
+               ('p-profile', 'run-m', 'calculated', 'engine', 'profile',
+                '0.1.0', '{}', 'h1', 't'),
+               ('p-zero', 'run-m', 'calculated', 'sensor.coverage', 'coverage',
+                '0.1.0', '{}', 'h2', 't'),
+               ('p-na', 'run-m', 'calculated', 'sensor.kendall', 'kendall',
+                '0.1.0', '{}', 'h3', 't'),
+               ('p-g', 'run-m', 'calculated', 'engine', 'structure',
+                '0.1.0', '{}', 'h4', 't');
+             INSERT INTO domains (id, created_at) VALUES ('coffee', 't');
+             INSERT INTO domain_versions (id, domain_id, version, created_at)
+               VALUES ('coffee@1', 'coffee', '1', 't');
+             INSERT INTO units (domain_version_id, id, kind)
+               VALUES ('coffee@1', 'sensory', 'atomic_meaning');
+             INSERT INTO measurement_frames (id, domain_id, created_at)
+               VALUES ('coffee.general', 'coffee', 't');
+             INSERT INTO frame_versions
+               (id, frame_id, version, domain_version_id, created_at)
+               VALUES ('coffee.general@1', 'coffee.general', '1', 'coffee@1', 't');
+             INSERT INTO frame_axes
+               (frame_version_id, domain_version_id, position, unit_id)
+               VALUES ('coffee.general@1', 'coffee@1', 0, 'sensory');
+             INSERT INTO sensor_runs
+               (id, engine_run_id, sensor_id, sensor_version, params_json,
+                params_hash, status, started_at, completed_at)
+               VALUES ('sr1', 'run-m', 'sensor.coverage', '0.1.0', '{}', 'h2',
+                       'completed', 't', 't2');
+             INSERT INTO measurement_profiles
+               (id, engine_run_id, frame_version_id, provenance_id, created_at)
+               VALUES ('mp1', 'run-m', 'coffee.general@1', 'p-profile', 't');
+             INSERT INTO measurements
+               (id, profile_id, sensor_run_id, provenance_id, kind, status,
+                value_json, sample_count) VALUES
+               ('m-zero', 'mp1', 'sr1', 'p-zero', 'scalar', 'value', '0.0', 1),
+               ('m-na', 'mp1', 'sr1', 'p-na', 'scalar', 'not_applicable',
+                NULL, 0);
+             INSERT INTO empirical_structures
+               (id, profile_id, kind, value_json, provenance_id, created_at)
+               VALUES ('g1', 'mp1', 'fixture', '{"nodes":[]}', 'p-g', 't');"#,
+        )
+        .await
+        .unwrap();
+
+        let zero = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT status, value_json FROM measurements WHERE id = 'm-zero'",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(zero.try_get::<String>("", "status").unwrap(), "value");
+        assert_eq!(zero.try_get::<String>("", "value_json").unwrap(), "0.0");
+
+        let sparse = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS count FROM measurements
+                 WHERE status != 'value' AND value_json IS NULL",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "count")
+            .unwrap();
+        assert_eq!(sparse, 1);
+
+        for invalid in [
+            "INSERT INTO measurements
+               (id, profile_id, sensor_run_id, provenance_id, kind, status)
+             VALUES ('bad-value', 'mp1', 'sr1', 'p-g', 'scalar', 'value')",
+            "INSERT INTO measurements
+               (id, profile_id, sensor_run_id, provenance_id, kind, status,
+                value_json)
+             VALUES ('bad-sparse', 'mp1', 'sr1', 'p-g', 'scalar',
+                     'not_measured', '0')",
+            "INSERT INTO measurements
+               (id, profile_id, sensor_run_id, provenance_id, kind, status)
+             VALUES ('bad-kind', 'mp1', 'sr1', 'p-g', 'score',
+                     'not_measured')",
+        ] {
+            assert!(
+                db.execute_unprepared(invalid).await.is_err(),
+                "invalid measurement unexpectedly succeeded: {invalid}"
             );
         }
     }
