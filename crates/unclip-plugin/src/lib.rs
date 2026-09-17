@@ -339,10 +339,22 @@ pub trait NullModel: Send + Sync {
 
 /// Reusable checks for first-party and cooperative third-party sensors.
 pub mod conformance {
-    use super::{Calculated, Measurement, MeasurementKind, Result, Sensor};
+    use super::{
+        classify_sensor, Calculated, MeasureCtx, Measurement, MeasurementKind, Result, Sensor,
+        SensorDecision,
+    };
 
     /// Run a sensor twice through the supplied fixture and assert the common
     /// deterministic and descriptor contracts.
+    pub fn assert_planning(
+        sensor: &dyn Sensor,
+        ctx: &MeasureCtx<'_>,
+        scheduled: bool,
+        expected: SensorDecision,
+    ) {
+        assert_eq!(classify_sensor(sensor, ctx, scheduled), expected);
+    }
+
     pub fn assert_sensor<F>(sensor: &dyn Sensor, mut run: F)
     where
         F: FnMut(&dyn Sensor) -> Result<Vec<Calculated<Measurement>>>,
@@ -634,6 +646,92 @@ mod tests {
             derived.provenance().frame_version,
             Some(FrameVersion::new("1"))
         );
+    }
+
+    #[test]
+    fn conformance_accepts_a_deterministic_scalar_sensor() {
+        use std::collections::BTreeMap;
+        use unclip_domain::{DomainId, FrameId};
+        use unclip_epistemic::{
+            DerivedId, DomainVersion, EmitMetadata, FrameVersion, ParameterHash, Timestamp,
+        };
+        use unclip_measure::{MeasurementContext, MeasurementValue};
+
+        struct ScalarSensor(SensorDescriptor);
+        impl Sensor for ScalarSensor {
+            fn descriptor(&self) -> &SensorDescriptor {
+                &self.0
+            }
+
+            fn applies_to(&self, _ctx: &MeasureCtx<'_>) -> Applicability {
+                Applicability::Applicable
+            }
+
+            fn measure(
+                &self,
+                _ctx: &MeasureCtx<'_>,
+                token: CalculationToken,
+            ) -> Result<Vec<Calculated<Measurement>>> {
+                Ok(vec![token.emit(Measurement {
+                    sensor: self.0.id.clone(),
+                    sensor_version: self.0.version.clone(),
+                    reading: Reading::Value {
+                        value: MeasurementValue::Scalar(0.0),
+                    },
+                    confidence: Some(1.0),
+                    sample_count: Some(1),
+                    context: MeasurementContext::default(),
+                })])
+            }
+        }
+
+        let sensor = ScalarSensor(SensorDescriptor {
+            id: PluginId::new("sensor.scalar"),
+            version: Version::new(0, 1, 0),
+            applicability: &[],
+            evidence: &[],
+            produces: &[MeasurementKind::Scalar],
+            params_schema: "{}",
+        });
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("1"),
+            axes: Vec::new(),
+        };
+        let params = serde_json::json!({});
+        let ctx = MeasureCtx::new(
+            &domain,
+            &frame,
+            &[],
+            &[],
+            &[],
+            &params,
+            DependencyCollector::default(),
+        );
+        conformance::assert_sensor(&sensor, |plugin| {
+            plugin.measure(
+                &ctx,
+                ctx.calculation_token(EmitMetadata {
+                    id: DerivedId::new("measurement"),
+                    producer: PluginId::new("sensor.scalar"),
+                    algorithm: "scalar".into(),
+                    version: Version::new(0, 1, 0),
+                    params: serde_json::json!({}),
+                    params_hash: ParameterHash::new("hash"),
+                    source: None,
+                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    domain_version: None,
+                    frame_version: None,
+                    model: None,
+                }),
+            )
+        });
     }
 
     #[test]

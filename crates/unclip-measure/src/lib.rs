@@ -17,10 +17,10 @@
 
 #![forbid(unsafe_code)]
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use unclip_epistemic::{PluginId, Provenance};
+use unclip_epistemic::PluginId;
 use unclip_observe::PartialRanking;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -90,7 +90,6 @@ pub struct Measurement {
     pub confidence: Option<f64>,
     pub sample_count: Option<usize>,
     pub context: MeasurementContext,
-    pub provenance: Arc<Provenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

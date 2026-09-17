@@ -29,7 +29,10 @@ use std::{
     collections::BTreeSet,
     fmt,
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use semver::Version;
@@ -279,6 +282,7 @@ pub struct EmitMetadata {
 pub struct EmitToken<O: OperationKind> {
     metadata: EmitMetadata,
     dependencies: DependencyCollector,
+    emitted: AtomicUsize,
     operation: PhantomData<O>,
 }
 
@@ -288,28 +292,34 @@ impl<O: OperationKind> EmitToken<O> {
         Self {
             metadata,
             dependencies,
+            emitted: AtomicUsize::new(0),
             operation: PhantomData,
         }
     }
 
-    pub fn emit<T>(self, value: T) -> Derived<T, O> {
-        let metadata = self.metadata;
+    pub fn emit<T>(&self, value: T) -> Derived<T, O> {
+        let sequence = self.emitted.fetch_add(1, Ordering::Relaxed);
+        let id = if sequence == 0 {
+            self.metadata.id.clone()
+        } else {
+            DerivedId::new(format!("{}#{sequence}", self.metadata.id))
+        };
         let provenance = Provenance {
             operation: O::OPERATION,
-            producer: metadata.producer,
-            algorithm: metadata.algorithm,
-            version: metadata.version,
-            params: metadata.params,
-            params_hash: metadata.params_hash,
-            inputs: self.dependencies.take(),
-            source: metadata.source,
-            timestamp: metadata.timestamp,
-            domain_version: metadata.domain_version,
-            frame_version: metadata.frame_version,
-            model: metadata.model,
+            producer: self.metadata.producer.clone(),
+            algorithm: self.metadata.algorithm.clone(),
+            version: self.metadata.version.clone(),
+            params: self.metadata.params.clone(),
+            params_hash: self.metadata.params_hash.clone(),
+            inputs: self.dependencies.snapshot(),
+            source: self.metadata.source.clone(),
+            timestamp: self.metadata.timestamp.clone(),
+            domain_version: self.metadata.domain_version.clone(),
+            frame_version: self.metadata.frame_version.clone(),
+            model: self.metadata.model.clone(),
         };
         Derived {
-            id: metadata.id,
+            id,
             value,
             provenance: Arc::new(provenance),
             operation: PhantomData,
@@ -364,6 +374,16 @@ mod tests {
             hash_params(&left),
             hash_params(&serde_json::json!({"z": 2}))
         );
+    }
+
+    #[test]
+    fn one_token_emits_stable_unique_ids() {
+        let token =
+            CalculationToken::from_harness(metadata("measurement"), DependencyCollector::default());
+        let first = token.emit(1);
+        let second = token.emit(2);
+        assert_eq!(first.id(), &DerivedId::new("measurement"));
+        assert_eq!(second.id(), &DerivedId::new("measurement#1"));
     }
 
     #[test]
