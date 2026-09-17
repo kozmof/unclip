@@ -11,12 +11,14 @@ use std::sync::Arc;
 use unclip_plugin::{Registry, Result};
 
 mod coverage;
+mod kendall;
 mod lehmer;
 mod permutation;
 mod residual;
 mod support;
 
 pub use coverage::CoverageSensor;
+pub use kendall::KendallSensor;
 pub use lehmer::LehmerSensor;
 pub use permutation::PermutationSensor;
 pub use residual::ResidualSensor;
@@ -26,7 +28,8 @@ pub fn register_all(registry: &mut Registry) -> Result<()> {
     registry.register_sensor(Arc::new(CoverageSensor::default()))?;
     registry.register_sensor(Arc::new(ResidualSensor::default()))?;
     registry.register_sensor(Arc::new(PermutationSensor::default()))?;
-    registry.register_sensor(Arc::new(LehmerSensor::default()))
+    registry.register_sensor(Arc::new(LehmerSensor::default()))?;
+    registry.register_sensor(Arc::new(KendallSensor::default()))
 }
 
 #[cfg(test)]
@@ -51,6 +54,6 @@ mod tests {
     fn registration_is_explicit() {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
-        assert_eq!(registry.sensors().count(), 4);
+        assert_eq!(registry.sensors().count(), 5);
     }
 }

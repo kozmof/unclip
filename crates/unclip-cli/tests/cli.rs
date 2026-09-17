@@ -230,6 +230,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("sensor.residual"));
     assert!(plugins.contains("sensor.permutation"));
     assert!(plugins.contains("sensor.lehmer"));
+    assert!(plugins.contains("sensor.kendall"));
     assert!(!db.path().exists());
 }
 
