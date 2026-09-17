@@ -20,8 +20,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use unclip_domain::UnitId;
 use unclip_epistemic::PluginId;
-use unclip_observe::PartialRanking;
+use unclip_observe::ObservedUnitId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +38,22 @@ pub enum MeasurementKind {
     Structured,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RankedState {
+    pub tiers: Vec<Vec<UnitId>>,
+    pub unknown: Vec<UnitId>,
+    pub unresolved: Vec<ObservedUnitId>,
+}
+
+impl RankedState {
+    pub fn is_total(&self, frame_size: usize) -> bool {
+        self.unknown.is_empty()
+            && self.unresolved.is_empty()
+            && self.tiers.iter().all(|tier| tier.len() == 1)
+            && self.tiers.len() == frame_size
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum MeasurementValue {
@@ -46,7 +63,7 @@ pub enum MeasurementValue {
     Distribution(Vec<(String, f64)>),
     Events(Vec<serde_json::Value>),
     Graph(serde_json::Value),
-    Ranking(PartialRanking),
+    Ranking(RankedState),
     Partition(Vec<Vec<String>>),
     Structured(serde_json::Value),
 }
