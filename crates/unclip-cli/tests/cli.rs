@@ -231,6 +231,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("sensor.permutation"));
     assert!(plugins.contains("sensor.lehmer"));
     assert!(plugins.contains("sensor.kendall"));
+    assert!(plugins.contains("sensor.rbo"));
     assert!(!db.path().exists());
 }
 

@@ -14,6 +14,7 @@ mod coverage;
 mod kendall;
 mod lehmer;
 mod permutation;
+mod rbo;
 mod residual;
 mod support;
 
@@ -21,6 +22,7 @@ pub use coverage::CoverageSensor;
 pub use kendall::KendallSensor;
 pub use lehmer::LehmerSensor;
 pub use permutation::PermutationSensor;
+pub use rbo::RboSensor;
 pub use residual::ResidualSensor;
 
 /// Register every built-in calculation sensor.
@@ -29,7 +31,8 @@ pub fn register_all(registry: &mut Registry) -> Result<()> {
     registry.register_sensor(Arc::new(ResidualSensor::default()))?;
     registry.register_sensor(Arc::new(PermutationSensor::default()))?;
     registry.register_sensor(Arc::new(LehmerSensor::default()))?;
-    registry.register_sensor(Arc::new(KendallSensor::default()))
+    registry.register_sensor(Arc::new(KendallSensor::default()))?;
+    registry.register_sensor(Arc::new(RboSensor::default()))
 }
 
 #[cfg(test)]
@@ -54,6 +57,6 @@ mod tests {
     fn registration_is_explicit() {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
-        assert_eq!(registry.sensors().count(), 5);
+        assert_eq!(registry.sensors().count(), 6);
     }
 }
