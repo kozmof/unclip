@@ -117,9 +117,13 @@ impl Sensor for PermutationSensor {
     }
 }
 
-type AlignmentIndex = BTreeMap<ObservationId, BTreeMap<ObservedUnitId, BTreeSet<UnitId>>>;
+pub(crate) type AlignmentIndex =
+    BTreeMap<ObservationId, BTreeMap<ObservedUnitId, BTreeSet<UnitId>>>;
 
-fn alignment_index(ctx: &MeasureCtx<'_>, frame_units: &BTreeSet<UnitId>) -> AlignmentIndex {
+pub(crate) fn alignment_index(
+    ctx: &MeasureCtx<'_>,
+    frame_units: &BTreeSet<UnitId>,
+) -> AlignmentIndex {
     let mut index: AlignmentIndex = BTreeMap::new();
     for tracked in ctx.alignments() {
         let alignment = ctx.read(tracked);
@@ -136,7 +140,7 @@ fn alignment_index(ctx: &MeasureCtx<'_>, frame_units: &BTreeSet<UnitId>) -> Alig
     index
 }
 
-fn ranked_state(
+pub(crate) fn ranked_state(
     ranking: &unclip_observe::PartialRanking,
     alignment: &BTreeMap<ObservedUnitId, BTreeSet<UnitId>>,
     frame_units: &BTreeSet<UnitId>,
@@ -200,6 +204,7 @@ mod tests {
     use unclip_plugin::conformance;
 
     use super::*;
+    use crate::LehmerSensor;
 
     fn metadata(id: &str, producer: &str) -> EmitMetadata {
         let params = serde_json::json!({});
@@ -354,5 +359,16 @@ mod tests {
             values[0].provenance().inputs,
             vec![DerivedId::new("alignment"), DerivedId::new("ranking")]
         );
+
+        let lehmer = LehmerSensor::default()
+            .measure(
+                &ctx,
+                ctx.calculation_token(metadata("lehmer", "sensor.lehmer")),
+            )
+            .unwrap();
+        assert!(matches!(
+            lehmer[0].value().reading,
+            Reading::InsufficientEvidence { have: 0, need: 1 }
+        ));
     }
 }
