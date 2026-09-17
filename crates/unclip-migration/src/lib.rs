@@ -12,6 +12,7 @@ mod m20260703_000005_harden_pattern_paths;
 mod m20260703_000006_harden_branch_records;
 mod m20260705_000007_multi_value_avoid_o2o;
 mod m20260918_000008_create_provenance_and_runs;
+mod m20260918_000009_create_domain;
 
 struct Migrator;
 
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260703_000006_harden_branch_records::Migration),
             Box::new(m20260705_000007_multi_value_avoid_o2o::Migration),
             Box::new(m20260918_000008_create_provenance_and_runs::Migration),
+            Box::new(m20260918_000009_create_domain::Migration),
         ]
     }
 }
@@ -320,5 +322,76 @@ mod tests {
             .try_get::<i64>("", "count")
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+    #[tokio::test]
+    async fn domain_versions_own_immutable_typed_graphs() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, None).await.unwrap();
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            r#"INSERT INTO domains (id, label, created_at)
+               VALUES ('coffee', 'Coffee', '2026-09-17T00:00:00Z');
+             INSERT INTO domain_versions (id, domain_id, version, created_at)
+               VALUES ('coffee@1', 'coffee', '1', '2026-09-17T00:00:00Z');
+             INSERT INTO units (domain_version_id, id, kind, label) VALUES
+               ('coffee@1', 'sensory', 'atomic_meaning', 'Sensory'),
+               ('coffee@1', 'social', 'semantic_role', 'Social');
+             INSERT INTO relations
+               (domain_version_id, id, source_unit_id, target_unit_id, kind)
+               VALUES ('coffee@1', 'r1', 'sensory', 'social', 'supports');
+             INSERT INTO unit_properties
+               (domain_version_id, unit_id, name, value_kind, number_value)
+               VALUES ('coffee@1', 'sensory', 'weight', 'number', 0.8);
+             INSERT INTO relation_properties
+               (domain_version_id, relation_id, name, value_kind, structured_json)
+               VALUES ('coffee@1', 'r1', 'evidence', 'structured', '{"count":2}');"#,
+        )
+        .await
+        .unwrap();
+
+        for invalid in [
+            "UPDATE units SET label = 'Changed'
+               WHERE domain_version_id = 'coffee@1' AND id = 'sensory'",
+            "INSERT INTO relations
+               (domain_version_id, id, source_unit_id, target_unit_id, kind)
+               VALUES ('coffee@1', 'bad', 'sensory', 'missing', 'supports')",
+            "INSERT INTO unit_properties
+               (domain_version_id, unit_id, name, value_kind, integer_value)
+               VALUES ('coffee@1', 'sensory', 'bad', 'text', 1)",
+        ] {
+            assert!(
+                db.execute_unprepared(invalid).await.is_err(),
+                "invalid versioned graph mutation unexpectedly succeeded: {invalid}"
+            );
+        }
+
+        db.execute_unprepared(
+            "INSERT INTO domain_versions
+               (id, domain_id, version, predecessor_id, created_at)
+             VALUES ('coffee@2', 'coffee', '2', 'coffee@1',
+                     '2026-09-17T00:01:00Z');
+             INSERT INTO units (domain_version_id, id, kind, label)
+               VALUES ('coffee@2', 'sensory', 'atomic_meaning', 'Revised sensory');
+             INSERT INTO unit_properties
+               (domain_version_id, unit_id, name, value_kind, number_value)
+               VALUES ('coffee@2', 'sensory', 'weight', 'number', 0.9);",
+        )
+        .await
+        .unwrap();
+
+        let weights = db
+            .query_all(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT domain_version_id, number_value FROM unit_properties
+                 WHERE unit_id = 'sensory' ORDER BY domain_version_id",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(weights.len(), 2);
+        assert_eq!(weights[0].try_get::<f64>("", "number_value").unwrap(), 0.8);
+        assert_eq!(weights[1].try_get::<f64>("", "number_value").unwrap(), 0.9);
     }
 }
