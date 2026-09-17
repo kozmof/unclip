@@ -396,10 +396,6 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn with_builtins() -> Self {
-        Self::default()
-    }
-
     pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
         insert_unique(&mut self.sensors, id, plugin)

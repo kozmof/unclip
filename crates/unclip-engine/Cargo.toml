@@ -1,0 +1,20 @@
+[package]
+name = "unclip-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Stage orchestration and replay planning for the Unclip leveling engine."
+
+[dependencies]
+unclip-domain.workspace = true
+unclip-epistemic.workspace = true
+unclip-infer.workspace = true
+unclip-measure.workspace = true
+unclip-observe.workspace = true
+unclip-plugin.workspace = true
+unclip-sensors.workspace = true
+unclip-store.workspace = true

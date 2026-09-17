@@ -2507,9 +2507,9 @@ dependencies = [
  "serde_norway",
  "tokio",
  "unclip-core",
+ "unclip-engine",
  "unclip-io",
  "unclip-match",
- "unclip-plugin",
  "unclip-sample",
  "unclip-store",
 ]
@@ -2534,6 +2534,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "unclip-engine"
+version = "0.1.0"
+dependencies = [
+ "unclip-domain",
+ "unclip-epistemic",
+ "unclip-infer",
+ "unclip-measure",
+ "unclip-observe",
+ "unclip-plugin",
+ "unclip-sensors",
+ "unclip-store",
+]
+
+[[package]]
 name = "unclip-entity"
 version = "0.1.0"
 dependencies = [
@@ -2548,6 +2562,20 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "unclip-infer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "semver",
+ "serde_json",
+ "unclip-domain",
+ "unclip-epistemic",
+ "unclip-match",
+ "unclip-observe",
+ "unclip-plugin",
 ]
 
 [[package]]
@@ -2624,6 +2652,19 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "unclip-core",
+]
+
+[[package]]
+name = "unclip-sensors"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde_json",
+ "unclip-domain",
+ "unclip-epistemic",
+ "unclip-measure",
+ "unclip-observe",
+ "unclip-plugin",
 ]
 
 [[package]]

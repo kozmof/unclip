@@ -1,9 +1,7 @@
 //! Commands for the semantic leveling engine.
 
-use unclip_plugin::Registry;
-
 pub(crate) fn plugins() -> anyhow::Result<()> {
-    let registry = Registry::with_builtins();
+    let registry = unclip_engine::builtin_registry()?;
     let mut found = false;
 
     for plugin in registry.inferrers() {

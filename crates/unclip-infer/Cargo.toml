@@ -1,0 +1,20 @@
+[package]
+name = "unclip-infer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Built-in semantic inferrers for Unclip."
+
+[dependencies]
+async-trait.workspace = true
+semver.workspace = true
+serde_json.workspace = true
+unclip-domain.workspace = true
+unclip-epistemic.workspace = true
+unclip-match.workspace = true
+unclip-observe.workspace = true
+unclip-plugin.workspace = true

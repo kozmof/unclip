@@ -14,6 +14,9 @@ members = [
     "crates/unclip-observe",
     "crates/unclip-measure",
     "crates/unclip-plugin",
+    "crates/unclip-sensors",
+    "crates/unclip-infer",
+    "crates/unclip-engine",
 ]
 
 [workspace.package]
@@ -41,6 +44,9 @@ unclip-domain = { path = "crates/unclip-domain", version = "0.1.0" }
 unclip-observe = { path = "crates/unclip-observe", version = "0.1.0" }
 unclip-measure = { path = "crates/unclip-measure", version = "0.1.0" }
 unclip-plugin = { path = "crates/unclip-plugin", version = "0.1.0" }
+unclip-sensors = { path = "crates/unclip-sensors", version = "0.1.0" }
+unclip-infer = { path = "crates/unclip-infer", version = "0.1.0" }
+unclip-engine = { path = "crates/unclip-engine", version = "0.1.0" }
 
 # CLI / async
 clap = { version = "4", features = ["derive"] }
