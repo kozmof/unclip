@@ -2588,6 +2588,8 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "unclip-core",
+ "unclip-domain",
+ "unclip-epistemic",
 ]
 
 [[package]]

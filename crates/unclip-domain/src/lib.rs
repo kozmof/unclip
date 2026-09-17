@@ -50,6 +50,7 @@ pub enum PropertyValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Unit {
     pub id: UnitId,
     pub kind: UnitKind,
@@ -59,6 +60,7 @@ pub struct Unit {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Relation {
     pub id: RelationId,
     pub source: UnitId,
@@ -69,6 +71,7 @@ pub struct Relation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DomainSnapshot {
     pub id: DomainId,
     pub version: DomainVersion,
@@ -77,12 +80,14 @@ pub struct DomainSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FrameAxis {
     pub unit: UnitId,
     pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeasurementFrame {
     pub id: FrameId,
     pub version: FrameVersion,
