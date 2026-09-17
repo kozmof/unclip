@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod domain_repository;
 mod error;
 mod frame_mapper;
 mod frame_repository;
@@ -15,6 +16,7 @@ mod repository;
 mod seaorm;
 mod sqlite_limits;
 
+pub use domain_repository::{DomainReader, DomainWriter, SeaOrmDomainRepository};
 pub use error::{StoreError, StoreResult};
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{

@@ -2680,7 +2680,9 @@ dependencies = [
  "thiserror",
  "tokio",
  "unclip-core",
+ "unclip-domain",
  "unclip-entity",
+ "unclip-epistemic",
  "unclip-migration",
 ]
 
