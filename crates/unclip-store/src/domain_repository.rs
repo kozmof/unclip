@@ -5,15 +5,17 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, TransactionTrait,
+    QueryFilter, QueryOrder, TransactionTrait,
 };
 use unclip_domain::{
-    DomainId, DomainSnapshot, PropertyValue, Relation, RelationId, Unit, UnitId, UnitKind,
+    DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, PropertyValue, Relation,
+    RelationId, Unit, UnitId, UnitKind,
 };
 use unclip_entity::{
-    domain_versions, domains, relation_properties, relations, unit_properties, units,
+    domain_versions, domains, frame_axes, frame_versions, measurement_frames, relation_properties,
+    relations, unit_properties, units,
 };
-use unclip_epistemic::DomainVersion;
+use unclip_epistemic::{DomainVersion, FrameVersion};
 
 use crate::{now, StoreError, StoreResult};
 
@@ -24,11 +26,22 @@ pub trait DomainReader: Sync {
         domain_id: &DomainId,
         version: &DomainVersion,
     ) -> StoreResult<Option<DomainSnapshot>>;
+    async fn get_measurement_frame(
+        &self,
+        frame_id: &FrameId,
+        version: &FrameVersion,
+    ) -> StoreResult<Option<MeasurementFrame>>;
 }
 
 #[async_trait]
 pub trait DomainWriter: Sync {
     async fn insert_domain_version(&self, snapshot: DomainSnapshot) -> StoreResult<()>;
+    async fn insert_measurement_frame(
+        &self,
+        domain_id: &DomainId,
+        domain_version: &DomainVersion,
+        frame: MeasurementFrame,
+    ) -> StoreResult<()>;
 }
 
 pub struct SeaOrmDomainRepository {
@@ -43,6 +56,10 @@ impl SeaOrmDomainRepository {
 
 fn version_key(domain_id: &DomainId, version: &DomainVersion) -> String {
     serde_json::to_string(&(&domain_id.0, &version.0)).expect("serializing two strings cannot fail")
+}
+
+fn frame_version_key(frame_id: &FrameId, version: &FrameVersion) -> String {
+    serde_json::to_string(&(&frame_id.0, &version.0)).expect("serializing two strings cannot fail")
 }
 
 fn unit_kind_name(kind: UnitKind) -> &'static str {
@@ -251,6 +268,76 @@ impl DomainWriter for SeaOrmDomainRepository {
         txn.commit().await?;
         Ok(())
     }
+    async fn insert_measurement_frame(
+        &self,
+        domain_id: &DomainId,
+        domain_version: &DomainVersion,
+        frame: MeasurementFrame,
+    ) -> StoreResult<()> {
+        let txn = self.db.begin().await?;
+        let stored_domain_version = domain_versions::Entity::find()
+            .filter(domain_versions::Column::DomainId.eq(&domain_id.0))
+            .filter(domain_versions::Column::Version.eq(&domain_version.0))
+            .one(&txn)
+            .await?
+            .ok_or_else(|| StoreError::NotFound {
+                path: format!("domain {} version {}", domain_id.0, domain_version.0),
+            })?;
+
+        if let Some(stored_frame) = measurement_frames::Entity::find_by_id(&frame.id.0)
+            .one(&txn)
+            .await?
+        {
+            if stored_frame.domain_id != domain_id.0 {
+                return Err(StoreError::Conflict { path: frame.id.0 });
+            }
+        } else {
+            measurement_frames::Entity::insert(measurement_frames::ActiveModel {
+                id: Set(frame.id.0.clone()),
+                domain_id: Set(domain_id.0.clone()),
+                label: Set(None),
+                created_at: Set(now()),
+            })
+            .exec(&txn)
+            .await?;
+        }
+
+        let key = frame_version_key(&frame.id, &frame.version);
+        if frame_versions::Entity::find_by_id(&key)
+            .one(&txn)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::AlreadyExists { path: key });
+        }
+        frame_versions::Entity::insert(frame_versions::ActiveModel {
+            id: Set(key.clone()),
+            frame_id: Set(frame.id.0),
+            version: Set(frame.version.0),
+            domain_version_id: Set(stored_domain_version.id.clone()),
+            predecessor_id: Set(None),
+            created_at: Set(now()),
+        })
+        .exec(&txn)
+        .await?;
+
+        for (position, axis) in frame.axes.into_iter().enumerate() {
+            let position = i32::try_from(position).map_err(|_| StoreError::InvalidRequest {
+                message: "measurement frame has too many axes".into(),
+            })?;
+            frame_axes::Entity::insert(frame_axes::ActiveModel {
+                frame_version_id: Set(key.clone()),
+                domain_version_id: Set(stored_domain_version.id.clone()),
+                position: Set(position),
+                unit_id: Set(axis.unit.0),
+                label: Set(axis.label),
+            })
+            .exec(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -354,6 +441,36 @@ impl DomainReader for SeaOrmDomainRepository {
             version: DomainVersion::new(stored_version.version),
             units: hydrated_units,
             relations: hydrated_relations,
+        }))
+    }
+    async fn get_measurement_frame(
+        &self,
+        frame_id: &FrameId,
+        version: &FrameVersion,
+    ) -> StoreResult<Option<MeasurementFrame>> {
+        let Some(stored) = frame_versions::Entity::find()
+            .filter(frame_versions::Column::FrameId.eq(&frame_id.0))
+            .filter(frame_versions::Column::Version.eq(&version.0))
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let axes = frame_axes::Entity::find()
+            .filter(frame_axes::Column::FrameVersionId.eq(&stored.id))
+            .order_by_asc(frame_axes::Column::Position)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|axis| FrameAxis {
+                unit: UnitId::new(axis.unit_id),
+                label: axis.label,
+            })
+            .collect();
+        Ok(Some(MeasurementFrame {
+            id: FrameId::new(stored.frame_id),
+            version: FrameVersion::new(stored.version),
+            axes,
         }))
     }
 }

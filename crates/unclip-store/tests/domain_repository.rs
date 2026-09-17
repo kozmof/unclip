@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use unclip_domain::{
-    DomainId, DomainSnapshot, PropertyValue, Relation, RelationId, Unit, UnitId, UnitKind,
+    DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, PropertyValue, Relation,
+    RelationId, Unit, UnitId, UnitKind,
 };
-use unclip_epistemic::DomainVersion;
+use unclip_epistemic::{DomainVersion, FrameVersion};
 use unclip_store::{
     connect_and_migrate, DomainReader, DomainWriter, SeaOrmDomainRepository, StoreError,
 };
@@ -124,4 +125,43 @@ async fn invalid_property_rolls_back_the_whole_version() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn measurement_frame_versions_round_trip_with_ordered_axes() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let repo = SeaOrmDomainRepository::new(db);
+    let domain = snapshot();
+    repo.insert_domain_version(domain.clone()).await.unwrap();
+    let frame = MeasurementFrame {
+        id: FrameId::new("example.general"),
+        version: FrameVersion::new("2"),
+        axes: vec![
+            FrameAxis {
+                unit: UnitId::new("target"),
+                label: Some("Target axis".into()),
+            },
+            FrameAxis {
+                unit: UnitId::new("source"),
+                label: None,
+            },
+        ],
+    };
+
+    repo.insert_measurement_frame(&domain.id, &domain.version, frame.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo.get_measurement_frame(&frame.id, &frame.version)
+            .await
+            .unwrap()
+            .unwrap(),
+        frame
+    );
+    let error = repo
+        .insert_measurement_frame(&domain.id, &domain.version, frame)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, StoreError::AlreadyExists { .. }));
 }
