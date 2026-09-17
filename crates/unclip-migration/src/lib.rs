@@ -13,6 +13,7 @@ mod m20260703_000006_harden_branch_records;
 mod m20260705_000007_multi_value_avoid_o2o;
 mod m20260918_000008_create_provenance_and_runs;
 mod m20260918_000009_create_domain;
+mod m20260918_000010_create_measurement_frames;
 
 struct Migrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260705_000007_multi_value_avoid_o2o::Migration),
             Box::new(m20260918_000008_create_provenance_and_runs::Migration),
             Box::new(m20260918_000009_create_domain::Migration),
+            Box::new(m20260918_000010_create_measurement_frames::Migration),
         ]
     }
 }
@@ -393,5 +395,74 @@ mod tests {
         assert_eq!(weights.len(), 2);
         assert_eq!(weights[0].try_get::<f64>("", "number_value").unwrap(), 0.8);
         assert_eq!(weights[1].try_get::<f64>("", "number_value").unwrap(), 0.9);
+    }
+    #[tokio::test]
+    async fn frame_versions_are_immutable_ordered_and_domain_pinned() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, None).await.unwrap();
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            "INSERT INTO domains (id, created_at) VALUES ('coffee', 't');
+             INSERT INTO domain_versions (id, domain_id, version, created_at)
+               VALUES ('coffee@1', 'coffee', '1', 't');
+             INSERT INTO units (domain_version_id, id, kind) VALUES
+               ('coffee@1', 'sensory', 'atomic_meaning'),
+               ('coffee@1', 'social', 'semantic_role');
+             INSERT INTO measurement_frames (id, domain_id, created_at)
+               VALUES ('coffee.general', 'coffee', 't');
+             INSERT INTO frame_versions
+               (id, frame_id, version, domain_version_id, created_at)
+               VALUES ('coffee.general@1', 'coffee.general', '1', 'coffee@1', 't');
+             INSERT INTO frame_axes
+               (frame_version_id, domain_version_id, position, unit_id) VALUES
+               ('coffee.general@1', 'coffee@1', 0, 'sensory'),
+               ('coffee.general@1', 'coffee@1', 1, 'social');",
+        )
+        .await
+        .unwrap();
+
+        for invalid in [
+            "UPDATE frame_axes SET position = 2
+               WHERE frame_version_id = 'coffee.general@1' AND position = 1",
+            "INSERT INTO frame_axes
+               (frame_version_id, domain_version_id, position, unit_id)
+             VALUES ('coffee.general@1', 'coffee@1', 0, 'social')",
+            "INSERT INTO frame_axes
+               (frame_version_id, domain_version_id, position, unit_id)
+             VALUES ('coffee.general@1', 'coffee@1', 2, 'sensory')",
+        ] {
+            assert!(
+                db.execute_unprepared(invalid).await.is_err(),
+                "invalid frame mutation unexpectedly succeeded: {invalid}"
+            );
+        }
+
+        db.execute_unprepared(
+            "INSERT INTO frame_versions
+               (id, frame_id, version, domain_version_id, predecessor_id, created_at)
+             VALUES ('coffee.general@2', 'coffee.general', '2', 'coffee@1',
+                     'coffee.general@1', 'later');
+             INSERT INTO frame_axes
+               (frame_version_id, domain_version_id, position, unit_id)
+             VALUES ('coffee.general@2', 'coffee@1', 0, 'social');",
+        )
+        .await
+        .unwrap();
+
+        let versions = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS count FROM frame_versions
+                 WHERE domain_version_id = 'coffee@1'",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "count")
+            .unwrap();
+        assert_eq!(versions, 2);
     }
 }
