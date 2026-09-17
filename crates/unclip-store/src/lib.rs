@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod domain_repository;
+mod engine_run_repository;
 mod error;
 mod frame_mapper;
 mod frame_repository;
@@ -20,6 +21,10 @@ mod seaorm;
 mod sqlite_limits;
 
 pub use domain_repository::{DomainReader, DomainWriter, SeaOrmDomainRepository};
+pub use engine_run_repository::{
+    EngineRunRecord, EngineRunReplay, EngineRunRepository, EngineRunStatus,
+    SeaOrmEngineRunRepository,
+};
 pub use error::{StoreError, StoreResult};
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
