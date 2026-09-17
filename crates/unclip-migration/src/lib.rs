@@ -14,6 +14,7 @@ mod m20260705_000007_multi_value_avoid_o2o;
 mod m20260918_000008_create_provenance_and_runs;
 mod m20260918_000009_create_domain;
 mod m20260918_000010_create_measurement_frames;
+mod m20260918_000011_create_observations;
 
 struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260918_000008_create_provenance_and_runs::Migration),
             Box::new(m20260918_000009_create_domain::Migration),
             Box::new(m20260918_000010_create_measurement_frames::Migration),
+            Box::new(m20260918_000011_create_observations::Migration),
         ]
     }
 }
@@ -464,5 +466,104 @@ mod tests {
             .try_get::<i64>("", "count")
             .unwrap();
         assert_eq!(versions, 2);
+    }
+    #[tokio::test]
+    async fn observations_preserve_ambiguous_alignment_ties_and_unknown_tail() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        up(&db, None).await.unwrap();
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            "INSERT INTO provenance
+               (derived_id, operation, producer, algorithm, version,
+                params_json, params_hash, timestamp)
+             VALUES ('p1', 'inferred', 'infer.fixture', 'fixture', '0.1.0',
+                     '{}', 'hash', 't');
+             INSERT INTO domains (id, created_at) VALUES ('coffee', 't');
+             INSERT INTO domain_versions (id, domain_id, version, created_at)
+               VALUES ('coffee@1', 'coffee', '1', 't');
+             INSERT INTO units (domain_version_id, id, kind) VALUES
+               ('coffee@1', 'sensory', 'atomic_meaning'),
+               ('coffee@1', 'social', 'semantic_role'),
+               ('coffee@1', 'production', 'semantic_role');
+             INSERT INTO observations
+               (id, provenance_id, source) VALUES ('x1', 'p1', 'fixture');
+             INSERT INTO observed_units
+               (observation_id, id, label, provenance_id) VALUES
+               ('x1', 'a', 'appearance', 'p1'),
+               ('x1', 'b', 'sharing', 'p1'),
+               ('x1', 'c', 'making', 'p1');
+             INSERT INTO observed_relations
+               (observation_id, id, source_unit_id, target_unit_id, kind,
+                provenance_id)
+               VALUES ('x1', 'or1', 'a', 'b', 'supports', 'p1');
+             INSERT INTO alignments
+               (id, observation_id, provenance_id) VALUES ('a1', 'x1', 'p1');
+             INSERT INTO alignment_candidates
+               (alignment_id, observation_id, observed_unit_id,
+                domain_version_id, domain_unit_id, position, confidence,
+                provenance_id) VALUES
+               ('a1', 'x1', 'a', 'coffee@1', 'sensory', 0, 0.7, 'p1'),
+               ('a1', 'x1', 'a', 'coffee@1', 'social', 1, 0.3, 'p1');
+             INSERT INTO rankings
+               (id, observation_id, provenance_id) VALUES ('rank1', 'x1', 'p1');
+             INSERT INTO ranking_entries
+               (ranking_id, observation_id, observed_unit_id, state, tier,
+                position, provenance_id) VALUES
+               ('rank1', 'x1', 'a', 'ranked', 0, 0, 'p1'),
+               ('rank1', 'x1', 'b', 'ranked', 0, 1, 'p1'),
+               ('rank1', 'x1', 'c', 'unknown', -1, 0, 'p1');",
+        )
+        .await
+        .unwrap();
+
+        let candidate_count = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS count FROM alignment_candidates
+                 WHERE alignment_id = 'a1' AND observed_unit_id = 'a'",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "count")
+            .unwrap();
+        assert_eq!(candidate_count, 2);
+
+        let tied_count = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS count FROM ranking_entries
+                 WHERE ranking_id = 'rank1' AND state = 'ranked' AND tier = 0",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "count")
+            .unwrap();
+        assert_eq!(tied_count, 2);
+
+        for invalid in [
+            "INSERT INTO observed_relations
+               (observation_id, id, source_unit_id, target_unit_id, kind,
+                provenance_id)
+             VALUES ('x1', 'bad', 'a', 'missing', 'supports', 'p1')",
+            "INSERT INTO alignment_candidates
+               (alignment_id, observation_id, observed_unit_id,
+                domain_version_id, domain_unit_id, position, confidence,
+                provenance_id)
+             VALUES ('a1', 'x1', 'b', 'coffee@1', 'social', 2, 1.1, 'p1')",
+            "INSERT INTO ranking_entries
+               (ranking_id, observation_id, observed_unit_id, state, tier,
+                position, provenance_id)
+             VALUES ('rank1', 'x1', 'c', 'unknown', 1, 1, 'p1')",
+        ] {
+            assert!(
+                db.execute_unprepared(invalid).await.is_err(),
+                "invalid observation row unexpectedly succeeded: {invalid}"
+            );
+        }
     }
 }
