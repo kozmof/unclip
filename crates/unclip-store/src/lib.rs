@@ -11,6 +11,7 @@ mod frame_mapper;
 mod frame_repository;
 mod history;
 mod mapper;
+mod observation_repository;
 mod pattern_repository;
 mod repository;
 mod seaorm;
@@ -22,6 +23,7 @@ pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
     now, HistoryRepository, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,
 };
+pub use observation_repository::{ObservationRepository, SeaOrmObservationRepository};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};
 pub use repository::{
     BranchHeader, BranchReader, BranchRepository, BranchRepositoryError, BranchRepositoryResult,

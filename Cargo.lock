@@ -2684,6 +2684,7 @@ dependencies = [
  "unclip-entity",
  "unclip-epistemic",
  "unclip-migration",
+ "unclip-observe",
 ]
 
 [[package]]

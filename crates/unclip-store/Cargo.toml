@@ -13,6 +13,7 @@ description = "Repository traits and SeaORM persistence implementations for uncl
 unclip-core.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
+unclip-observe.workspace = true
 unclip-entity.workspace = true
 unclip-migration.workspace = true
 sea-orm.workspace = true
