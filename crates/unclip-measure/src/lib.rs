@@ -7,6 +7,13 @@
 //!
 //! let score: f64 = MeasurementProfile::default().into();
 //! ```
+//!
+//! ```compile_fail
+//! use unclip_measure::MeasurementProfile;
+//!
+//! fn requires_order<T: Ord>() {}
+//! requires_order::<MeasurementProfile>();
+//! ```
 
 #![forbid(unsafe_code)]
 

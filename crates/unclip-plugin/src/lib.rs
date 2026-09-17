@@ -9,8 +9,9 @@ use semver::{Version, VersionReq};
 use thiserror::Error;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
-    Calculated, CalculationToken, DependencyCollector, ExperimentToken, Experimental, FrameVersion,
-    InferenceToken, Inferred, InterpretationToken, Interpreted, PluginId, SourceRef, Tracked,
+    Calculated, CalculationToken, DependencyCollector, EmitMetadata, ExperimentToken, Experimental,
+    FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, PluginId, SourceRef,
+    Tracked,
 };
 use unclip_measure::{Delta, EmpiricalStructure, Measurement, MeasurementKind, Reading};
 use unclip_observe::{Alignment, Observation, PartialRanking};
@@ -159,9 +160,103 @@ impl<'a> MeasureCtx<'a> {
         self.dependencies.clone()
     }
 
+    pub fn calculation_token(&self, mut metadata: EmitMetadata) -> CalculationToken {
+        metadata.domain_version = Some(self.domain.version.clone());
+        metadata.frame_version = Some(self.frame.version.clone());
+        CalculationToken::from_harness(metadata, self.dependencies.clone())
+    }
+
     pub fn frame_version(&self) -> FrameVersion {
         self.frame.version.clone()
     }
+
+    pub fn evidence_gap(&self, requirement: EvidenceRequirement) -> Option<EvidenceGap> {
+        match requirement {
+            EvidenceRequirement::TotalOrder => {
+                let have = usize::from(
+                    self.rankings
+                        .iter()
+                        .any(|ranking| self.read(ranking).is_total()),
+                );
+                (have < 1).then_some(EvidenceGap {
+                    requirement,
+                    have,
+                    need: 1,
+                })
+            }
+            EvidenceRequirement::MinSamples(need) => {
+                let have = self.observations.len();
+                (have < need).then_some(EvidenceGap {
+                    requirement,
+                    have,
+                    need,
+                })
+            }
+            EvidenceRequirement::Ordered => {
+                let have = self
+                    .observations
+                    .iter()
+                    .filter(|observation| self.read(observation).observed_at.is_some())
+                    .count();
+                let need = self.observations.len();
+                (have < need).then_some(EvidenceGap {
+                    requirement,
+                    have,
+                    need,
+                })
+            }
+            EvidenceRequirement::ConditioningVariables => {
+                let have = self
+                    .params
+                    .get("conditioning_variables")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len);
+                (have < 1).then_some(EvidenceGap {
+                    requirement,
+                    have,
+                    need: 1,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvidenceGap {
+    pub requirement: EvidenceRequirement,
+    pub have: usize,
+    pub need: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SensorDecision {
+    Run,
+    Record(Reading),
+}
+
+pub fn classify_sensor(
+    sensor: &dyn Sensor,
+    ctx: &MeasureCtx<'_>,
+    scheduled: bool,
+) -> SensorDecision {
+    if !scheduled {
+        return SensorDecision::Record(Reading::NotMeasured);
+    }
+    if let Applicability::NotApplicable { reason } = sensor.applies_to(ctx) {
+        return SensorDecision::Record(Reading::NotApplicable { reason });
+    }
+    if let Some(gap) = sensor
+        .descriptor()
+        .evidence
+        .iter()
+        .find_map(|requirement| ctx.evidence_gap(*requirement))
+    {
+        return SensorDecision::Record(Reading::InsufficientEvidence {
+            have: gap.have,
+            need: gap.need,
+        });
+    }
+    SensorDecision::Run
 }
 
 pub struct InferCtx<'a> {
@@ -418,15 +513,24 @@ pub struct RunPlan {
 mod tests {
     use super::*;
 
-    struct StubSensor(SensorDescriptor);
+    struct StubSensor {
+        descriptor: SensorDescriptor,
+        applicable: bool,
+    }
 
     impl Sensor for StubSensor {
         fn descriptor(&self) -> &SensorDescriptor {
-            &self.0
+            &self.descriptor
         }
 
         fn applies_to(&self, _ctx: &MeasureCtx<'_>) -> Applicability {
-            Applicability::Applicable
+            if self.applicable {
+                Applicability::Applicable
+            } else {
+                Applicability::NotApplicable {
+                    reason: "unsupported fixture".into(),
+                }
+            }
         }
 
         fn measure(
@@ -439,14 +543,97 @@ mod tests {
     }
 
     fn sensor() -> Arc<dyn Sensor> {
-        Arc::new(StubSensor(SensorDescriptor {
-            id: PluginId::new("sensor.stub"),
-            version: Version::new(0, 1, 0),
-            applicability: &[],
-            evidence: &[],
-            produces: &[],
-            params_schema: "{}",
-        }))
+        sensor_with(&[], true)
+    }
+
+    fn sensor_with(evidence: &'static [EvidenceRequirement], applicable: bool) -> Arc<dyn Sensor> {
+        Arc::new(StubSensor {
+            descriptor: SensorDescriptor {
+                id: PluginId::new("sensor.stub"),
+                version: Version::new(0, 1, 0),
+                applicability: &[],
+                evidence,
+                produces: &[],
+                params_schema: "{}",
+            },
+            applicable,
+        })
+    }
+
+    #[test]
+    fn planner_preserves_sparse_reading_states() {
+        use std::collections::BTreeMap;
+        use unclip_domain::{DomainId, FrameId};
+        use unclip_epistemic::{DerivedId, DomainVersion, FrameVersion, ParameterHash, Timestamp};
+
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("1"),
+            axes: Vec::new(),
+        };
+        let params = serde_json::json!({});
+        let ctx = MeasureCtx::new(
+            &domain,
+            &frame,
+            &[],
+            &[],
+            &[],
+            &params,
+            DependencyCollector::default(),
+        );
+
+        assert_eq!(
+            classify_sensor(sensor().as_ref(), &ctx, false),
+            SensorDecision::Record(Reading::NotMeasured)
+        );
+        assert_eq!(
+            classify_sensor(sensor_with(&[], false).as_ref(), &ctx, true),
+            SensorDecision::Record(Reading::NotApplicable {
+                reason: "unsupported fixture".into()
+            })
+        );
+        assert_eq!(
+            classify_sensor(
+                sensor_with(&[EvidenceRequirement::MinSamples(2)], true).as_ref(),
+                &ctx,
+                true
+            ),
+            SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 2 })
+        );
+        assert_eq!(
+            classify_sensor(sensor().as_ref(), &ctx, true),
+            SensorDecision::Run
+        );
+
+        let derived = ctx
+            .calculation_token(EmitMetadata {
+                id: DerivedId::new("measurement-1"),
+                producer: PluginId::new("sensor.stub"),
+                algorithm: "stub".into(),
+                version: Version::new(0, 1, 0),
+                params: serde_json::json!({}),
+                params_hash: ParameterHash::new("hash"),
+                source: None,
+                timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                domain_version: None,
+                frame_version: None,
+                model: None,
+            })
+            .emit(());
+        assert_eq!(
+            derived.provenance().domain_version,
+            Some(DomainVersion::new("1"))
+        );
+        assert_eq!(
+            derived.provenance().frame_version,
+            Some(FrameVersion::new("1"))
+        );
     }
 
     #[test]
