@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use semver::Version;
-use unclip_domain::UnitId;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementKind, MeasurementValue, Reading};
-use unclip_observe::{ObservationId, ObservedUnitId};
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, Result, Sensor, SensorDescriptor,
 };
+
+use crate::support::analyze;
 
 const APPLICABILITY: &[Capability] = &[Capability::Observation, Capability::Alignment];
 const EVIDENCE: &[EvidenceRequirement] = &[EvidenceRequirement::MinSamples(1)];
@@ -56,56 +56,11 @@ impl Sensor for CoverageSensor {
         ctx: &MeasureCtx<'_>,
         token: CalculationToken,
     ) -> Result<Vec<Calculated<Measurement>>> {
-        let mut aligned: BTreeMap<ObservationId, BTreeMap<ObservedUnitId, BTreeSet<UnitId>>> =
-            BTreeMap::new();
-
-        for tracked in ctx.alignments() {
-            let alignment = ctx.read(tracked);
-            let units = aligned.entry(alignment.observation.clone()).or_default();
-            for candidate in &alignment.candidates {
-                units
-                    .entry(candidate.observed.clone())
-                    .or_default()
-                    .insert(candidate.domain.clone());
-            }
-        }
-
-        let mut observed_nodes = 0;
-        let mut supported_nodes = 0;
-        let mut observed_relations = 0;
-        let mut supported_relations = 0;
-
-        for tracked in ctx.observations() {
-            let observation = ctx.read(tracked);
-            let units = aligned.get(&observation.id);
-            observed_nodes += observation.units.len();
-            supported_nodes += observation
-                .units
-                .iter()
-                .filter(|unit| units.is_some_and(|units| units.contains_key(&unit.id)))
-                .count();
-
-            observed_relations += observation.relations.len();
-            supported_relations += observation
-                .relations
-                .iter()
-                .filter(|relation| {
-                    let Some(units) = units else {
-                        return false;
-                    };
-                    let (Some(sources), Some(targets)) =
-                        (units.get(&relation.source), units.get(&relation.target))
-                    else {
-                        return false;
-                    };
-                    ctx.domain().relations.values().any(|domain_relation| {
-                        domain_relation.kind == relation.kind
-                            && sources.contains(&domain_relation.source)
-                            && targets.contains(&domain_relation.target)
-                    })
-                })
-                .count();
-        }
+        let support = analyze(ctx);
+        let observed_nodes = support.observed_nodes;
+        let supported_nodes = support.supported_nodes();
+        let observed_relations = support.observed_relations;
+        let supported_relations = support.supported_relations();
 
         let node = ratio(supported_nodes, observed_nodes);
         let relation = ratio(supported_relations, observed_relations);
@@ -158,15 +113,16 @@ mod tests {
     use std::collections::BTreeMap;
 
     use unclip_domain::{
-        DomainId, DomainSnapshot, FrameId, MeasurementFrame, Relation, RelationId, Unit, UnitKind,
+        DomainId, DomainSnapshot, FrameId, MeasurementFrame, Relation, RelationId, Unit, UnitId,
+        UnitKind,
     };
     use unclip_epistemic::{
         hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion,
         InferenceToken, ParameterHash, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{
-        Alignment, AlignmentCandidate, Observation, ObservedRelation, ObservedRelationId,
-        ObservedUnit,
+        Alignment, AlignmentCandidate, Observation, ObservationId, ObservedRelation,
+        ObservedRelationId, ObservedUnit, ObservedUnitId,
     };
     use unclip_plugin::conformance;
 
