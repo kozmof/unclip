@@ -6,11 +6,17 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use unclip_plugin::{Registry, Result};
 
+mod coverage;
+
+pub use coverage::CoverageSensor;
+
 /// Register every built-in calculation sensor.
-pub fn register_all(_registry: &mut Registry) -> Result<()> {
-    Ok(())
+pub fn register_all(registry: &mut Registry) -> Result<()> {
+    registry.register_sensor(Arc::new(CoverageSensor::default()))
 }
 
 #[cfg(test)]
@@ -32,9 +38,9 @@ mod tests {
     }
 
     #[test]
-    fn registration_is_explicit_and_currently_empty() {
+    fn registration_is_explicit() {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
-        assert_eq!(registry.sensors().count(), 0);
+        assert_eq!(registry.sensors().count(), 1);
     }
 }
