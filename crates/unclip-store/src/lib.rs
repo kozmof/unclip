@@ -11,6 +11,7 @@ mod frame_mapper;
 mod frame_repository;
 mod history;
 mod mapper;
+mod measurement_repository;
 mod observation_repository;
 mod pattern_repository;
 mod repository;
@@ -22,6 +23,10 @@ pub use error::{StoreError, StoreResult};
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
     now, HistoryRepository, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,
+};
+pub use measurement_repository::{
+    MeasurementProfileHeader, MeasurementRecord, MeasurementRepository,
+    SeaOrmMeasurementRepository, SensorRunRecord,
 };
 pub use observation_repository::{ObservationRepository, SeaOrmObservationRepository};
 pub use pattern_repository::{SeaOrmPatternRepository, StoredPattern};

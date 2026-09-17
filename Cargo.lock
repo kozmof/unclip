@@ -2676,6 +2676,8 @@ dependencies = [
  "async-trait",
  "chrono",
  "sea-orm",
+ "semver",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
@@ -2683,6 +2685,7 @@ dependencies = [
  "unclip-domain",
  "unclip-entity",
  "unclip-epistemic",
+ "unclip-measure",
  "unclip-migration",
  "unclip-observe",
 ]
