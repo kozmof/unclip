@@ -356,6 +356,21 @@ async fn level_domain_frame_and_observe_workflow() {
         .find_map(|line| line.strip_prefix("RUN\t"))
         .expect("observe output should identify its persisted run")
         .to_owned();
+
+    let derived_id = format!("{run_id}/infer.manual");
+    let provenance = unclip(&path, &["level", "provenance", &derived_id]);
+    assert!(
+        provenance.status.success(),
+        "level provenance failed: {}",
+        stderr(&provenance)
+    );
+    assert!(stdout(&provenance).contains(&format!(
+        "{derived_id}\tINFERRED\tinfer.manual@1.0.0\tdepth=0 inputs=0"
+    )));
+    let missing_provenance = unclip(&path, &["level", "provenance", "missing"]);
+    assert!(!missing_provenance.status.success());
+    assert!(stderr(&missing_provenance).contains("provenance not found: missing"));
+
     let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
         .await
         .unwrap();

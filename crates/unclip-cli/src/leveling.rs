@@ -242,6 +242,46 @@ pub(crate) async fn observe(
     Ok(())
 }
 
+pub(crate) async fn provenance(
+    repository: &impl unclip_store::ProvenanceRepository,
+    derived_id: &str,
+) -> anyhow::Result<()> {
+    let root = unclip_epistemic::DerivedId::new(derived_id);
+    let mut queue = std::collections::VecDeque::from([(root, 0usize)]);
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some((id, depth)) = queue.pop_front() {
+        if !visited.insert(id.clone()) {
+            continue;
+        }
+        let value = repository.get_provenance(&id).await?.ok_or_else(|| {
+            if depth == 0 {
+                anyhow::anyhow!("provenance not found: {}", id.0)
+            } else {
+                anyhow::anyhow!("provenance dependency not found: {}", id.0)
+            }
+        })?;
+        for input in &value.provenance.inputs {
+            queue.push_back((input.clone(), depth + 1));
+        }
+        let operation = match value.provenance.operation {
+            unclip_epistemic::Operation::Inferred => "INFERRED",
+            unclip_epistemic::Operation::Calculated => "CALCULATED",
+            unclip_epistemic::Operation::Experimental => "EXPERIMENTAL",
+            unclip_epistemic::Operation::Interpreted => "INTERPRETED",
+        };
+        crate::output::outln!(
+            "{}\t{}\t{}@{}\tdepth={} inputs={}",
+            value.id.0,
+            operation,
+            value.provenance.producer,
+            value.provenance.version,
+            depth,
+            value.provenance.inputs.len()
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn profile_show(
     repository: &impl unclip_store::MeasurementRepository,
     profile_id: &str,
