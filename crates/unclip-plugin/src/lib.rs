@@ -268,6 +268,11 @@ pub struct InferCtx<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InferenceOutput {
+    Bundle {
+        observations: Vec<Observation>,
+        alignments: Vec<Alignment>,
+        rankings: Vec<PartialRanking>,
+    },
     Observations(Vec<Observation>),
     Alignments(Vec<Alignment>),
     Rankings(Vec<PartialRanking>),
