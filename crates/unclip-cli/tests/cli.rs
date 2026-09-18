@@ -235,8 +235,8 @@ fn level_plugins_does_not_require_a_database() {
     assert!(!db.path().exists());
 }
 
-#[test]
-fn level_domain_frame_and_observe_workflow() {
+#[tokio::test]
+async fn level_domain_frame_and_observe_workflow() {
     let db = TempDb::new();
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
@@ -351,6 +351,23 @@ fn level_domain_frame_and_observe_workflow() {
     assert!(stdout(&observed).contains("INFERRED"));
     assert!(stdout(&observed).contains("infer.manual@1.0.0"));
     assert!(stdout(&observed).contains("observations=1"));
+    let run_id = stdout(&observed)
+        .lines()
+        .find_map(|line| line.strip_prefix("RUN\t"))
+        .expect("observe output should identify its persisted run")
+        .to_owned();
+    let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
+        .await
+        .unwrap();
+    let runs = unclip_store::SeaOrmEngineRunRepository::new(connection);
+    let replay = unclip_store::EngineRunRepository::replay_run(&runs, &run_id)
+        .await
+        .unwrap()
+        .expect("observe run should be persisted");
+    assert_eq!(replay.run.status, unclip_store::EngineRunStatus::Completed);
+    assert_eq!(replay.observations.len(), 1);
+    assert_eq!(replay.observations[0].value.id.0, "manual-observation");
+    assert_eq!(replay.provenance_ids.len(), 1);
 
     let frame_fixture = db.write(
         "frame.yaml",

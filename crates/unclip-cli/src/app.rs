@@ -231,7 +231,7 @@ pub async fn run() -> anyhow::Result<()> {
                 }
             },
             LevelAction::Observe { source, profile } => {
-                crate::leveling::observe(&repos.domains, &source, &profile).await?;
+                crate::leveling::observe(&repos, &source, &profile).await?;
             }
         },
     }

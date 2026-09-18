@@ -18,6 +18,7 @@ unclip-core.workspace = true
 unclip-store.workspace = true
 unclip-sample.workspace = true
 unclip-io.workspace = true
+unclip-observe.workspace = true
 unclip-match.workspace = true
 unclip-engine.workspace = true
 unclip-plugin.workspace = true

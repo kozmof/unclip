@@ -5,8 +5,9 @@ use std::path::Path;
 use anyhow::Context;
 use sea_orm::{ConnectOptions, DatabaseConnection};
 use unclip_store::{
-    SeaOrmBranchRepository, SeaOrmDomainRepository, SeaOrmFrameRepository, SeaOrmHistoryRepository,
-    SeaOrmPatternRepository,
+    SeaOrmBranchRepository, SeaOrmDomainRepository, SeaOrmEngineRunRepository,
+    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmObservationRepository,
+    SeaOrmPatternRepository, SeaOrmProvenanceRepository,
 };
 
 /// Build SQLite connection options for the given file path.
@@ -67,9 +68,12 @@ pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
 pub struct Repos {
     pub branches: SeaOrmBranchRepository,
     pub domains: SeaOrmDomainRepository,
+    pub engine_runs: SeaOrmEngineRunRepository,
     pub frames: SeaOrmFrameRepository,
     pub history: SeaOrmHistoryRepository,
     pub patterns: SeaOrmPatternRepository,
+    pub observations: SeaOrmObservationRepository,
+    pub provenance: SeaOrmProvenanceRepository,
 }
 
 /// Open the database and construct the repositories over a shared connection.
@@ -85,9 +89,12 @@ pub async fn open_repos(path: &Path, create: bool) -> anyhow::Result<Repos> {
     Ok(Repos {
         branches: SeaOrmBranchRepository::new(conn.clone()),
         domains: SeaOrmDomainRepository::new(conn.clone()),
+        engine_runs: SeaOrmEngineRunRepository::new(conn.clone()),
         frames: SeaOrmFrameRepository::new(conn.clone()),
         history: SeaOrmHistoryRepository::new(conn.clone()),
-        patterns: SeaOrmPatternRepository::new(conn),
+        patterns: SeaOrmPatternRepository::new(conn.clone()),
+        observations: SeaOrmObservationRepository::new(conn.clone()),
+        provenance: SeaOrmProvenanceRepository::new(conn),
     })
 }
 

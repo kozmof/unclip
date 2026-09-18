@@ -153,7 +153,7 @@ impl unclip_plugin::InferenceIo for FileInferenceIo {
 }
 
 pub(crate) async fn observe(
-    repository: &impl unclip_store::DomainReader,
+    repositories: &crate::db::Repos,
     source: &std::path::Path,
     profile_path: &std::path::Path,
 ) -> anyhow::Result<()> {
@@ -163,10 +163,13 @@ pub(crate) async fn observe(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("engine profile must select domain@version"))?;
     let (domain_id, domain_version) = parse_domain_selector(domain_selector)?;
-    let domain = repository
-        .get_domain_version(&domain_id, &domain_version)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
+    let domain = unclip_store::DomainReader::get_domain_version(
+        &repositories.domains,
+        &domain_id,
+        &domain_version,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
     let parsed = document.resolve()?;
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
@@ -174,12 +177,28 @@ pub(crate) async fn observe(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("inference source path must be valid UTF-8"))?;
     let timestamp = unclip_store::now();
+    let run_id = format!("observe-{timestamp}");
+    let record = engine.run_record(
+        &plan,
+        &parsed.params,
+        &run_id,
+        unclip_epistemic::Timestamp::new(timestamp.clone()),
+        serde_json::json!({"source": source, "profile": profile_path}),
+    );
+    unclip_store::EngineRunRepository::insert_run(&repositories.engine_runs, record).await?;
+    unclip_store::EngineRunRepository::transition_run(
+        &repositories.engine_runs,
+        &run_id,
+        unclip_store::EngineRunStatus::Running,
+        None,
+    )
+    .await?;
     let results = engine
         .infer(
             &plan,
             &domain,
             unclip_engine::InferenceRun {
-                id: &format!("observe-{timestamp}"),
+                id: &run_id,
                 source: unclip_epistemic::SourceRef::new(source),
                 timestamp: unclip_epistemic::Timestamp::new(timestamp),
                 params: &parsed.params,
@@ -188,6 +207,16 @@ pub(crate) async fn observe(
         )
         .await?;
 
+    persist_inference(repositories, &run_id, &domain_id, &domain_version, &results).await?;
+    unclip_store::EngineRunRepository::transition_run(
+        &repositories.engine_runs,
+        &run_id,
+        unclip_store::EngineRunStatus::Completed,
+        Some(unclip_store::now()),
+    )
+    .await?;
+
+    crate::output::outln!("RUN\t{run_id}");
     for output in &results.outputs {
         let provenance = output.provenance();
         let (observations, alignments, rankings) = match output.value() {
@@ -212,6 +241,102 @@ pub(crate) async fn observe(
     }
     Ok(())
 }
+
+async fn persist_inference(
+    repositories: &crate::db::Repos,
+    run_id: &str,
+    domain_id: &unclip_domain::DomainId,
+    domain_version: &unclip_epistemic::DomainVersion,
+    results: &unclip_engine::InferenceResults,
+) -> anyhow::Result<()> {
+    use std::collections::BTreeMap;
+    let mut observations = BTreeMap::new();
+    let mut alignments = Vec::new();
+    let mut rankings = Vec::new();
+    for output in &results.outputs {
+        let provenance_id = output.id().clone();
+        unclip_store::ProvenanceRepository::insert_provenance(
+            &repositories.provenance,
+            unclip_store::StoredProvenance {
+                id: provenance_id.clone(),
+                run_id: Some(run_id.to_owned()),
+                provenance: output.provenance().clone(),
+            },
+        )
+        .await?;
+        let (obs, aligns, ranks) = match output.value() {
+            unclip_plugin::InferenceOutput::Bundle {
+                observations,
+                alignments,
+                rankings,
+            } => (
+                observations.as_slice(),
+                alignments.as_slice(),
+                rankings.as_slice(),
+            ),
+            unclip_plugin::InferenceOutput::Observations(v) => (
+                v.as_slice(),
+                &[] as &[unclip_observe::Alignment],
+                &[] as &[unclip_observe::PartialRanking],
+            ),
+            unclip_plugin::InferenceOutput::Alignments(v) => (
+                &[] as &[unclip_observe::Observation],
+                v.as_slice(),
+                &[] as &[unclip_observe::PartialRanking],
+            ),
+            unclip_plugin::InferenceOutput::Rankings(v) => (
+                &[] as &[unclip_observe::Observation],
+                &[] as &[unclip_observe::Alignment],
+                v.as_slice(),
+            ),
+            unclip_plugin::InferenceOutput::Structured(_) => (
+                &[] as &[unclip_observe::Observation],
+                &[] as &[unclip_observe::Alignment],
+                &[] as &[unclip_observe::PartialRanking],
+            ),
+        };
+        for observation in obs {
+            observations.insert(
+                observation.id.0.clone(),
+                (observation.clone(), provenance_id.clone()),
+            );
+        }
+        alignments.extend(aligns.iter().cloned().map(|v| (v, provenance_id.clone())));
+        rankings.extend(ranks.iter().cloned().map(|v| (v, provenance_id.clone())));
+    }
+    for (_, (observation, provenance)) in observations {
+        unclip_store::ObservationRepository::insert_observation(
+            &repositories.observations,
+            observation,
+            &provenance,
+        )
+        .await?;
+    }
+    for (index, (alignment, provenance)) in alignments.into_iter().enumerate() {
+        let id = format!("{run_id}/alignment/{index}");
+        unclip_store::ObservationRepository::insert_alignment(
+            &repositories.observations,
+            &id,
+            alignment,
+            domain_id,
+            domain_version,
+            &provenance,
+        )
+        .await?;
+    }
+    for (index, (ranking, provenance)) in rankings.into_iter().enumerate() {
+        let id = format!("{run_id}/ranking/{index}");
+        unclip_store::ObservationRepository::insert_ranking(
+            &repositories.observations,
+            &id,
+            ranking,
+            &provenance,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
