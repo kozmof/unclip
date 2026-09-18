@@ -325,6 +325,204 @@ pub(crate) async fn explain(
     Ok(())
 }
 
+pub(crate) async fn measure(
+    repositories: &crate::db::Repos,
+    observation_id: &str,
+    profile_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let document = unclip_io::load_engine_profile(profile_path)?;
+    let domain_selector = document
+        .domain
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("engine profile must select domain@version"))?;
+    let frame_selector = document
+        .frame
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("engine profile must select frame@version"))?;
+    let (domain_id, domain_version) = parse_domain_selector(domain_selector)?;
+    let (frame_id, frame_version) = parse_frame_selector(frame_selector)?;
+    let domain = unclip_store::DomainReader::get_domain_version(
+        &repositories.domains,
+        &domain_id,
+        &domain_version,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
+    let frame = unclip_store::DomainReader::get_measurement_frame(
+        &repositories.domains,
+        &frame_id,
+        &frame_version,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("measurement frame version not found: {frame_selector}"))?;
+
+    let observation_id = unclip_observe::ObservationId::new(observation_id);
+    let observation = unclip_store::ObservationRepository::get_recorded_observation(
+        &repositories.observations,
+        &observation_id,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("observation not found: {}", observation_id.0))?;
+    let alignment_records = unclip_store::ObservationRepository::alignments_for_observation(
+        &repositories.observations,
+        &observation_id,
+    )
+    .await?;
+    let ranking_records = unclip_store::ObservationRepository::rankings_for_observation(
+        &repositories.observations,
+        &observation_id,
+    )
+    .await?;
+    let observations = vec![unclip_epistemic::Tracked::from_recorded(
+        observation.provenance,
+        observation.value,
+    )];
+    let alignments = alignment_records
+        .into_iter()
+        .map(|record| unclip_epistemic::Tracked::from_recorded(record.provenance, record.value))
+        .collect::<Vec<_>>();
+    let rankings = ranking_records
+        .into_iter()
+        .map(|record| unclip_epistemic::Tracked::from_recorded(record.provenance, record.value))
+        .collect::<Vec<_>>();
+
+    let parsed = document.resolve()?;
+    let engine = unclip_engine::Engine::with_builtins()?;
+    let plan = engine.plan(&parsed.profile)?;
+    anyhow::ensure!(
+        !plan.sensors.is_empty(),
+        "engine profile must select at least one sensor"
+    );
+    let timestamp = unclip_store::now();
+    let run_id = format!("measure-{timestamp}");
+    let profile_id = format!("{run_id}/profile");
+    let run_record = engine.run_record(
+        &plan,
+        &parsed.params,
+        &run_id,
+        unclip_epistemic::Timestamp::new(timestamp.clone()),
+        serde_json::json!({
+            "observation": observation_id.0,
+            "profile": profile_path,
+        }),
+    );
+    unclip_store::EngineRunRepository::insert_run(&repositories.engine_runs, run_record).await?;
+    unclip_store::EngineRunRepository::transition_run(
+        &repositories.engine_runs,
+        &run_id,
+        unclip_store::EngineRunStatus::Running,
+        None,
+    )
+    .await?;
+    let calculated = engine.measure(
+        &plan,
+        unclip_engine::MeasurementInputs {
+            domain: &domain,
+            frame: &frame,
+            observations: &observations,
+            alignments: &alignments,
+            rankings: &rankings,
+        },
+        unclip_engine::MeasurementRun {
+            id: &run_id,
+            timestamp: unclip_epistemic::Timestamp::new(timestamp.clone()),
+            params: &parsed.params,
+        },
+    )?;
+
+    let mut records = Vec::with_capacity(calculated.len());
+    for value in &calculated {
+        let measurement = value.value();
+        let descriptor = plan
+            .sensors
+            .iter()
+            .map(|sensor| sensor.descriptor())
+            .find(|descriptor| descriptor.id == measurement.sensor)
+            .ok_or_else(|| {
+                anyhow::anyhow!("resolved sensor disappeared: {}", measurement.sensor.0)
+            })?;
+        let kind = match &measurement.reading {
+            unclip_measure::Reading::Value { value } => value.kind(),
+            _ => *descriptor.produces.first().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "sensor declares no measurement kind: {}",
+                    measurement.sensor.0
+                )
+            })?,
+        };
+        unclip_store::ProvenanceRepository::insert_provenance(
+            &repositories.provenance,
+            unclip_store::StoredProvenance {
+                id: value.id().clone(),
+                run_id: Some(run_id.clone()),
+                provenance: value.provenance().clone(),
+            },
+        )
+        .await?;
+        let params = parsed
+            .params
+            .get(&measurement.sensor)
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        unclip_store::MeasurementRepository::insert_sensor_run(
+            &repositories.measurements,
+            unclip_store::SensorRunRecord {
+                id: value.id().0.clone(),
+                engine_run_id: run_id.clone(),
+                sensor: measurement.sensor.clone(),
+                sensor_version: measurement.sensor_version.clone(),
+                params: params.clone(),
+                params_hash: unclip_epistemic::hash_params(&params),
+                status: "completed".into(),
+                started_at: timestamp.clone(),
+                completed_at: Some(unclip_store::now()),
+            },
+        )
+        .await?;
+        records.push(unclip_store::MeasurementRecord {
+            id: format!("{}/measurement", value.id().0),
+            sensor_run_id: value.id().0.clone(),
+            provenance: value.id().clone(),
+            kind,
+            measurement: measurement.clone(),
+        });
+        crate::output::outln!(
+            "MEASUREMENT\tCALCULATED\t{}@{}\t{}",
+            measurement.sensor,
+            measurement.sensor_version,
+            serde_json::to_string(&measurement.reading)?
+        );
+    }
+    let profile_provenance = calculated
+        .first()
+        .expect("non-empty sensor plan emits one result per sensor")
+        .id()
+        .clone();
+    unclip_store::MeasurementRepository::insert_profile(
+        &repositories.measurements,
+        unclip_store::MeasurementProfileHeader {
+            id: profile_id.clone(),
+            engine_run_id: run_id.clone(),
+            observation_id: Some(observation_id.0),
+            frame: frame_id,
+            frame_version,
+            provenance: profile_provenance,
+            created_at: unclip_store::now(),
+        },
+        records,
+    )
+    .await?;
+    unclip_store::EngineRunRepository::transition_run(
+        &repositories.engine_runs,
+        &run_id,
+        unclip_store::EngineRunStatus::Completed,
+        Some(unclip_store::now()),
+    )
+    .await?;
+    crate::output::outln!("PROFILE\tCALCULATED\t{profile_id}");
+    Ok(())
+}
+
 async fn persist_inference(
     repositories: &crate::db::Repos,
     run_id: &str,

@@ -6,8 +6,8 @@ use anyhow::Context;
 use sea_orm::{ConnectOptions, DatabaseConnection};
 use unclip_store::{
     SeaOrmBranchRepository, SeaOrmDomainRepository, SeaOrmEngineRunRepository,
-    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmObservationRepository,
-    SeaOrmPatternRepository, SeaOrmProvenanceRepository,
+    SeaOrmFrameRepository, SeaOrmHistoryRepository, SeaOrmMeasurementRepository,
+    SeaOrmObservationRepository, SeaOrmPatternRepository, SeaOrmProvenanceRepository,
 };
 
 /// Build SQLite connection options for the given file path.
@@ -71,6 +71,7 @@ pub struct Repos {
     pub engine_runs: SeaOrmEngineRunRepository,
     pub frames: SeaOrmFrameRepository,
     pub history: SeaOrmHistoryRepository,
+    pub measurements: SeaOrmMeasurementRepository,
     pub patterns: SeaOrmPatternRepository,
     pub observations: SeaOrmObservationRepository,
     pub provenance: SeaOrmProvenanceRepository,
@@ -92,6 +93,7 @@ pub async fn open_repos(path: &Path, create: bool) -> anyhow::Result<Repos> {
         engine_runs: SeaOrmEngineRunRepository::new(conn.clone()),
         frames: SeaOrmFrameRepository::new(conn.clone()),
         history: SeaOrmHistoryRepository::new(conn.clone()),
+        measurements: SeaOrmMeasurementRepository::new(conn.clone()),
         patterns: SeaOrmPatternRepository::new(conn.clone()),
         observations: SeaOrmObservationRepository::new(conn.clone()),
         provenance: SeaOrmProvenanceRepository::new(conn),

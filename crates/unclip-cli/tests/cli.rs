@@ -434,6 +434,47 @@ async fn level_domain_frame_and_observe_workflow() {
     assert_eq!(frame_value["version"], "2");
     assert_eq!(frame_value["axes"][0]["unit"], "sensory");
 
+    let measurement_profile = db.write(
+        "measure.json",
+        &serde_json::json!({
+            "domain": "coffee@7",
+            "frame": "coffee.general@2",
+            "sensors": [{"id": "sensor.coverage"}]
+        })
+        .to_string(),
+    );
+    let measured = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "manual-observation",
+            "--profile",
+            measurement_profile.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        measured.status.success(),
+        "level measure failed: {}",
+        stderr(&measured)
+    );
+    assert!(stdout(&measured).contains("MEASUREMENT\tCALCULATED\tsensor.coverage@0.1.0"));
+    let measured_stdout = stdout(&measured);
+    let profile_id = measured_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("PROFILE\tCALCULATED\t"))
+        .expect("measure output should identify its persisted profile");
+    let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
+        .await
+        .unwrap();
+    let measurements = unclip_store::SeaOrmMeasurementRepository::new(connection);
+    let stored = unclip_store::MeasurementRepository::get_profile(&measurements, profile_id)
+        .await
+        .unwrap()
+        .expect("measurement profile should be persisted");
+    assert_eq!(stored.measurements.len(), 1);
+    assert_eq!(stored.measurements[0].sensor.0, "sensor.coverage");
+
     let unversioned = unclip(&path, &["level", "domain", "show", "coffee"]);
     assert!(!unversioned.status.success());
     assert!(stderr(&unversioned).contains("domain@version"));

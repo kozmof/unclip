@@ -2513,6 +2513,7 @@ dependencies = [
  "unclip-epistemic",
  "unclip-io",
  "unclip-match",
+ "unclip-measure",
  "unclip-observe",
  "unclip-plugin",
  "unclip-sample",
