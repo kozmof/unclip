@@ -8,7 +8,7 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         found = true;
         let descriptor = plugin.descriptor();
         crate::output::outln!(
-            "{}\tinferred\t{}\t-\tinference_output",
+            "{}\tINFERRED\t{}\t-\tinference_output",
             descriptor.id,
             descriptor.version
         );
@@ -17,7 +17,7 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         found = true;
         let descriptor = plugin.descriptor();
         crate::output::outln!(
-            "{}\tcalculated\t{}\t{:?}/{:?}\t{:?}",
+            "{}\tCALCULATED\t{}\t{:?}/{:?}\t{:?}",
             descriptor.id,
             descriptor.version,
             descriptor.applicability,
@@ -29,7 +29,7 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         found = true;
         let descriptor = plugin.descriptor();
         crate::output::outln!(
-            "{}\tcalculated\t{}\t{:?}\tdelta",
+            "{}\tCALCULATED\t{}\t{:?}\tdelta",
             descriptor.id,
             descriptor.version,
             descriptor.supports

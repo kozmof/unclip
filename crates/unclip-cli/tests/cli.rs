@@ -232,6 +232,16 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("sensor.lehmer"));
     assert!(plugins.contains("sensor.kendall"));
     assert!(plugins.contains("sensor.rbo"));
+    for line in plugins.lines() {
+        let operation = line.split("\t").nth(1).expect("plugin operation column");
+        assert!(
+            matches!(
+                operation,
+                "INFERRED" | "CALCULATED" | "EXPERIMENTAL" | "INTERPRETED"
+            ),
+            "unlabeled plugin output: {line}"
+        );
+    }
     assert!(!db.path().exists());
 }
 
@@ -357,6 +367,7 @@ async fn level_domain_frame_and_observe_workflow() {
         .expect("observe output should identify its persisted run")
         .to_owned();
 
+    std::fs::remove_file(&observation_fixture).unwrap();
     let verified = unclip(&path, &["level", "verify", &run_id]);
     assert!(
         verified.status.success(),
