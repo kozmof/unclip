@@ -267,6 +267,44 @@ impl Engine {
         Ok(results)
     }
 
+    /// Replay persisted inference products and re-execute calculation stages only.
+    pub fn verify(
+        &self,
+        plan: &RunPlan,
+        domain: &DomainSnapshot,
+        frame: &MeasurementFrame,
+        replay: &unclip_store::EngineRunReplay,
+        run: MeasurementRun<'_>,
+    ) -> Result<Vec<Calculated<Measurement>>> {
+        let observations = replay
+            .observations
+            .iter()
+            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .collect::<Vec<_>>();
+        let alignments = replay
+            .alignments
+            .iter()
+            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .collect::<Vec<_>>();
+        let rankings = replay
+            .rankings
+            .iter()
+            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .collect::<Vec<_>>();
+
+        self.measure(
+            plan,
+            MeasurementInputs {
+                domain,
+                frame,
+                observations: &observations,
+                alignments: &alignments,
+                rankings: &rankings,
+            },
+            run,
+        )
+    }
+
     /// Execute inference, explanation, residual, and measurement stages in order.
     pub async fn execute(
         &self,
@@ -652,6 +690,81 @@ mod tests {
                 DerivedId::new("run-text/infer.rank-pattern")
             ]
         );
+
+        let mut replay = unclip_store::EngineRunReplay {
+            run: engine.run_record(
+                &plan,
+                &params,
+                "run-text",
+                Timestamp::new("2026-09-18T00:00:00Z"),
+                serde_json::json!({}),
+            ),
+            sensor_runs: Vec::new(),
+            provenance_ids: results
+                .inference
+                .outputs
+                .iter()
+                .map(|output| output.id().0.clone())
+                .collect(),
+            profile_ids: Vec::new(),
+            observations: Vec::new(),
+            alignments: Vec::new(),
+            rankings: Vec::new(),
+        };
+        for output in &results.inference.outputs {
+            if let unclip_plugin::InferenceOutput::Bundle {
+                observations,
+                alignments,
+                rankings,
+            } = output.value()
+            {
+                replay
+                    .observations
+                    .extend(observations.iter().cloned().map(|value| {
+                        unclip_store::RecordedInference {
+                            provenance: output.id().clone(),
+                            value,
+                        }
+                    }));
+                replay
+                    .alignments
+                    .extend(alignments.iter().cloned().map(|value| {
+                        unclip_store::RecordedInference {
+                            provenance: output.id().clone(),
+                            value,
+                        }
+                    }));
+                replay
+                    .rankings
+                    .extend(rankings.iter().cloned().map(|value| {
+                        unclip_store::RecordedInference {
+                            provenance: output.id().clone(),
+                            value,
+                        }
+                    }));
+            }
+        }
+        let expected = results
+            .explanations
+            .iter()
+            .chain(&results.residuals)
+            .chain(&results.measurements)
+            .cloned()
+            .collect::<Vec<_>>();
+        let verified = engine
+            .verify(
+                &plan,
+                &domain,
+                &frame,
+                &replay,
+                MeasurementRun {
+                    id: "run-text",
+                    timestamp: Timestamp::new("2026-09-18T00:00:00Z"),
+                    params: &params,
+                },
+            )
+            .unwrap();
+        assert_eq!(verified, expected);
     }
     #[test]
     fn run_record_captures_resolved_plugins_parameters_and_hashes() {

@@ -22,7 +22,7 @@ mod sqlite_limits;
 
 pub use domain_repository::{DomainReader, DomainWriter, SeaOrmDomainRepository};
 pub use engine_run_repository::{
-    EngineRunRecord, EngineRunReplay, EngineRunRepository, EngineRunStatus,
+    EngineRunRecord, EngineRunReplay, EngineRunRepository, EngineRunStatus, RecordedInference,
     SeaOrmEngineRunRepository,
 };
 pub use error::{StoreError, StoreResult};

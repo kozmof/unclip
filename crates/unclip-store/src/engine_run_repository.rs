@@ -5,10 +5,13 @@ use sea_orm::{
     sea_query::Expr, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder,
 };
-use unclip_entity::{engine_runs, measurement_profiles, provenance, sensor_runs};
+use unclip_entity::{
+    alignments as alignment_rows, engine_runs, measurement_profiles,
+    observations as observation_rows, provenance, rankings as ranking_rows, sensor_runs,
+};
 use unclip_epistemic::{ParameterHash, PluginId};
 
-use crate::{SensorRunRecord, StoreError, StoreResult};
+use crate::{ObservationRepository, SensorRunRecord, StoreError, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineRunStatus {
@@ -62,11 +65,20 @@ pub struct EngineRunRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct RecordedInference<T> {
+    pub provenance: unclip_epistemic::DerivedId,
+    pub value: T,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct EngineRunReplay {
     pub run: EngineRunRecord,
     pub sensor_runs: Vec<SensorRunRecord>,
     pub provenance_ids: Vec<String>,
     pub profile_ids: Vec<String>,
+    pub observations: Vec<RecordedInference<unclip_observe::Observation>>,
+    pub alignments: Vec<RecordedInference<unclip_observe::Alignment>>,
+    pub rankings: Vec<RecordedInference<unclip_observe::PartialRanking>>,
 }
 
 #[async_trait]
@@ -213,7 +225,7 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
             .into_iter()
             .map(hydrate_sensor_run)
             .collect::<StoreResult<Vec<_>>>()?;
-        let provenance_ids = provenance::Entity::find()
+        let provenance_ids: Vec<String> = provenance::Entity::find()
             .filter(provenance::Column::RunId.eq(id))
             .order_by_asc(provenance::Column::DerivedId)
             .all(&self.db)
@@ -221,6 +233,68 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
             .into_iter()
             .map(|row| row.derived_id)
             .collect();
+
+        let observation_repo = crate::SeaOrmObservationRepository::new(self.db.clone());
+        let observation_rows = if provenance_ids.is_empty() {
+            Vec::new()
+        } else {
+            observation_rows::Entity::find()
+                .filter(observation_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                .order_by_asc(observation_rows::Column::Id)
+                .all(&self.db)
+                .await?
+        };
+        let mut observations = Vec::with_capacity(observation_rows.len());
+        for row in observation_rows {
+            let value = observation_repo
+                .get_observation(&unclip_observe::ObservationId::new(&row.id))
+                .await?
+                .ok_or_else(|| invalid(format!("missing replay observation: {}", row.id)))?;
+            observations.push(RecordedInference {
+                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                value,
+            });
+        }
+        let alignment_rows = if provenance_ids.is_empty() {
+            Vec::new()
+        } else {
+            alignment_rows::Entity::find()
+                .filter(alignment_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                .order_by_asc(alignment_rows::Column::Id)
+                .all(&self.db)
+                .await?
+        };
+        let mut alignments = Vec::with_capacity(alignment_rows.len());
+        for row in alignment_rows {
+            let value = observation_repo
+                .get_alignment(&row.id)
+                .await?
+                .ok_or_else(|| invalid(format!("missing replay alignment: {}", row.id)))?;
+            alignments.push(RecordedInference {
+                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                value,
+            });
+        }
+        let ranking_rows = if provenance_ids.is_empty() {
+            Vec::new()
+        } else {
+            ranking_rows::Entity::find()
+                .filter(ranking_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                .order_by_asc(ranking_rows::Column::Id)
+                .all(&self.db)
+                .await?
+        };
+        let mut rankings = Vec::with_capacity(ranking_rows.len());
+        for row in ranking_rows {
+            let value = observation_repo
+                .get_ranking(&row.id)
+                .await?
+                .ok_or_else(|| invalid(format!("missing replay ranking: {}", row.id)))?;
+            rankings.push(RecordedInference {
+                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                value,
+            });
+        }
         let profile_ids = measurement_profiles::Entity::find()
             .filter(measurement_profiles::Column::EngineRunId.eq(id))
             .order_by_asc(measurement_profiles::Column::Id)
@@ -234,6 +308,9 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
             sensor_runs,
             provenance_ids,
             profile_ids,
+            observations,
+            alignments,
+            rankings,
         }))
     }
 }

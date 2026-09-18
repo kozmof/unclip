@@ -3,7 +3,7 @@ use serde_json::json;
 use unclip_epistemic::{hash_params, DerivedId, Operation, PluginId, Provenance, Timestamp};
 use unclip_store::{
     connect_and_migrate, EngineRunRecord, EngineRunRepository, EngineRunStatus,
-    MeasurementRepository, ProvenanceRepository, SeaOrmEngineRunRepository,
+    MeasurementRepository, ObservationRepository, ProvenanceRepository, SeaOrmEngineRunRepository,
     SeaOrmMeasurementRepository, SeaOrmProvenanceRepository, SensorRunRecord, StoreError,
     StoredProvenance,
 };
@@ -101,6 +101,52 @@ async fn lifecycle_and_replay_bundle_round_trip() {
         .await
         .unwrap();
 
+    seed_profile_parents(&db).await;
+    let observation_repo = unclip_store::SeaOrmObservationRepository::new(db.clone());
+    let observation = unclip_observe::Observation {
+        id: unclip_observe::ObservationId::new("observation"),
+        source: unclip_epistemic::SourceRef::new("fixture"),
+        observed_at: None,
+        units: vec![unclip_observe::ObservedUnit {
+            id: unclip_observe::ObservedUnitId::new("observed"),
+            label: "observed".into(),
+            salience: None,
+            uncertainty: None,
+            context: std::collections::BTreeMap::new(),
+        }],
+        relations: Vec::new(),
+        context: std::collections::BTreeMap::new(),
+    };
+    observation_repo
+        .insert_observation(observation.clone(), &DerivedId::new("prov-a"))
+        .await
+        .unwrap();
+    observation_repo
+        .insert_alignment(
+            "alignment",
+            unclip_observe::Alignment {
+                observation: observation.id.clone(),
+                candidates: Vec::new(),
+            },
+            &unclip_domain::DomainId::new("domain"),
+            &unclip_epistemic::DomainVersion::new("1"),
+            &DerivedId::new("prov-a"),
+        )
+        .await
+        .unwrap();
+    observation_repo
+        .insert_ranking(
+            "ranking",
+            unclip_observe::PartialRanking {
+                observation: observation.id.clone(),
+                tiers: Vec::new(),
+                unknown: vec![unclip_observe::ObservedUnitId::new("observed")],
+            },
+            &DerivedId::new("prov-a"),
+        )
+        .await
+        .unwrap();
+
     let measurements = SeaOrmMeasurementRepository::new(db.clone());
     measurements
         .insert_sensor_run(sensor("run-z", "sensor.z"))
@@ -110,8 +156,6 @@ async fn lifecycle_and_replay_bundle_round_trip() {
         .insert_sensor_run(sensor("run-a", "sensor.a"))
         .await
         .unwrap();
-    seed_profile_parents(&db).await;
-
     runs.transition_run("run", EngineRunStatus::Completed, Some("end".into()))
         .await
         .unwrap();
@@ -128,6 +172,13 @@ async fn lifecycle_and_replay_bundle_round_trip() {
     );
     assert_eq!(replay.provenance_ids, vec!["prov-a", "prov-b"]);
     assert_eq!(replay.profile_ids, vec!["profile-b"]);
+    assert_eq!(replay.observations.len(), 1);
+    assert_eq!(replay.observations[0].provenance, DerivedId::new("prov-a"));
+    assert_eq!(replay.observations[0].value, observation);
+    assert_eq!(replay.alignments.len(), 1);
+    assert_eq!(replay.alignments[0].provenance, DerivedId::new("prov-a"));
+    assert_eq!(replay.rankings.len(), 1);
+    assert_eq!(replay.rankings[0].provenance, DerivedId::new("prov-a"));
 }
 
 #[tokio::test]

@@ -238,6 +238,11 @@ impl<T> Tracked<T> {
         }
     }
 
+    /// Restore a tracked value using its persisted provenance identity.
+    pub fn from_recorded(id: DerivedId, value: T) -> Self {
+        Self { id, value }
+    }
+
     pub fn id(&self) -> &DerivedId {
         &self.id
     }
