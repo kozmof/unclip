@@ -81,6 +81,57 @@ fn parse_domain_selector(
     ))
 }
 
+pub(crate) async fn frame_import(
+    repository: &impl unclip_store::DomainWriter,
+    file: &std::path::Path,
+) -> anyhow::Result<()> {
+    let document = unclip_io::load_measurement_frame(file)?;
+    let selector = format!("{}@{}", document.frame.id.0, document.frame.version.0);
+    let axes = document.frame.axes.len();
+    repository
+        .insert_measurement_frame(
+            &document.domain_id,
+            &document.domain_version,
+            document.frame,
+        )
+        .await?;
+    crate::output::outln!("imported measurement frame {selector} ({axes} axis/axes)");
+    Ok(())
+}
+
+pub(crate) async fn frame_show(
+    repository: &impl unclip_store::DomainReader,
+    selector: &str,
+    format: unclip_io::Format,
+) -> anyhow::Result<()> {
+    let (frame, version) = parse_frame_selector(selector)?;
+    let snapshot = repository
+        .get_measurement_frame(&frame, &version)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("measurement frame version not found: {selector}"))?;
+    let rendered = match format {
+        unclip_io::Format::Yaml => serde_norway::to_string(&snapshot)?,
+        unclip_io::Format::Json => format!("{}\n", serde_json::to_string_pretty(&snapshot)?),
+        unclip_io::Format::Jsonl => {
+            anyhow::bail!("JSONL is not supported for measurement frames")
+        }
+    };
+    crate::output::write_stdout(&rendered)
+}
+
+fn parse_frame_selector(
+    selector: &str,
+) -> anyhow::Result<(unclip_domain::FrameId, unclip_epistemic::FrameVersion)> {
+    let (frame, version) = selector
+        .rsplit_once('@')
+        .filter(|(frame, version)| !frame.is_empty() && !version.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("frame selector must be frame@version"))?;
+    Ok((
+        unclip_domain::FrameId::new(frame),
+        unclip_epistemic::FrameVersion::new(version),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +144,10 @@ mod tests {
         assert!(parse_domain_selector("coffee").is_err());
         assert!(parse_domain_selector("@7").is_err());
         assert!(parse_domain_selector("coffee@").is_err());
+
+        let (frame, frame_version) = parse_frame_selector("coffee.general@2").unwrap();
+        assert_eq!(frame.0, "coffee.general");
+        assert_eq!(frame_version.0, "2");
+        assert!(parse_frame_selector("coffee.general").is_err());
     }
 }

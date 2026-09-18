@@ -236,7 +236,7 @@ fn level_plugins_does_not_require_a_database() {
 }
 
 #[test]
-fn level_domain_import_and_show_round_trip() {
+fn level_domain_and_frame_import_show_round_trip() {
     let db = TempDb::new();
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
@@ -300,6 +300,62 @@ fn level_domain_import_and_show_round_trip() {
         value["domain"]["units"]["sensory"]["properties"]["weight"],
         0.75
     );
+
+    let frame_fixture = db.write(
+        "frame.yaml",
+        r#"measurement_frame:
+  domain_id: coffee
+  domain_version: "7"
+  frame:
+    id: coffee.general
+    version: "2"
+    axes:
+      - unit: sensory
+        label: Sensory axis
+      - unit: social
+        label: null
+"#,
+    );
+    let frame_imported = unclip(
+        &path,
+        &["level", "frame", "import", frame_fixture.to_str().unwrap()],
+    );
+    assert!(
+        frame_imported.status.success(),
+        "frame import failed: {}",
+        stderr(&frame_imported)
+    );
+    assert!(stdout(&frame_imported).contains("coffee.general@2"));
+
+    let frame_yaml = unclip(&path, &["level", "frame", "show", "coffee.general@2"]);
+    assert!(
+        frame_yaml.status.success(),
+        "frame show failed: {}",
+        stderr(&frame_yaml)
+    );
+    assert!(stdout(&frame_yaml).contains("id: coffee.general"));
+    assert!(stdout(&frame_yaml).contains("unit: sensory"));
+
+    let frame_json = unclip(
+        &path,
+        &[
+            "level",
+            "frame",
+            "show",
+            "coffee.general@2",
+            "--format",
+            "json",
+        ],
+    );
+    assert!(
+        frame_json.status.success(),
+        "frame JSON show failed: {}",
+        stderr(&frame_json)
+    );
+    let frame_value: serde_json::Value = serde_json::from_str(&stdout(&frame_json)).unwrap();
+    assert_eq!(frame_value["id"], "coffee.general");
+    assert_eq!(frame_value["version"], "2");
+    assert_eq!(frame_value["axes"][0]["unit"], "sensory");
 
     let unversioned = unclip(&path, &["level", "domain", "show", "coffee"]);
     assert!(!unversioned.status.success());

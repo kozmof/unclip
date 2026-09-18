@@ -5,7 +5,7 @@ use clap::Parser;
 use unclip_io::split_frame_selector;
 use unclip_store::FrameRepository;
 
-use crate::cli::{Cli, Command, LevelAction, LevelDomainAction, PatternAction};
+use crate::cli::{Cli, Command, LevelAction, LevelDomainAction, LevelFrameAction, PatternAction};
 use crate::{commands, db, matching, sampling, usage};
 
 use commands::QueryInput;
@@ -220,6 +220,14 @@ pub async fn run() -> anyhow::Result<()> {
                 }
                 LevelDomainAction::Show { selector, format } => {
                     crate::leveling::domain_show(&repos.domains, &selector, format).await?;
+                }
+            },
+            LevelAction::Frame { action } => match action {
+                LevelFrameAction::Import { file } => {
+                    crate::leveling::frame_import(&repos.domains, &file).await?;
+                }
+                LevelFrameAction::Show { selector, format } => {
+                    crate::leveling::frame_show(&repos.domains, &selector, format).await?;
                 }
             },
         },

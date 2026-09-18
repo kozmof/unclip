@@ -247,6 +247,26 @@ pub(crate) enum LevelAction {
         #[command(subcommand)]
         action: LevelDomainAction,
     },
+
+    /// Inspect immutable measurement-frame versions.
+    Frame {
+        #[command(subcommand)]
+        action: LevelFrameAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum LevelFrameAction {
+    /// Import a measurement-frame document from YAML or JSON.
+    Import { file: PathBuf },
+
+    /// Show a stored measurement-frame version.
+    Show {
+        /// Immutable frame selector in frame@version form.
+        selector: String,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+    },
 }
 
 #[derive(Subcommand)]
