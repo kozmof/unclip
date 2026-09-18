@@ -241,6 +241,26 @@ pub(crate) enum Command {
 pub(crate) enum LevelAction {
     /// List the leveling plugins compiled into this binary.
     Plugins,
+
+    /// Manage immutable semantic-domain versions.
+    Domain {
+        #[command(subcommand)]
+        action: LevelDomainAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum LevelDomainAction {
+    /// Import a semantic-domain snapshot from YAML or JSON.
+    Import { file: PathBuf },
+
+    /// Show a stored semantic-domain version.
+    Show {
+        /// Immutable domain selector in domain@version form.
+        selector: String,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+    },
 }
 
 #[derive(Subcommand)]

@@ -236,6 +236,77 @@ fn level_plugins_does_not_require_a_database() {
 }
 
 #[test]
+fn level_domain_import_and_show_round_trip() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    let fixture = db.write(
+        "domain.yaml",
+        r#"domain:
+  id: coffee
+  version: "7"
+  units:
+    sensory:
+      id: sensory
+      kind: atomic_meaning
+      label: Sensory
+      properties:
+        weight: 0.75
+    social:
+      id: social
+      kind: semantic_role
+      label: Social
+      properties: {}
+  relations:
+    connects:
+      id: connects
+      source: sensory
+      target: social
+      kind: association
+      properties: {}
+"#,
+    );
+
+    let imported = unclip(
+        &path,
+        &["level", "domain", "import", fixture.to_str().unwrap()],
+    );
+    assert!(
+        imported.status.success(),
+        "domain import failed: {}",
+        stderr(&imported)
+    );
+    assert!(stdout(&imported).contains("imported domain coffee@7"));
+
+    let yaml = unclip(&path, &["level", "domain", "show", "coffee@7"]);
+    assert!(
+        yaml.status.success(),
+        "domain show failed: {}",
+        stderr(&yaml)
+    );
+    assert!(stdout(&yaml).contains("id: coffee"));
+    assert!(stdout(&yaml).contains("version: '7'"));
+    assert!(stdout(&yaml).contains("sensory"));
+
+    let json = unclip(
+        &path,
+        &["level", "domain", "show", "coffee@7", "--format", "json"],
+    );
+    assert!(json.status.success(), "JSON show failed: {}", stderr(&json));
+    let value: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+    assert_eq!(value["domain"]["id"], "coffee");
+    assert_eq!(value["domain"]["version"], "7");
+    assert_eq!(
+        value["domain"]["units"]["sensory"]["properties"]["weight"],
+        0.75
+    );
+
+    let unversioned = unclip(&path, &["level", "domain", "show", "coffee"]);
+    assert!(!unversioned.status.success());
+    assert!(stderr(&unversioned).contains("domain@version"));
+}
+
+#[test]
 fn level_help_lists_plugins_command() {
     let db = TempDb::new();
     let out = unclip(&db.path(), &["level", "--help"]);

@@ -5,7 +5,7 @@ use clap::Parser;
 use unclip_io::split_frame_selector;
 use unclip_store::FrameRepository;
 
-use crate::cli::{Cli, Command, LevelAction, PatternAction};
+use crate::cli::{Cli, Command, LevelAction, LevelDomainAction, PatternAction};
 use crate::{commands, db, matching, sampling, usage};
 
 use commands::QueryInput;
@@ -212,7 +212,17 @@ pub async fn run() -> anyhow::Result<()> {
             }
         },
         Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,
-        Command::Level { .. } => unreachable!("level commands return before opening repositories"),
+        Command::Level { action } => match action {
+            LevelAction::Plugins => unreachable!("plugins returns before opening repositories"),
+            LevelAction::Domain { action } => match action {
+                LevelDomainAction::Import { file } => {
+                    crate::leveling::domain_import(&repos.domains, &file).await?;
+                }
+                LevelDomainAction::Show { selector, format } => {
+                    crate::leveling::domain_show(&repos.domains, &selector, format).await?;
+                }
+            },
+        },
     }
 
     Ok(())
