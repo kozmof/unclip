@@ -7,6 +7,7 @@ pub mod domain;
 pub mod format;
 pub mod frames;
 pub mod measurement_frame;
+pub mod observation;
 pub mod packet;
 pub mod text;
 
@@ -17,6 +18,10 @@ pub use frames::{load_frames, parse_frames, split_frame_selector};
 pub use measurement_frame::{
     load_measurement_frame, parse_measurement_frame, render_measurement_frame,
     MeasurementFrameDocument,
+};
+pub use observation::{
+    load_manual_observation, parse_manual_observation, render_manual_observation,
+    ManualObservationDocument,
 };
 pub use packet::{render_packet, render_packets};
 pub use text::{read_text_file, MAX_TEXT_BYTES};

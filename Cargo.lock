@@ -2590,6 +2590,7 @@ dependencies = [
  "unclip-core",
  "unclip-domain",
  "unclip-epistemic",
+ "unclip-observe",
 ]
 
 [[package]]

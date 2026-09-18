@@ -27,6 +27,7 @@ string_id!(ObservedUnitId);
 string_id!(ObservedRelationId);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedUnit {
     pub id: ObservedUnitId,
     pub label: String,
@@ -37,6 +38,7 @@ pub struct ObservedUnit {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedRelation {
     pub id: ObservedRelationId,
     pub source: ObservedUnitId,
@@ -46,6 +48,7 @@ pub struct ObservedRelation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Observation {
     pub id: ObservationId,
     pub source: SourceRef,
@@ -57,6 +60,7 @@ pub struct Observation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AlignmentCandidate {
     pub observed: ObservedUnitId,
     pub domain: UnitId,
@@ -66,17 +70,20 @@ pub struct AlignmentCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Alignment {
     pub observation: ObservationId,
     pub candidates: Vec<AlignmentCandidate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RankTier {
     pub units: Vec<ObservedUnitId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PartialRanking {
     pub observation: ObservationId,
     pub tiers: Vec<RankTier>,
