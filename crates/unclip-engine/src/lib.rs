@@ -98,6 +98,22 @@ impl InferenceResults {
     }
 }
 
+#[derive(Debug)]
+pub struct PipelineResults {
+    pub inference: InferenceResults,
+    pub explanations: Vec<Calculated<Measurement>>,
+    pub residuals: Vec<Calculated<Measurement>>,
+    pub measurements: Vec<Calculated<Measurement>>,
+}
+
+fn calculation_stage(plugin: &PluginId) -> u8 {
+    match plugin.0.as_str() {
+        "sensor.coverage" => 0,
+        "sensor.residual" => 1,
+        _ => 2,
+    }
+}
+
 /// Inputs already established by observation and inference stages.
 pub struct MeasurementInputs<'a> {
     pub domain: &'a DomainSnapshot,
@@ -180,7 +196,51 @@ impl Engine {
         Ok(results)
     }
 
-    /// Execute calculation sensors in stable plugin-id order.
+    /// Execute inference, explanation, residual, and measurement stages in order.
+    pub async fn execute(
+        &self,
+        plan: &RunPlan,
+        domain: &DomainSnapshot,
+        frame: &MeasurementFrame,
+        run: InferenceRun<'_>,
+    ) -> Result<PipelineResults> {
+        let measurement_run = MeasurementRun {
+            id: run.id,
+            timestamp: run.timestamp.clone(),
+            params: run.params,
+        };
+        let inference = self.infer(plan, domain, run).await?;
+        let calculated = self.measure(
+            plan,
+            MeasurementInputs {
+                domain,
+                frame,
+                observations: &inference.observations,
+                alignments: &inference.alignments,
+                rankings: &inference.rankings,
+            },
+            measurement_run,
+        )?;
+
+        let mut explanations = Vec::new();
+        let mut residuals = Vec::new();
+        let mut measurements = Vec::new();
+        for value in calculated {
+            match calculation_stage(&value.value().sensor) {
+                0 => explanations.push(value),
+                1 => residuals.push(value),
+                _ => measurements.push(value),
+            }
+        }
+        Ok(PipelineResults {
+            inference,
+            explanations,
+            residuals,
+            measurements,
+        })
+    }
+
+    /// Execute calculation sensors in stable stage and plugin-id order.
     ///
     /// Every invocation gets a fresh dependency collector so provenance cannot
     /// leak reads from one sensor into another.
@@ -191,7 +251,13 @@ impl Engine {
         run: MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Measurement>>> {
         let mut sensors = plan.sensors.iter().collect::<Vec<_>>();
-        sensors.sort_by(|left, right| left.descriptor().id.cmp(&right.descriptor().id));
+        sensors.sort_by(|left, right| {
+            let left = left.descriptor();
+            let right = right.descriptor();
+            calculation_stage(&left.id)
+                .cmp(&calculation_stage(&right.id))
+                .then_with(|| left.id.cmp(&right.id))
+        });
 
         let empty_params = serde_json::json!({});
         let mut measurements = Vec::new();
@@ -314,11 +380,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "sensor.coverage",
+                "sensor.residual",
                 "sensor.kendall",
                 "sensor.lehmer",
                 "sensor.permutation",
                 "sensor.rbo",
-                "sensor.residual",
             ]
         );
         assert!(measurements.iter().all(|measurement| matches!(
@@ -404,7 +470,11 @@ mod tests {
                 PluginSelection::any("infer.pattern"),
                 PluginSelection::any("infer.rank-pattern"),
             ],
-            sensors: vec![PluginSelection::any("sensor.permutation")],
+            sensors: vec![
+                PluginSelection::any("sensor.coverage"),
+                PluginSelection::any("sensor.residual"),
+                PluginSelection::any("sensor.permutation"),
+            ],
             ..EngineProfile::default()
         };
         let plan = engine.plan(&profile).unwrap();
@@ -461,15 +531,15 @@ mod tests {
                 serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"}),
             ),
         ]);
-        let timestamp = Timestamp::new("2026-09-18T00:00:00Z");
-        let inferred = engine
-            .infer(
+        let results = engine
+            .execute(
                 &plan,
                 &domain,
+                &frame,
                 InferenceRun {
                     id: "run-text",
                     source: SourceRef::new("notes/ordinary.txt"),
-                    timestamp: timestamp.clone(),
+                    timestamp: Timestamp::new("2026-09-18T00:00:00Z"),
                     params: &params,
                     io: &OrdinaryTextIo,
                 },
@@ -477,35 +547,27 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(inferred.outputs.len(), 2);
-        assert_eq!(inferred.observations.len(), 2);
-        assert_eq!(inferred.alignments.len(), 1);
-        assert_eq!(inferred.rankings.len(), 1);
+        assert_eq!(results.inference.outputs.len(), 2);
+        assert_eq!(results.inference.observations.len(), 2);
+        assert_eq!(results.inference.alignments.len(), 1);
+        assert_eq!(results.inference.rankings.len(), 1);
         assert_eq!(
-            inferred.rankings[0].id(),
+            results.inference.rankings[0].id(),
             &DerivedId::new("run-text/infer.rank-pattern")
         );
-
-        let measurements = engine
-            .measure(
-                &plan,
-                MeasurementInputs {
-                    domain: &domain,
-                    frame: &frame,
-                    observations: &inferred.observations,
-                    alignments: &inferred.alignments,
-                    rankings: &inferred.rankings,
-                },
-                MeasurementRun {
-                    id: "run-text",
-                    timestamp,
-                    params: &params,
-                },
-            )
-            .unwrap();
-
+        assert!(!results.explanations.is_empty());
+        assert!(results
+            .explanations
+            .iter()
+            .all(|value| value.value().sensor == PluginId::new("sensor.coverage")));
+        assert!(!results.residuals.is_empty());
+        assert!(results
+            .residuals
+            .iter()
+            .all(|value| value.value().sensor == PluginId::new("sensor.residual")));
+        assert_eq!(results.measurements.len(), 1);
         assert!(matches!(
-            &measurements[0].value().reading,
+            &results.measurements[0].value().reading,
             Reading::Value {
                 value: MeasurementValue::Ranking(state)
             } if state.tiers == vec![vec![u1]]
@@ -513,7 +575,7 @@ mod tests {
                 && state.unresolved.is_empty()
         ));
         assert_eq!(
-            measurements[0].provenance().inputs,
+            results.measurements[0].provenance().inputs,
             vec![
                 DerivedId::new("run-text/infer.pattern"),
                 DerivedId::new("run-text/infer.rank-pattern")
