@@ -230,6 +230,14 @@ where
 }
 
 impl<T> Tracked<T> {
+    /// Track a value extracted from a derived aggregate under that aggregate's provenance id.
+    pub fn from_derived<S, O: OperationKind>(source: &Derived<S, O>, value: T) -> Self {
+        Self {
+            id: source.id.clone(),
+            value,
+        }
+    }
+
     pub fn id(&self) -> &DerivedId {
         &self.id
     }

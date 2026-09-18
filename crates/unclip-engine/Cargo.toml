@@ -19,3 +19,7 @@ unclip-observe.workspace = true
 unclip-plugin.workspace = true
 unclip-sensors.workspace = true
 unclip-store.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio.workspace = true

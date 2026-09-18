@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
-    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, PluginId, Timestamp,
-    Tracked,
+    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, InferenceToken,
+    Inferred, PluginId, SourceRef, Timestamp, Tracked,
 };
 use unclip_measure::{Measurement, MeasurementContext};
 use unclip_observe::{Alignment, Observation, PartialRanking};
@@ -21,6 +21,81 @@ pub fn builtin_registry() -> Result<Registry> {
     unclip_infer::register_all(&mut registry)?;
     unclip_sensors::register_all(&mut registry)?;
     Ok(registry)
+}
+
+/// Inputs controlled by the harness for one inference stage.
+pub struct InferenceRun<'a> {
+    pub id: &'a str,
+    pub source: SourceRef,
+    pub timestamp: Timestamp,
+    pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+    pub io: &'a dyn unclip_plugin::InferenceIo,
+}
+
+/// Inferred aggregates together with typed handles for later calculation stages.
+#[derive(Debug, Default)]
+pub struct InferenceResults {
+    pub outputs: Vec<Inferred<unclip_plugin::InferenceOutput>>,
+    pub observations: Vec<Tracked<Observation>>,
+    pub alignments: Vec<Tracked<Alignment>>,
+    pub rankings: Vec<Tracked<PartialRanking>>,
+}
+
+impl InferenceResults {
+    fn push(&mut self, output: Inferred<unclip_plugin::InferenceOutput>) {
+        match output.value() {
+            unclip_plugin::InferenceOutput::Bundle {
+                observations,
+                alignments,
+                rankings,
+            } => {
+                self.observations.extend(
+                    observations
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+                self.alignments.extend(
+                    alignments
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+                self.rankings.extend(
+                    rankings
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+            }
+            unclip_plugin::InferenceOutput::Observations(values) => {
+                self.observations.extend(
+                    values
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+            }
+            unclip_plugin::InferenceOutput::Alignments(values) => {
+                self.alignments.extend(
+                    values
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+            }
+            unclip_plugin::InferenceOutput::Rankings(values) => {
+                self.rankings.extend(
+                    values
+                        .iter()
+                        .cloned()
+                        .map(|value| Tracked::from_derived(&output, value)),
+                );
+            }
+            unclip_plugin::InferenceOutput::Structured(_) => {}
+        }
+        self.outputs.push(output);
+    }
 }
 
 /// Inputs already established by observation and inference stages.
@@ -61,6 +136,48 @@ impl Engine {
 
     pub fn plan(&self, profile: &EngineProfile) -> Result<RunPlan> {
         self.registry.resolve(profile)
+    }
+
+    /// Execute all configured inferrers before any calculation sensor runs.
+    pub async fn infer(
+        &self,
+        plan: &RunPlan,
+        domain: &DomainSnapshot,
+        run: InferenceRun<'_>,
+    ) -> Result<InferenceResults> {
+        let empty_params = serde_json::json!({});
+        let mut results = InferenceResults::default();
+        for inferrer in &plan.inferrers {
+            let descriptor = inferrer.descriptor();
+            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            let ctx = unclip_plugin::InferCtx {
+                source: run.source.clone(),
+                domain,
+                params,
+                io: run.io,
+            };
+            let metadata = EmitMetadata {
+                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+                producer: descriptor.id.clone(),
+                algorithm: descriptor.id.0.clone(),
+                version: descriptor.version.clone(),
+                params: params.clone(),
+                params_hash: hash_params(params),
+                source: Some(run.source.clone()),
+                timestamp: run.timestamp.clone(),
+                domain_version: Some(domain.version.clone()),
+                frame_version: None,
+                model: None,
+            };
+            let output = inferrer
+                .infer(
+                    &ctx,
+                    InferenceToken::from_harness(metadata, DependencyCollector::default()),
+                )
+                .await?;
+            results.push(output);
+        }
+        Ok(results)
     }
 
     /// Execute calculation sensors in stable plugin-id order.
@@ -219,5 +336,188 @@ mod tests {
             );
             assert!(measurement.provenance().inputs.is_empty());
         }
+    }
+    struct OrdinaryTextIo;
+
+    #[async_trait::async_trait]
+    impl unclip_plugin::InferenceIo for OrdinaryTextIo {
+        async fn request(
+            &self,
+            _source: &SourceRef,
+            params: &serde_json::Value,
+        ) -> unclip_plugin::Result<serde_json::Value> {
+            if params.get("min_confidence").is_some() {
+                return Ok(serde_json::json!({
+                    "text": "alpha beta",
+                    "observation_id": "ordinary",
+                    "patterns": [
+                        {
+                            "pattern": "alpha",
+                            "target": {"kind": "o2o", "name": "unit", "value": "u1"}
+                        },
+                        {
+                            "pattern": "beta",
+                            "target": {"kind": "o2o", "name": "unit", "value": "u2"}
+                        }
+                    ]
+                }));
+            }
+            Ok(serde_json::json!({
+                "observation": {
+                    "id": "ordinary",
+                    "source": "notes/ordinary.txt",
+                    "observed_at": null,
+                    "units": [
+                        {
+                            "id": "hit-0-5",
+                            "label": "alpha",
+                            "salience": null,
+                            "uncertainty": null,
+                            "context": {}
+                        },
+                        {
+                            "id": "hit-6-10",
+                            "label": "beta",
+                            "salience": null,
+                            "uncertainty": null,
+                            "context": {}
+                        }
+                    ],
+                    "relations": [],
+                    "context": {}
+                },
+                "evidence": [
+                    {"pattern": "alpha", "salience": 0.9, "uncertainty": 0.1}
+                ]
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_text_is_ranked_before_state_sensors_run() {
+        use unclip_domain::{FrameAxis, Relation, Unit, UnitId, UnitKind};
+        use unclip_measure::MeasurementValue;
+
+        let engine = Engine::with_builtins().unwrap();
+        let profile = EngineProfile {
+            inferrers: vec![
+                PluginSelection::any("infer.pattern"),
+                PluginSelection::any("infer.rank-pattern"),
+            ],
+            sensors: vec![PluginSelection::any("sensor.permutation")],
+            ..EngineProfile::default()
+        };
+        let plan = engine.plan(&profile).unwrap();
+        let u1 = UnitId::new("u1");
+        let u2 = UnitId::new("u2");
+        let domain = DomainSnapshot {
+            id: DomainId::new("ordinary"),
+            version: DomainVersion::new("domain-1"),
+            units: [
+                (
+                    u1.clone(),
+                    Unit {
+                        id: u1.clone(),
+                        kind: UnitKind::AtomicMeaning,
+                        label: None,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    u2.clone(),
+                    Unit {
+                        id: u2.clone(),
+                        kind: UnitKind::AtomicMeaning,
+                        label: None,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            relations: BTreeMap::<unclip_domain::RelationId, Relation>::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("ordinary.general"),
+            version: FrameVersion::new("frame-1"),
+            axes: vec![
+                FrameAxis {
+                    unit: u1.clone(),
+                    label: None,
+                },
+                FrameAxis {
+                    unit: u2.clone(),
+                    label: None,
+                },
+            ],
+        };
+        let params = BTreeMap::from([
+            (
+                PluginId::new("infer.pattern"),
+                serde_json::json!({"min_confidence": 0.7}),
+            ),
+            (
+                PluginId::new("infer.rank-pattern"),
+                serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"}),
+            ),
+        ]);
+        let timestamp = Timestamp::new("2026-09-18T00:00:00Z");
+        let inferred = engine
+            .infer(
+                &plan,
+                &domain,
+                InferenceRun {
+                    id: "run-text",
+                    source: SourceRef::new("notes/ordinary.txt"),
+                    timestamp: timestamp.clone(),
+                    params: &params,
+                    io: &OrdinaryTextIo,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(inferred.outputs.len(), 2);
+        assert_eq!(inferred.observations.len(), 2);
+        assert_eq!(inferred.alignments.len(), 1);
+        assert_eq!(inferred.rankings.len(), 1);
+        assert_eq!(
+            inferred.rankings[0].id(),
+            &DerivedId::new("run-text/infer.rank-pattern")
+        );
+
+        let measurements = engine
+            .measure(
+                &plan,
+                MeasurementInputs {
+                    domain: &domain,
+                    frame: &frame,
+                    observations: &inferred.observations,
+                    alignments: &inferred.alignments,
+                    rankings: &inferred.rankings,
+                },
+                MeasurementRun {
+                    id: "run-text",
+                    timestamp,
+                    params: &params,
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            &measurements[0].value().reading,
+            Reading::Value {
+                value: MeasurementValue::Ranking(state)
+            } if state.tiers == vec![vec![u1]]
+                && state.unknown == vec![u2]
+                && state.unresolved.is_empty()
+        ));
+        assert_eq!(
+            measurements[0].provenance().inputs,
+            vec![
+                DerivedId::new("run-text/infer.pattern"),
+                DerivedId::new("run-text/infer.rank-pattern")
+            ]
+        );
     }
 }
