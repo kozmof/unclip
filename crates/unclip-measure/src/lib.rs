@@ -141,6 +141,32 @@ mod tests {
     }
 
     #[test]
+    fn sparse_states_and_measured_zero_are_independently_representable() {
+        let readings = [
+            Reading::NotApplicable {
+                reason: "outside domain".into(),
+            },
+            Reading::NotMeasured,
+            Reading::InsufficientEvidence { have: 0, need: 1 },
+            Reading::Value {
+                value: MeasurementValue::Scalar(0.0),
+            },
+        ];
+
+        for (left_index, left) in readings.iter().enumerate() {
+            for right in readings.iter().skip(left_index + 1) {
+                assert_ne!(left, right);
+            }
+        }
+        assert!(matches!(
+            &readings[3],
+            Reading::Value {
+                value: MeasurementValue::Scalar(value)
+            } if *value == 0.0
+        ));
+    }
+
+    #[test]
     fn kinds_are_explicit() {
         assert_eq!(
             MeasurementValue::Partition(vec![]).kind(),
