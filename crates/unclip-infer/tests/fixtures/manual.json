@@ -1,0 +1,30 @@
+{
+  "observation": {
+    "id": "manual",
+    "source": "observations/manual.yaml",
+    "observed_at": null,
+    "units": [
+      {
+        "id": "a",
+        "label": "A",
+        "salience": 0.8,
+        "uncertainty": 0.1,
+        "context": {}
+      },
+      {
+        "id": "b",
+        "label": "B",
+        "salience": 0.8,
+        "uncertainty": 0.2,
+        "context": {}
+      }
+    ],
+    "relations": [],
+    "context": {}
+  },
+  "ranking": {
+    "observation": "manual",
+    "tiers": [{"units": ["a", "b"]}],
+    "unknown": []
+  }
+}

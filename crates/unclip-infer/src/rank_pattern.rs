@@ -199,26 +199,10 @@ mod tests {
                 params,
                 &serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"})
             );
-            Ok(serde_json::json!({
-                "observation": {
-                    "id": "ranked",
-                    "source": "notes/ranking.yaml",
-                    "observed_at": null,
-                    "units": [
-                        {"id": "a", "label": "urgent alpha", "salience": null, "uncertainty": null, "context": {}},
-                        {"id": "b", "label": "urgent beta", "salience": null, "uncertainty": null, "context": {}},
-                        {"id": "c", "label": "unclassified", "salience": 0.2, "uncertainty": 0.1, "context": {}},
-                        {"id": "d", "label": "ordinary delta", "salience": null, "uncertainty": null, "context": {}}
-                    ],
-                    "relations": [],
-                    "context": {}
-                },
-                "evidence": [
-                    {"pattern": "urgent", "salience": 0.9, "uncertainty": 0.1},
-                    {"pattern": "alpha", "salience": 0.9, "uncertainty": 0.3},
-                    {"pattern": "ordinary", "salience": 0.4, "uncertainty": 0.2}
-                ]
-            }))
+            Ok(
+                serde_json::from_str(include_str!("../tests/fixtures/rank-pattern.json"))
+                    .expect("valid rank-pattern.json fixture"),
+            )
         }
     }
 

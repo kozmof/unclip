@@ -85,36 +85,10 @@ mod tests {
         ) -> Result<serde_json::Value> {
             assert_eq!(source.0, "observations/manual.yaml");
             assert_eq!(params, &serde_json::json!({"strict": true}));
-            Ok(serde_json::json!({
-                "observation": {
-                    "id": "manual",
-                    "source": "observations/manual.yaml",
-                    "observed_at": null,
-                    "units": [
-                        {
-                            "id": "a",
-                            "label": "A",
-                            "salience": 0.8,
-                            "uncertainty": 0.1,
-                            "context": {}
-                        },
-                        {
-                            "id": "b",
-                            "label": "B",
-                            "salience": 0.8,
-                            "uncertainty": 0.2,
-                            "context": {}
-                        }
-                    ],
-                    "relations": [],
-                    "context": {}
-                },
-                "ranking": {
-                    "observation": "manual",
-                    "tiers": [{"units": ["a", "b"]}],
-                    "unknown": []
-                }
-            }))
+            Ok(
+                serde_json::from_str(include_str!("../tests/fixtures/manual.json"))
+                    .expect("valid manual.json fixture"),
+            )
         }
     }
 

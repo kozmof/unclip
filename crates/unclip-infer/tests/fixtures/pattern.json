@@ -1,0 +1,23 @@
+{
+  "text": "alpha links beta",
+  "observation_id": "pattern-result",
+  "observed_at": "2026-09-18T00:00:00Z",
+  "patterns": [
+    {
+      "pattern": "alpha",
+      "target": {"kind": "o2o", "name": "unit", "value": "u1"}
+    },
+    {
+      "pattern": "alpha",
+      "target": {"kind": "o2o", "name": "unit", "value": "u3"}
+    },
+    {
+      "pattern": "beta",
+      "target": {"kind": "o2o", "name": "unit", "value": "u2"}
+    },
+    {
+      "pattern": "links",
+      "target": {"kind": "o2o", "name": "relation", "value": "r1"}
+    }
+  ]
+}

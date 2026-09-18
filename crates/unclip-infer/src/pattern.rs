@@ -177,29 +177,10 @@ mod tests {
         ) -> Result<serde_json::Value> {
             assert_eq!(source.0, "notes/pattern.txt");
             assert_eq!(params, &serde_json::json!({"min_confidence": 0.7}));
-            Ok(serde_json::json!({
-                "text": "alpha links beta",
-                "observation_id": "pattern-result",
-                "observed_at": "2026-09-18T00:00:00Z",
-                "patterns": [
-                    {
-                        "pattern": "alpha",
-                        "target": {"kind": "o2o", "name": "unit", "value": "u1"}
-                    },
-                    {
-                        "pattern": "alpha",
-                        "target": {"kind": "o2o", "name": "unit", "value": "u3"}
-                    },
-                    {
-                        "pattern": "beta",
-                        "target": {"kind": "o2o", "name": "unit", "value": "u2"}
-                    },
-                    {
-                        "pattern": "links",
-                        "target": {"kind": "o2o", "name": "relation", "value": "r1"}
-                    }
-                ]
-            }))
+            Ok(
+                serde_json::from_str(include_str!("../tests/fixtures/pattern.json"))
+                    .expect("valid pattern.json fixture"),
+            )
         }
     }
 
