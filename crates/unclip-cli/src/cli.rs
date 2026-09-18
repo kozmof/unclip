@@ -265,6 +265,11 @@ pub(crate) enum LevelAction {
         profile: PathBuf,
     },
 
+    #[command(about = "Replay persisted inference and rerun calculation stages only")]
+    Verify {
+        run_id: String,
+    },
+
     Provenance {
         derived_id: String,
     },

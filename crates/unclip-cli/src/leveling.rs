@@ -183,7 +183,12 @@ pub(crate) async fn observe(
         &parsed.params,
         &run_id,
         unclip_epistemic::Timestamp::new(timestamp.clone()),
-        serde_json::json!({"source": source, "profile": profile_path}),
+        serde_json::json!({
+            "source": source,
+            "profile": profile_path,
+            "domain": domain_selector,
+            "frame": document.frame,
+        }),
     );
     unclip_store::EngineRunRepository::insert_run(&repositories.engine_runs, record).await?;
     unclip_store::EngineRunRepository::transition_run(
@@ -237,6 +242,141 @@ pub(crate) async fn observe(
             observations,
             alignments,
             rankings
+        );
+    }
+    Ok(())
+}
+
+fn resolved_profile(
+    value: &serde_json::Value,
+) -> anyhow::Result<(
+    unclip_plugin::EngineProfile,
+    std::collections::BTreeMap<unclip_epistemic::PluginId, serde_json::Value>,
+)> {
+    fn section(
+        value: &serde_json::Value,
+        name: &str,
+        params: &mut std::collections::BTreeMap<unclip_epistemic::PluginId, serde_json::Value>,
+    ) -> anyhow::Result<Vec<unclip_plugin::PluginSelection>> {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("stored run plan has no {name} array"))?
+            .iter()
+            .map(|entry| {
+                let id = entry
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("stored {name} entry has no id"))?;
+                let version = entry
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("stored {name} entry has no version"))?;
+                let id = unclip_epistemic::PluginId::new(id);
+                params.insert(
+                    id.clone(),
+                    entry
+                        .get("params")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({})),
+                );
+                Ok(unclip_plugin::PluginSelection {
+                    id,
+                    version: format!("={version}").parse()?,
+                })
+            })
+            .collect()
+    }
+
+    let mut params = std::collections::BTreeMap::new();
+    let inferrers = section(value, "inferrers", &mut params)?;
+    let sensors = section(value, "sensors", &mut params)?;
+    let comparators = section(value, "comparators", &mut params)?;
+    Ok((
+        unclip_plugin::EngineProfile {
+            sensors,
+            inferrers,
+            comparators,
+        },
+        params,
+    ))
+}
+
+pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> anyhow::Result<()> {
+    let replay = unclip_store::EngineRunRepository::replay_run(&repositories.engine_runs, run_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("engine run not found: {run_id}"))?;
+    anyhow::ensure!(
+        !replay.observations.is_empty(),
+        "engine run has no persisted inference products: {run_id}"
+    );
+    let (profile, params) = resolved_profile(&replay.run.resolved_plan)?;
+    let engine = unclip_engine::Engine::with_builtins()?;
+    let plan = engine.plan(&profile)?;
+    if plan.sensors.is_empty() {
+        crate::output::outln!(
+            "VERIFIED\tINFERENCE_REPLAY\trun={} observations={} alignments={} rankings={} calculated=0",
+            run_id,
+            replay.observations.len(),
+            replay.alignments.len(),
+            replay.rankings.len()
+        );
+        return Ok(());
+    }
+
+    let domain_selector = replay
+        .run
+        .metadata
+        .get("domain")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("stored run metadata has no domain selector"))?;
+    let frame_selector = replay
+        .run
+        .metadata
+        .get("frame")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("stored run metadata has no frame selector"))?;
+    let (domain_id, domain_version) = parse_domain_selector(domain_selector)?;
+    let (frame_id, frame_version) = parse_frame_selector(frame_selector)?;
+    let domain = unclip_store::DomainReader::get_domain_version(
+        &repositories.domains,
+        &domain_id,
+        &domain_version,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
+    let frame = unclip_store::DomainReader::get_measurement_frame(
+        &repositories.domains,
+        &frame_id,
+        &frame_version,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("measurement frame version not found: {frame_selector}"))?;
+    let calculated = engine.verify(
+        &plan,
+        &domain,
+        &frame,
+        &replay,
+        unclip_engine::MeasurementRun {
+            id: &format!("verify-{run_id}"),
+            timestamp: unclip_epistemic::Timestamp::new(unclip_store::now()),
+            params: &params,
+        },
+    )?;
+    crate::output::outln!(
+        "VERIFIED\tINFERENCE_REPLAY\trun={} observations={} alignments={} rankings={} calculated={}",
+        run_id,
+        replay.observations.len(),
+        replay.alignments.len(),
+        replay.rankings.len(),
+        calculated.len()
+    );
+    for value in calculated {
+        crate::output::outln!(
+            "MEASUREMENT\tCALCULATED\t{}@{}\t{}",
+            value.value().sensor,
+            value.value().sensor_version,
+            serde_json::to_string(&value.value().reading)?
         );
     }
     Ok(())

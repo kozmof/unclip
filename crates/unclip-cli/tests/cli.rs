@@ -357,6 +357,16 @@ async fn level_domain_frame_and_observe_workflow() {
         .expect("observe output should identify its persisted run")
         .to_owned();
 
+    let verified = unclip(&path, &["level", "verify", &run_id]);
+    assert!(
+        verified.status.success(),
+        "level verify failed: {}",
+        stderr(&verified)
+    );
+    assert!(stdout(&verified).contains(&format!(
+        "VERIFIED\tINFERENCE_REPLAY\trun={run_id} observations=1 alignments=0 rankings=0 calculated=0"
+    )));
+
     let derived_id = format!("{run_id}/infer.manual");
     let provenance = unclip(&path, &["level", "provenance", &derived_id]);
     assert!(
@@ -530,6 +540,10 @@ fn level_help_lists_plugins_command() {
     let out = unclip(&db.path(), &["level", "--help"]);
     assert!(out.status.success(), "help failed: {}", stderr(&out));
     assert!(stdout(&out).contains("plugins"));
+    assert!(stdout(&out).contains("verify"));
+    let verify_help = unclip(&db.path(), &["level", "verify", "--help"]);
+    assert!(verify_help.status.success());
+    assert!(stdout(&verify_help).contains("Replay persisted inference"));
     assert!(!db.path().exists());
 }
 
