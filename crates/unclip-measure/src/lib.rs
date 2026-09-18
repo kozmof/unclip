@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
 use unclip_epistemic::PluginId;
-use unclip_observe::ObservedUnitId;
+use unclip_observe::{ObservationId, ObservedUnitId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +51,79 @@ impl RankedState {
             && self.unresolved.is_empty()
             && self.tiers.iter().all(|tier| tier.len() == 1)
             && self.tiers.len() == frame_size
+    }
+}
+
+/// A unit's rank at one observation in a trajectory.
+///
+/// `Missing` means the unit was absent from the partial state, while `Unknown`
+/// means the state explicitly included the unit without assigning it a rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RankPosition {
+    Ranked { rank: usize },
+    Unknown,
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RankSample {
+    pub observation: ObservationId,
+    pub position: RankPosition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RankTrajectory {
+    pub unit: UnitId,
+    pub samples: Vec<RankSample>,
+}
+
+/// Constructs per-unit trajectories from states in caller-supplied order.
+///
+/// Ranks are one-based dense ranks, so every unit in a tied tier receives the
+/// same rank. Units mentioned by a state but absent from `frame_units` are
+/// retained rather than silently discarded.
+pub fn construct_rank_trajectories(
+    frame_units: &[UnitId],
+    states: &[(ObservationId, RankedState)],
+) -> Vec<RankTrajectory> {
+    let mut units = frame_units
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for (_, state) in states {
+        units.extend(state.tiers.iter().flatten().cloned());
+        units.extend(state.unknown.iter().cloned());
+    }
+
+    units
+        .into_iter()
+        .map(|unit| RankTrajectory {
+            samples: states
+                .iter()
+                .map(|(observation, state)| RankSample {
+                    observation: observation.clone(),
+                    position: rank_position(state, &unit),
+                })
+                .collect(),
+            unit,
+        })
+        .collect()
+}
+
+fn rank_position(state: &RankedState, unit: &UnitId) -> RankPosition {
+    if let Some(rank) = state
+        .tiers
+        .iter()
+        .position(|tier| tier.iter().any(|candidate| candidate == unit))
+    {
+        RankPosition::Ranked { rank: rank + 1 }
+    } else if state.unknown.contains(unit) {
+        RankPosition::Unknown
+    } else {
+        RankPosition::Missing
     }
 }
 
@@ -131,6 +204,112 @@ pub struct EmpiricalStructure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unit(id: &str) -> UnitId {
+        UnitId::new(id)
+    }
+
+    #[test]
+    fn constructs_rank_trajectories_in_observation_order() {
+        let states = vec![
+            (
+                ObservationId::new("first"),
+                RankedState {
+                    tiers: vec![vec![unit("a"), unit("b")], vec![unit("c")]],
+                    unknown: vec![],
+                    unresolved: vec![],
+                },
+            ),
+            (
+                ObservationId::new("second"),
+                RankedState {
+                    tiers: vec![vec![unit("c")], vec![unit("a")]],
+                    unknown: vec![unit("b")],
+                    unresolved: vec![],
+                },
+            ),
+        ];
+
+        let trajectories = construct_rank_trajectories(&[unit("a"), unit("b"), unit("c")], &states);
+
+        assert_eq!(
+            trajectories,
+            vec![
+                RankTrajectory {
+                    unit: unit("a"),
+                    samples: vec![
+                        RankSample {
+                            observation: ObservationId::new("first"),
+                            position: RankPosition::Ranked { rank: 1 },
+                        },
+                        RankSample {
+                            observation: ObservationId::new("second"),
+                            position: RankPosition::Ranked { rank: 2 },
+                        },
+                    ],
+                },
+                RankTrajectory {
+                    unit: unit("b"),
+                    samples: vec![
+                        RankSample {
+                            observation: ObservationId::new("first"),
+                            position: RankPosition::Ranked { rank: 1 },
+                        },
+                        RankSample {
+                            observation: ObservationId::new("second"),
+                            position: RankPosition::Unknown,
+                        },
+                    ],
+                },
+                RankTrajectory {
+                    unit: unit("c"),
+                    samples: vec![
+                        RankSample {
+                            observation: ObservationId::new("first"),
+                            position: RankPosition::Ranked { rank: 2 },
+                        },
+                        RankSample {
+                            observation: ObservationId::new("second"),
+                            position: RankPosition::Ranked { rank: 1 },
+                        },
+                    ],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_missing_units_and_units_discovered_in_states() {
+        let states = vec![
+            (
+                ObservationId::new("first"),
+                RankedState {
+                    tiers: vec![vec![unit("outside-frame")]],
+                    unknown: vec![],
+                    unresolved: vec![],
+                },
+            ),
+            (
+                ObservationId::new("second"),
+                RankedState {
+                    tiers: vec![],
+                    unknown: vec![unit("frame-unit")],
+                    unresolved: vec![],
+                },
+            ),
+        ];
+
+        let trajectories = construct_rank_trajectories(&[unit("frame-unit")], &states);
+
+        assert_eq!(trajectories.len(), 2);
+        assert_eq!(trajectories[0].samples[0].position, RankPosition::Missing);
+        assert_eq!(trajectories[0].samples[1].position, RankPosition::Unknown);
+        assert_eq!(
+            trajectories[1].samples[0].position,
+            RankPosition::Ranked { rank: 1 }
+        );
+        assert_eq!(trajectories[1].samples[1].position, RankPosition::Missing);
+    }
 
     #[test]
     fn zero_is_a_value_not_a_sparse_status() {
