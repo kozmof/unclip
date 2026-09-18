@@ -425,6 +425,40 @@ mod tests {
     use unclip_plugin::PluginSelection;
 
     #[test]
+    fn builtin_registry_contains_only_milestone_one_plugins() {
+        let registry = builtin_registry().unwrap();
+        let inferrers = registry
+            .inferrers()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
+        let sensors = registry
+            .sensors()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
+        let comparators = registry
+            .comparators()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            inferrers,
+            vec!["infer.manual", "infer.pattern", "infer.rank-pattern"]
+        );
+        assert_eq!(
+            sensors,
+            vec![
+                "sensor.coverage",
+                "sensor.kendall",
+                "sensor.lehmer",
+                "sensor.permutation",
+                "sensor.rbo",
+                "sensor.residual",
+            ]
+        );
+        assert!(comparators.is_empty());
+    }
+
+    #[test]
     fn empty_builtin_profile_resolves() {
         let engine = Engine::with_builtins().unwrap();
         let plan = engine.plan(&EngineProfile::default()).unwrap();
