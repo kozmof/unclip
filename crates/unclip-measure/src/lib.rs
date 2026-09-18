@@ -196,6 +196,70 @@ pub fn spearman_correlation(
     left: &RankTrajectory,
     right: &RankTrajectory,
 ) -> Result<Option<Correlation>, TrajectoryAlignmentError> {
+    let (left_values, right_values) = pairwise_rank_values(left, right)?;
+    let sample_count = left_values.len();
+    if sample_count < 2 {
+        return Ok(None);
+    }
+    let left_ranks = average_ranks(&left_values);
+    let right_ranks = average_ranks(&right_values);
+    Ok(
+        pearson_correlation(&left_ranks, &right_ranks).map(|coefficient| Correlation {
+            coefficient,
+            sample_count,
+        }),
+    )
+}
+
+/// Calculates Kendall's tau-b association over pairwise-complete samples.
+///
+/// Tau-b corrects for ties in either trajectory. `None` indicates fewer than
+/// two comparable samples or no comparable variation.
+pub fn kendall_association(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+) -> Result<Option<Correlation>, TrajectoryAlignmentError> {
+    let (left_values, right_values) = pairwise_rank_values(left, right)?;
+    let sample_count = left_values.len();
+    if sample_count < 2 {
+        return Ok(None);
+    }
+
+    let mut concordant = 0_usize;
+    let mut discordant = 0_usize;
+    let mut left_ties = 0_usize;
+    let mut right_ties = 0_usize;
+    for first in 0..sample_count {
+        for second in first + 1..sample_count {
+            use std::cmp::Ordering;
+            match (
+                left_values[first].cmp(&left_values[second]),
+                right_values[first].cmp(&right_values[second]),
+            ) {
+                (Ordering::Equal, Ordering::Equal) => {}
+                (Ordering::Equal, _) => left_ties += 1,
+                (_, Ordering::Equal) => right_ties += 1,
+                (left_order, right_order) if left_order == right_order => concordant += 1,
+                _ => discordant += 1,
+            }
+        }
+    }
+
+    let untied = concordant + discordant;
+    let denominator = (((untied + left_ties) as f64) * ((untied + right_ties) as f64)).sqrt();
+    if denominator == 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(Correlation {
+        coefficient: (concordant as f64 - discordant as f64) / denominator,
+        sample_count,
+    }))
+}
+
+fn pairwise_rank_values(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+) -> Result<(Vec<usize>, Vec<usize>), TrajectoryAlignmentError> {
     let mut left_values = Vec::new();
     let mut right_values = Vec::new();
 
@@ -232,19 +296,7 @@ pub fn spearman_correlation(
                 .map(|sample| sample.observation.clone()),
         });
     }
-
-    let sample_count = left_values.len();
-    if sample_count < 2 {
-        return Ok(None);
-    }
-    let left_ranks = average_ranks(&left_values);
-    let right_ranks = average_ranks(&right_values);
-    Ok(
-        pearson_correlation(&left_ranks, &right_ranks).map(|coefficient| Correlation {
-            coefficient,
-            sample_count,
-        }),
-    )
+    Ok((left_values, right_values))
 }
 
 fn average_ranks(values: &[usize]) -> Vec<f64> {
@@ -656,6 +708,72 @@ mod tests {
                 right: Some(ObservationId::new("two")),
             })
         );
+    }
+
+    #[test]
+    fn kendall_tau_b_corrects_for_ties_and_sparse_samples() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Unknown),
+                ("four", RankPosition::Ranked { rank: 2 }),
+                ("five", RankPosition::Ranked { rank: 3 }),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+                ("four", RankPosition::Ranked { rank: 3 }),
+                ("five", RankPosition::Ranked { rank: 3 }),
+            ],
+        );
+
+        let association = kendall_association(&left, &right).unwrap().unwrap();
+
+        assert_eq!(association.sample_count, 4);
+        assert!((association.coefficient - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn kendall_reports_inverse_and_undefined_associations() {
+        let ascending = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 3 }),
+            ],
+        );
+        let descending = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 3 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+        let constant = trajectory(
+            "c",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+
+        assert_eq!(
+            kendall_association(&ascending, &descending)
+                .unwrap()
+                .unwrap()
+                .coefficient,
+            -1.0
+        );
+        assert_eq!(kendall_association(&ascending, &constant).unwrap(), None);
     }
 
     #[test]
