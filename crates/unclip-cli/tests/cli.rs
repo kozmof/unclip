@@ -236,7 +236,7 @@ fn level_plugins_does_not_require_a_database() {
 }
 
 #[test]
-fn level_domain_and_frame_import_show_round_trip() {
+fn level_domain_frame_and_observe_workflow() {
     let db = TempDb::new();
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
@@ -300,6 +300,57 @@ fn level_domain_and_frame_import_show_round_trip() {
         value["domain"]["units"]["sensory"]["properties"]["weight"],
         0.75
     );
+
+    let observation_fixture = db.write(
+        "observation.json",
+        r#"{
+  "observation": {
+    "id": "manual-observation",
+    "source": "observation.json",
+    "observed_at": null,
+    "units": [
+      {
+        "id": "observed",
+        "label": "Observed",
+        "salience": 0.8,
+        "uncertainty": 0.1,
+        "context": {}
+      }
+    ],
+    "relations": [],
+    "context": {}
+  }
+}"#,
+    );
+    let profile_fixture = db.write(
+        "engine.json",
+        &serde_json::json!({
+            "domain": "coffee@7",
+            "inferrers": [{
+                "id": "infer.manual",
+                "params": {"file": observation_fixture.to_str().unwrap()}
+            }]
+        })
+        .to_string(),
+    );
+    let observed = unclip(
+        &path,
+        &[
+            "level",
+            "observe",
+            observation_fixture.to_str().unwrap(),
+            "--profile",
+            profile_fixture.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        observed.status.success(),
+        "level observe failed: {}",
+        stderr(&observed)
+    );
+    assert!(stdout(&observed).contains("INFERRED"));
+    assert!(stdout(&observed).contains("infer.manual@1.0.0"));
+    assert!(stdout(&observed).contains("observations=1"));
 
     let frame_fixture = db.write(
         "frame.yaml",

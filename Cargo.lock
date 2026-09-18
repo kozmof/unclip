@@ -2500,6 +2500,7 @@ name = "unclip-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "sea-orm",
  "serde",
@@ -2512,6 +2513,7 @@ dependencies = [
  "unclip-epistemic",
  "unclip-io",
  "unclip-match",
+ "unclip-plugin",
  "unclip-sample",
  "unclip-store",
 ]

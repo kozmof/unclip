@@ -253,6 +253,13 @@ pub(crate) enum LevelAction {
         #[command(subcommand)]
         action: LevelFrameAction,
     },
+
+    /// Infer observations, alignments, and rankings using an engine profile.
+    Observe {
+        source: PathBuf,
+        #[arg(long)]
+        profile: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]

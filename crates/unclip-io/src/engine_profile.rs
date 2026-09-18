@@ -35,6 +35,10 @@ fn default_params() -> serde_json::Value {
 #[serde(deny_unknown_fields)]
 pub struct EngineProfileDocument {
     #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub frame: Option<String>,
+    #[serde(default)]
     pub sensors: Vec<PluginConfig>,
     #[serde(default)]
     pub inferrers: Vec<PluginConfig>,

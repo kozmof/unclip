@@ -230,6 +230,9 @@ pub async fn run() -> anyhow::Result<()> {
                     crate::leveling::frame_show(&repos.domains, &selector, format).await?;
                 }
             },
+            LevelAction::Observe { source, profile } => {
+                crate::leveling::observe(&repos.domains, &source, &profile).await?;
+            }
         },
     }
 

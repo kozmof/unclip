@@ -132,6 +132,86 @@ fn parse_frame_selector(
     ))
 }
 
+struct FileInferenceIo;
+
+#[async_trait::async_trait]
+impl unclip_plugin::InferenceIo for FileInferenceIo {
+    async fn request(
+        &self,
+        source: &unclip_epistemic::SourceRef,
+        params: &serde_json::Value,
+    ) -> unclip_plugin::Result<serde_json::Value> {
+        let path = params
+            .get("file")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&source.0);
+        let text = unclip_io::read_text_file(std::path::Path::new(path), "inference input")
+            .map_err(|error| unclip_plugin::PluginError::Message(error.to_string()))?;
+        serde_norway::from_str(&text)
+            .map_err(|error| unclip_plugin::PluginError::Message(error.to_string()))
+    }
+}
+
+pub(crate) async fn observe(
+    repository: &impl unclip_store::DomainReader,
+    source: &std::path::Path,
+    profile_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let document = unclip_io::load_engine_profile(profile_path)?;
+    let domain_selector = document
+        .domain
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("engine profile must select domain@version"))?;
+    let (domain_id, domain_version) = parse_domain_selector(domain_selector)?;
+    let domain = repository
+        .get_domain_version(&domain_id, &domain_version)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
+    let parsed = document.resolve()?;
+    let engine = unclip_engine::Engine::with_builtins()?;
+    let plan = engine.plan(&parsed.profile)?;
+    let source = source
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("inference source path must be valid UTF-8"))?;
+    let timestamp = unclip_store::now();
+    let results = engine
+        .infer(
+            &plan,
+            &domain,
+            unclip_engine::InferenceRun {
+                id: &format!("observe-{timestamp}"),
+                source: unclip_epistemic::SourceRef::new(source),
+                timestamp: unclip_epistemic::Timestamp::new(timestamp),
+                params: &parsed.params,
+                io: &FileInferenceIo,
+            },
+        )
+        .await?;
+
+    for output in &results.outputs {
+        let provenance = output.provenance();
+        let (observations, alignments, rankings) = match output.value() {
+            unclip_plugin::InferenceOutput::Bundle {
+                observations,
+                alignments,
+                rankings,
+            } => (observations.len(), alignments.len(), rankings.len()),
+            unclip_plugin::InferenceOutput::Observations(values) => (values.len(), 0, 0),
+            unclip_plugin::InferenceOutput::Alignments(values) => (0, values.len(), 0),
+            unclip_plugin::InferenceOutput::Rankings(values) => (0, 0, values.len()),
+            unclip_plugin::InferenceOutput::Structured(_) => (0, 0, 0),
+        };
+        crate::output::outln!(
+            "INFERRED\t{}@{}\tobservations={} alignments={} rankings={}",
+            provenance.producer,
+            provenance.version,
+            observations,
+            alignments,
+            rankings
+        );
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
