@@ -2538,6 +2538,7 @@ name = "unclip-engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "semver",
  "serde_json",
  "tokio",
  "unclip-domain",

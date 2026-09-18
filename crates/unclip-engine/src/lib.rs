@@ -154,6 +154,77 @@ impl Engine {
         self.registry.resolve(profile)
     }
 
+    /// Build a persistable planned-run record from the exact resolved plugins.
+    pub fn run_record(
+        &self,
+        plan: &RunPlan,
+        params: &BTreeMap<PluginId, serde_json::Value>,
+        id: impl Into<String>,
+        started_at: Timestamp,
+        metadata: serde_json::Value,
+    ) -> unclip_store::EngineRunRecord {
+        fn entry(
+            id: &PluginId,
+            version: &semver::Version,
+            params: &BTreeMap<PluginId, serde_json::Value>,
+        ) -> serde_json::Value {
+            let values = params
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            serde_json::json!({
+                "id": id,
+                "version": version,
+                "params_hash": hash_params(&values),
+                "params": values,
+            })
+        }
+
+        let mut inferrers = plan
+            .inferrers
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
+        let mut sensors = plan
+            .sensors
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
+        let mut comparators = plan
+            .comparators
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
+        let by_id = |left: &serde_json::Value, right: &serde_json::Value| {
+            left["id"].as_str().cmp(&right["id"].as_str())
+        };
+        inferrers.sort_by(by_id);
+        sensors.sort_by(by_id);
+        comparators.sort_by(by_id);
+
+        unclip_store::EngineRunRecord {
+            id: id.into(),
+            resolved_plan: serde_json::json!({
+                "inferrers": inferrers,
+                "sensors": sensors,
+                "comparators": comparators,
+            }),
+            status: unclip_store::EngineRunStatus::Planned,
+            started_at: started_at.0,
+            completed_at: None,
+            metadata,
+        }
+    }
+
     /// Execute all configured inferrers before any calculation sensor runs.
     pub async fn infer(
         &self,
@@ -581,5 +652,52 @@ mod tests {
                 DerivedId::new("run-text/infer.rank-pattern")
             ]
         );
+    }
+    #[test]
+    fn run_record_captures_resolved_plugins_parameters_and_hashes() {
+        let engine = Engine::with_builtins().unwrap();
+        let profile = EngineProfile {
+            inferrers: vec![PluginSelection::any("infer.pattern")],
+            sensors: vec![PluginSelection::any("sensor.coverage")],
+            ..EngineProfile::default()
+        };
+        let plan = engine.plan(&profile).unwrap();
+        let sensor_params = serde_json::json!({});
+        let inference_params = serde_json::json!({"min_confidence": 0.4});
+        let params = BTreeMap::from([
+            (PluginId::new("sensor.coverage"), sensor_params.clone()),
+            (PluginId::new("infer.pattern"), inference_params.clone()),
+        ]);
+
+        let record = engine.run_record(
+            &plan,
+            &params,
+            "run-record",
+            Timestamp::new("2026-09-18T00:00:00Z"),
+            serde_json::json!({"source": "notes.txt"}),
+        );
+
+        assert_eq!(record.status, unclip_store::EngineRunStatus::Planned);
+        assert_eq!(record.started_at, "2026-09-18T00:00:00Z");
+        assert_eq!(record.metadata, serde_json::json!({"source": "notes.txt"}));
+        assert_eq!(
+            record.resolved_plan["inferrers"][0],
+            serde_json::json!({
+                "id": "infer.pattern",
+                "version": "1.0.0",
+                "params": inference_params,
+                "params_hash": hash_params(&serde_json::json!({"min_confidence": 0.4}))
+            })
+        );
+        assert_eq!(
+            record.resolved_plan["sensors"][0],
+            serde_json::json!({
+                "id": "sensor.coverage",
+                "version": "0.1.0",
+                "params": sensor_params,
+                "params_hash": hash_params(&serde_json::json!({}))
+            })
+        );
+        assert_eq!(record.resolved_plan["comparators"], serde_json::json!([]));
     }
 }

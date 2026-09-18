@@ -11,6 +11,7 @@ description = "Stage orchestration and replay planning for the Unclip leveling e
 
 [dependencies]
 serde_json.workspace = true
+semver.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-infer.workspace = true
