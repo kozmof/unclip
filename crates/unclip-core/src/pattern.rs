@@ -102,7 +102,8 @@ impl PatternTarget {
 }
 
 /// A text pattern mapped to a structured target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PatternEntry {
     pub pattern: String,
     pub target: PatternTarget,
