@@ -105,6 +105,20 @@ pub struct RelativeRankTrajectory {
     pub samples: Vec<RelativeRankSample>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Correlation {
+    pub coefficient: f64,
+    pub sample_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrajectoryAlignmentError {
+    pub index: usize,
+    pub left: Option<ObservationId>,
+    pub right: Option<ObservationId>,
+}
+
 /// Constructs per-unit trajectories from states in caller-supplied order.
 ///
 /// Ranks are one-based dense ranks, so every unit in a tied tier receives the
@@ -171,6 +185,103 @@ pub fn construct_relative_rank_trajectories(
     }
 
     relative
+}
+
+/// Calculates Spearman's rank correlation over pairwise-complete samples.
+///
+/// Explicitly unknown and missing positions are excluded. Ties receive their
+/// average rank. `None` indicates fewer than two comparable samples or zero
+/// variance in either retained series.
+pub fn spearman_correlation(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+) -> Result<Option<Correlation>, TrajectoryAlignmentError> {
+    let mut left_values = Vec::new();
+    let mut right_values = Vec::new();
+
+    for (index, (left_sample, right_sample)) in left.samples.iter().zip(&right.samples).enumerate()
+    {
+        if left_sample.observation != right_sample.observation {
+            return Err(TrajectoryAlignmentError {
+                index,
+                left: Some(left_sample.observation.clone()),
+                right: Some(right_sample.observation.clone()),
+            });
+        }
+        if let (
+            RankPosition::Ranked { rank: left_rank },
+            RankPosition::Ranked { rank: right_rank },
+        ) = (left_sample.position, right_sample.position)
+        {
+            left_values.push(left_rank);
+            right_values.push(right_rank);
+        }
+    }
+
+    if left.samples.len() != right.samples.len() {
+        let index = left.samples.len().min(right.samples.len());
+        return Err(TrajectoryAlignmentError {
+            index,
+            left: left
+                .samples
+                .get(index)
+                .map(|sample| sample.observation.clone()),
+            right: right
+                .samples
+                .get(index)
+                .map(|sample| sample.observation.clone()),
+        });
+    }
+
+    let sample_count = left_values.len();
+    if sample_count < 2 {
+        return Ok(None);
+    }
+    let left_ranks = average_ranks(&left_values);
+    let right_ranks = average_ranks(&right_values);
+    Ok(
+        pearson_correlation(&left_ranks, &right_ranks).map(|coefficient| Correlation {
+            coefficient,
+            sample_count,
+        }),
+    )
+}
+
+fn average_ranks(values: &[usize]) -> Vec<f64> {
+    let mut ordered = values.iter().copied().enumerate().collect::<Vec<_>>();
+    ordered.sort_by_key(|(_, value)| *value);
+    let mut ranks = vec![0.0; values.len()];
+    let mut start = 0;
+    while start < ordered.len() {
+        let mut end = start + 1;
+        while end < ordered.len() && ordered[end].1 == ordered[start].1 {
+            end += 1;
+        }
+        let average = ((start + 1 + end) as f64) / 2.0;
+        for &(original, _) in &ordered[start..end] {
+            ranks[original] = average;
+        }
+        start = end;
+    }
+    ranks
+}
+
+fn pearson_correlation(left: &[f64], right: &[f64]) -> Option<f64> {
+    let count = left.len() as f64;
+    let left_mean = left.iter().sum::<f64>() / count;
+    let right_mean = right.iter().sum::<f64>() / count;
+    let mut covariance = 0.0;
+    let mut left_variance = 0.0;
+    let mut right_variance = 0.0;
+    for (&left, &right) in left.iter().zip(right) {
+        let left_delta = left - left_mean;
+        let right_delta = right - right_mean;
+        covariance += left_delta * right_delta;
+        left_variance += left_delta * left_delta;
+        right_variance += right_delta * right_delta;
+    }
+    let denominator = (left_variance * right_variance).sqrt();
+    (denominator > 0.0).then_some(covariance / denominator)
 }
 
 fn rank_position(state: &RankedState, unit: &UnitId) -> RankPosition {
@@ -446,6 +557,104 @@ mod tests {
         assert_eq!(
             trajectories[2].samples[0].position,
             RelativeRankPosition::Difference { value: -1 }
+        );
+    }
+
+    fn trajectory(unit_id: &str, positions: &[(&str, RankPosition)]) -> RankTrajectory {
+        RankTrajectory {
+            unit: unit(unit_id),
+            samples: positions
+                .iter()
+                .map(|(observation, position)| RankSample {
+                    observation: ObservationId::new(*observation),
+                    position: *position,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn spearman_uses_pairwise_complete_samples_and_average_ties() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Unknown),
+                ("three", RankPosition::Ranked { rank: 2 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+                ("five", RankPosition::Ranked { rank: 4 }),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 4 }),
+                ("two", RankPosition::Ranked { rank: 3 }),
+                ("three", RankPosition::Ranked { rank: 2 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+                ("five", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+
+        let correlation = spearman_correlation(&left, &right).unwrap().unwrap();
+
+        assert_eq!(correlation.sample_count, 4);
+        assert!((correlation.coefficient + 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn spearman_reports_undefined_and_misaligned_trajectories() {
+        let constant = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+        let varying = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        assert_eq!(spearman_correlation(&constant, &varying).unwrap(), None);
+
+        let misaligned = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("other", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        assert_eq!(
+            spearman_correlation(&constant, &misaligned),
+            Err(TrajectoryAlignmentError {
+                index: 1,
+                left: Some(ObservationId::new("two")),
+                right: Some(ObservationId::new("other")),
+            })
+        );
+    }
+
+    #[test]
+    fn spearman_rejects_different_trajectory_lengths() {
+        let short = trajectory("a", &[("one", RankPosition::Ranked { rank: 1 })]);
+        let long = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+
+        assert_eq!(
+            spearman_correlation(&short, &long),
+            Err(TrajectoryAlignmentError {
+                index: 1,
+                left: None,
+                right: Some(ObservationId::new("two")),
+            })
         );
     }
 
