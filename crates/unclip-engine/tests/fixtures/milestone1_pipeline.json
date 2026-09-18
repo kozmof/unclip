@@ -1,0 +1,55 @@
+{
+  "pattern_input": {
+    "text": "alpha beta",
+    "observation_id": "ordinary",
+    "patterns": [
+      {
+        "pattern": "alpha",
+        "target": {"kind": "o2o", "name": "unit", "value": "u1"}
+      },
+      {
+        "pattern": "beta",
+        "target": {"kind": "o2o", "name": "unit", "value": "u2"}
+      }
+    ]
+  },
+  "ranking_input": {
+    "observation": {
+      "id": "ordinary",
+      "source": "notes/ordinary.txt",
+      "observed_at": null,
+      "units": [
+        {
+          "id": "hit-0-5",
+          "label": "alpha",
+          "salience": null,
+          "uncertainty": null,
+          "context": {}
+        },
+        {
+          "id": "hit-6-10",
+          "label": "beta",
+          "salience": null,
+          "uncertainty": null,
+          "context": {}
+        }
+      ],
+      "relations": [],
+      "context": {}
+    },
+    "evidence": [
+      {"pattern": "alpha", "salience": 0.9, "uncertainty": 0.1}
+    ]
+  },
+  "expected": {
+    "inference_outputs": 2,
+    "observations": 2,
+    "alignments": 1,
+    "rankings": 1,
+    "explanation_sensors": ["sensor.coverage", "sensor.coverage", "sensor.coverage"],
+    "residual_sensors": ["sensor.residual", "sensor.residual"],
+    "measurement_sensors": ["sensor.permutation"],
+    "ranking_tiers": [["u1"]],
+    "ranking_unknown": ["u2"]
+  }
+}

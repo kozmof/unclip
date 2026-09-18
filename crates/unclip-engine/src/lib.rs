@@ -521,50 +521,15 @@ mod tests {
             _source: &SourceRef,
             params: &serde_json::Value,
         ) -> unclip_plugin::Result<serde_json::Value> {
-            if params.get("min_confidence").is_some() {
-                return Ok(serde_json::json!({
-                    "text": "alpha beta",
-                    "observation_id": "ordinary",
-                    "patterns": [
-                        {
-                            "pattern": "alpha",
-                            "target": {"kind": "o2o", "name": "unit", "value": "u1"}
-                        },
-                        {
-                            "pattern": "beta",
-                            "target": {"kind": "o2o", "name": "unit", "value": "u2"}
-                        }
-                    ]
-                }));
-            }
-            Ok(serde_json::json!({
-                "observation": {
-                    "id": "ordinary",
-                    "source": "notes/ordinary.txt",
-                    "observed_at": null,
-                    "units": [
-                        {
-                            "id": "hit-0-5",
-                            "label": "alpha",
-                            "salience": null,
-                            "uncertainty": null,
-                            "context": {}
-                        },
-                        {
-                            "id": "hit-6-10",
-                            "label": "beta",
-                            "salience": null,
-                            "uncertainty": null,
-                            "context": {}
-                        }
-                    ],
-                    "relations": [],
-                    "context": {}
-                },
-                "evidence": [
-                    {"pattern": "alpha", "salience": 0.9, "uncertainty": 0.1}
-                ]
-            }))
+            let fixture: serde_json::Value =
+                serde_json::from_str(include_str!("../tests/fixtures/milestone1_pipeline.json"))
+                    .map_err(|error| unclip_plugin::PluginError::Message(error.to_string()))?;
+            let key = if params.get("min_confidence").is_some() {
+                "pattern_input"
+            } else {
+                "ranking_input"
+            };
+            Ok(fixture[key].clone())
         }
     }
 
@@ -655,6 +620,40 @@ mod tests {
             )
             .await
             .unwrap();
+
+        let golden: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/milestone1_pipeline.json"))
+                .unwrap();
+        let state = match &results.measurements[0].value().reading {
+            Reading::Value {
+                value: MeasurementValue::Ranking(state),
+            } => state,
+            other => panic!("expected ranking measurement, got {other:?}"),
+        };
+        let actual = serde_json::json!({
+            "inference_outputs": results.inference.outputs.len(),
+            "observations": results.inference.observations.len(),
+            "alignments": results.inference.alignments.len(),
+            "rankings": results.inference.rankings.len(),
+            "explanation_sensors": results
+                .explanations
+                .iter()
+                .map(|value| value.value().sensor.0.clone())
+                .collect::<Vec<_>>(),
+            "residual_sensors": results
+                .residuals
+                .iter()
+                .map(|value| value.value().sensor.0.clone())
+                .collect::<Vec<_>>(),
+            "measurement_sensors": results
+                .measurements
+                .iter()
+                .map(|value| value.value().sensor.0.clone())
+                .collect::<Vec<_>>(),
+            "ranking_tiers": state.tiers,
+            "ranking_unknown": state.unknown,
+        });
+        assert_eq!(actual, golden["expected"]);
 
         assert_eq!(results.inference.outputs.len(), 2);
         assert_eq!(results.inference.observations.len(), 2);
