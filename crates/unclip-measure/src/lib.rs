@@ -80,6 +80,31 @@ pub struct RankTrajectory {
     pub samples: Vec<RankSample>,
 }
 
+/// The relative rank of an ordered unit pair at one observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RelativeRankPosition {
+    Difference { value: isize },
+    Unknown,
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelativeRankSample {
+    pub observation: ObservationId,
+    pub position: RelativeRankPosition,
+}
+
+/// The trajectory `rank(left) - rank(right)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelativeRankTrajectory {
+    pub left: UnitId,
+    pub right: UnitId,
+    pub samples: Vec<RelativeRankSample>,
+}
+
 /// Constructs per-unit trajectories from states in caller-supplied order.
 ///
 /// Ranks are one-based dense ranks, so every unit in a tied tier receives the
@@ -113,6 +138,41 @@ pub fn construct_rank_trajectories(
         .collect()
 }
 
+/// Constructs a trajectory for every unordered pair of observed frame units.
+///
+/// Pair orientation follows the stable unit ordering. A difference is emitted
+/// only when both units have known ranks; sparse states remain sparse.
+pub fn construct_relative_rank_trajectories(
+    frame_units: &[UnitId],
+    states: &[(ObservationId, RankedState)],
+) -> Vec<RelativeRankTrajectory> {
+    let trajectories = construct_rank_trajectories(frame_units, states);
+    let mut relative = Vec::new();
+
+    for (left_index, left) in trajectories.iter().enumerate() {
+        for right in trajectories.iter().skip(left_index + 1) {
+            relative.push(RelativeRankTrajectory {
+                left: left.unit.clone(),
+                right: right.unit.clone(),
+                samples: left
+                    .samples
+                    .iter()
+                    .zip(&right.samples)
+                    .map(|(left_sample, right_sample)| RelativeRankSample {
+                        observation: left_sample.observation.clone(),
+                        position: relative_rank_position(
+                            left_sample.position,
+                            right_sample.position,
+                        ),
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    relative
+}
+
 fn rank_position(state: &RankedState, unit: &UnitId) -> RankPosition {
     if let Some(rank) = state
         .tiers
@@ -124,6 +184,20 @@ fn rank_position(state: &RankedState, unit: &UnitId) -> RankPosition {
         RankPosition::Unknown
     } else {
         RankPosition::Missing
+    }
+}
+
+fn relative_rank_position(left: RankPosition, right: RankPosition) -> RelativeRankPosition {
+    match (left, right) {
+        (RankPosition::Missing, _) | (_, RankPosition::Missing) => RelativeRankPosition::Missing,
+        (RankPosition::Unknown, _) | (_, RankPosition::Unknown) => RelativeRankPosition::Unknown,
+        (RankPosition::Ranked { rank: left }, RankPosition::Ranked { rank: right }) => {
+            RelativeRankPosition::Difference {
+                // Vec lengths cannot exceed isize::MAX, so ranks obtained from
+                // tier indexes are representable as isize.
+                value: left as isize - right as isize,
+            }
+        }
     }
 }
 
@@ -309,6 +383,70 @@ mod tests {
             RankPosition::Ranked { rank: 1 }
         );
         assert_eq!(trajectories[1].samples[1].position, RankPosition::Missing);
+    }
+
+    #[test]
+    fn constructs_sparse_relative_rank_trajectories() {
+        let states = vec![
+            (
+                ObservationId::new("known"),
+                RankedState {
+                    tiers: vec![vec![unit("a")], vec![unit("b")], vec![unit("c")]],
+                    unknown: vec![],
+                    unresolved: vec![],
+                },
+            ),
+            (
+                ObservationId::new("unknown"),
+                RankedState {
+                    tiers: vec![vec![unit("a")]],
+                    unknown: vec![unit("b"), unit("c")],
+                    unresolved: vec![],
+                },
+            ),
+            (
+                ObservationId::new("missing"),
+                RankedState {
+                    tiers: vec![vec![unit("a")], vec![unit("b")]],
+                    unknown: vec![],
+                    unresolved: vec![],
+                },
+            ),
+        ];
+
+        let trajectories =
+            construct_relative_rank_trajectories(&[unit("a"), unit("b"), unit("c")], &states);
+
+        assert_eq!(trajectories.len(), 3);
+        assert_eq!(
+            trajectories[0],
+            RelativeRankTrajectory {
+                left: unit("a"),
+                right: unit("b"),
+                samples: vec![
+                    RelativeRankSample {
+                        observation: ObservationId::new("known"),
+                        position: RelativeRankPosition::Difference { value: -1 },
+                    },
+                    RelativeRankSample {
+                        observation: ObservationId::new("unknown"),
+                        position: RelativeRankPosition::Unknown,
+                    },
+                    RelativeRankSample {
+                        observation: ObservationId::new("missing"),
+                        position: RelativeRankPosition::Difference { value: -1 },
+                    },
+                ],
+            }
+        );
+        assert_eq!(
+            trajectories[1].samples[2].position,
+            RelativeRankPosition::Missing
+        );
+        assert_eq!(
+            trajectories[2].samples[0].position,
+            RelativeRankPosition::Difference { value: -1 }
+        );
     }
 
     #[test]
