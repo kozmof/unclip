@@ -2593,6 +2593,7 @@ dependencies = [
  "unclip-epistemic",
  "unclip-measure",
  "unclip-observe",
+ "unclip-plugin",
 ]
 
 [[package]]

@@ -15,10 +15,9 @@ unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-measure.workspace = true
 unclip-observe.workspace = true
+unclip-plugin.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_norway.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
-
-[dev-dependencies]
-semver.workspace = true

@@ -4,6 +4,7 @@
 
 pub mod branch_io;
 pub mod domain;
+pub mod engine_profile;
 pub mod format;
 pub mod frames;
 pub mod measurement_frame;
@@ -14,6 +15,10 @@ pub mod text;
 
 pub use branch_io::{load_branches_file, parse_branches, parse_branches_jsonl, render_branches};
 pub use domain::{load_domain, parse_domain, render_domain};
+pub use engine_profile::{
+    load_engine_profile, parse_engine_profile, EngineProfileDocument, ParsedEngineProfile,
+    PluginConfig,
+};
 pub use format::Format;
 pub use frames::{load_frames, parse_frames, split_frame_selector};
 pub use measurement_frame::{
