@@ -140,8 +140,26 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
         alignment
     );
 
+    let recorded = repo
+        .get_recorded_observation(&expected_observation.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recorded.provenance, provenance);
+    assert_eq!(recorded.value, expected_observation);
+    let observation_id = expected_observation.id.clone();
+    assert_eq!(
+        repo.alignments_for_observation(&observation_id)
+            .await
+            .unwrap(),
+        vec![unclip_store::RecordedInference {
+            provenance: provenance.clone(),
+            value: alignment.clone(),
+        }]
+    );
+
     let ranking = PartialRanking {
-        observation: expected_observation.id,
+        observation: observation_id.clone(),
         tiers: vec![RankTier {
             units: vec![ObservedUnitId::new("o1"), ObservedUnitId::new("o2")],
         }],
@@ -151,6 +169,15 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
         .await
         .unwrap();
     assert_eq!(repo.get_ranking("ranking").await.unwrap().unwrap(), ranking);
+    assert_eq!(
+        repo.rankings_for_observation(&observation_id)
+            .await
+            .unwrap(),
+        vec![unclip_store::RecordedInference {
+            provenance,
+            value: ranking,
+        }]
+    );
 }
 
 #[tokio::test]

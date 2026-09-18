@@ -29,6 +29,11 @@ pub trait ObservationRepository: Sync {
         provenance: &DerivedId,
     ) -> StoreResult<()>;
     async fn get_observation(&self, id: &ObservationId) -> StoreResult<Option<Observation>>;
+    async fn get_recorded_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Option<crate::RecordedInference<Observation>>>;
+
     async fn insert_alignment(
         &self,
         id: &str,
@@ -38,6 +43,11 @@ pub trait ObservationRepository: Sync {
         provenance: &DerivedId,
     ) -> StoreResult<()>;
     async fn get_alignment(&self, id: &str) -> StoreResult<Option<Alignment>>;
+    async fn alignments_for_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Vec<crate::RecordedInference<Alignment>>>;
+
     async fn insert_ranking(
         &self,
         id: &str,
@@ -45,6 +55,10 @@ pub trait ObservationRepository: Sync {
         provenance: &DerivedId,
     ) -> StoreResult<()>;
     async fn get_ranking(&self, id: &str) -> StoreResult<Option<PartialRanking>>;
+    async fn rankings_for_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Vec<crate::RecordedInference<PartialRanking>>>;
 }
 
 pub struct SeaOrmObservationRepository {
@@ -196,6 +210,26 @@ impl ObservationRepository for SeaOrmObservationRepository {
         }))
     }
 
+    async fn get_recorded_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Option<crate::RecordedInference<Observation>>> {
+        let Some(row) = observations::Entity::find_by_id(&id.0)
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let value = self
+            .get_observation(id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound { path: id.0.clone() })?;
+        Ok(Some(crate::RecordedInference {
+            provenance: DerivedId::new(row.provenance_id),
+            value,
+        }))
+    }
+
     async fn insert_alignment(
         &self,
         id: &str,
@@ -278,6 +312,31 @@ impl ObservationRepository for SeaOrmObservationRepository {
             observation: ObservationId::new(row.observation_id),
             candidates,
         }))
+    }
+
+    async fn alignments_for_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Vec<crate::RecordedInference<Alignment>>> {
+        let rows = alignments::Entity::find()
+            .filter(alignments::Column::ObservationId.eq(&id.0))
+            .order_by_asc(alignments::Column::Id)
+            .all(&self.db)
+            .await?;
+        let mut values = Vec::with_capacity(rows.len());
+        for row in rows {
+            let value = self
+                .get_alignment(&row.id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound {
+                    path: row.id.clone(),
+                })?;
+            values.push(crate::RecordedInference {
+                provenance: DerivedId::new(row.provenance_id),
+                value,
+            });
+        }
+        Ok(values)
     }
 
     async fn insert_ranking(
@@ -365,5 +424,28 @@ impl ObservationRepository for SeaOrmObservationRepository {
                 .collect(),
             unknown,
         }))
+    }
+
+    async fn rankings_for_observation(
+        &self,
+        id: &ObservationId,
+    ) -> StoreResult<Vec<crate::RecordedInference<PartialRanking>>> {
+        let rows = rankings::Entity::find()
+            .filter(rankings::Column::ObservationId.eq(&id.0))
+            .order_by_asc(rankings::Column::Id)
+            .all(&self.db)
+            .await?;
+        let mut values = Vec::with_capacity(rows.len());
+        for row in rows {
+            let value = self
+                .get_ranking(&row.id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound { path: row.id })?;
+            values.push(crate::RecordedInference {
+                provenance: DerivedId::new(row.provenance_id),
+                value,
+            });
+        }
+        Ok(values)
     }
 }

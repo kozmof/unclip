@@ -369,6 +369,15 @@ async fn level_domain_frame_and_observe_workflow() {
     assert_eq!(replay.observations[0].value.id.0, "manual-observation");
     assert_eq!(replay.provenance_ids.len(), 1);
 
+    let explained = unclip(&path, &["level", "explain", "manual-observation"]);
+    assert!(
+        explained.status.success(),
+        "level explain failed: {}",
+        stderr(&explained)
+    );
+    assert!(stdout(&explained).contains("OBSERVATION\tINFERRED\tinfer.manual@1.0.0"));
+    assert!(stdout(&explained).contains("id=manual-observation units=1 relations=0"));
+
     let frame_fixture = db.write(
         "frame.yaml",
         r#"measurement_frame:

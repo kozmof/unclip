@@ -255,6 +255,8 @@ pub(crate) enum LevelAction {
     },
 
     /// Infer observations, alignments, and rankings using an engine profile.
+    Explain { observation_id: String },
+
     Observe {
         source: PathBuf,
         #[arg(long)]

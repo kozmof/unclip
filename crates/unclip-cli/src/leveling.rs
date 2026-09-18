@@ -242,6 +242,89 @@ pub(crate) async fn observe(
     Ok(())
 }
 
+pub(crate) async fn explain(
+    repositories: &crate::db::Repos,
+    observation_id: &str,
+) -> anyhow::Result<()> {
+    let id = unclip_observe::ObservationId::new(observation_id);
+    let observation = unclip_store::ObservationRepository::get_recorded_observation(
+        &repositories.observations,
+        &id,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("observation not found: {observation_id}"))?;
+    let alignments = unclip_store::ObservationRepository::alignments_for_observation(
+        &repositories.observations,
+        &id,
+    )
+    .await?;
+    let rankings = unclip_store::ObservationRepository::rankings_for_observation(
+        &repositories.observations,
+        &id,
+    )
+    .await?;
+
+    let provenance = unclip_store::ProvenanceRepository::get_provenance(
+        &repositories.provenance,
+        &observation.provenance,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", observation.provenance.0))?;
+    crate::output::outln!(
+        "OBSERVATION\tINFERRED\t{}@{}\tid={} units={} relations={}",
+        provenance.provenance.producer,
+        provenance.provenance.version,
+        observation.value.id.0,
+        observation.value.units.len(),
+        observation.value.relations.len()
+    );
+
+    for alignment in alignments {
+        let provenance = unclip_store::ProvenanceRepository::get_provenance(
+            &repositories.provenance,
+            &alignment.provenance,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", alignment.provenance.0))?;
+        let mut counts = std::collections::BTreeMap::new();
+        for candidate in &alignment.value.candidates {
+            *counts.entry(&candidate.observed.0).or_insert(0usize) += 1;
+        }
+        let ambiguous = counts.values().filter(|count| **count > 1).count();
+        crate::output::outln!(
+            "ALIGNMENT\tINFERRED\t{}@{}\tcandidates={} confident={} ambiguous={}",
+            provenance.provenance.producer,
+            provenance.provenance.version,
+            alignment.value.candidates.len(),
+            counts.len().saturating_sub(ambiguous),
+            ambiguous
+        );
+    }
+    for ranking in rankings {
+        let provenance = unclip_store::ProvenanceRepository::get_provenance(
+            &repositories.provenance,
+            &ranking.provenance,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", ranking.provenance.0))?;
+        let known = ranking
+            .value
+            .tiers
+            .iter()
+            .map(|tier| tier.units.len())
+            .sum::<usize>();
+        crate::output::outln!(
+            "RANKING\tINFERRED\t{}@{}\ttiers={} known={} unknown={}",
+            provenance.provenance.producer,
+            provenance.provenance.version,
+            ranking.value.tiers.len(),
+            known,
+            ranking.value.unknown.len()
+        );
+    }
+    Ok(())
+}
+
 async fn persist_inference(
     repositories: &crate::db::Repos,
     run_id: &str,
