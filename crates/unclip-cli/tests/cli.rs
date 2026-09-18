@@ -464,6 +464,35 @@ async fn level_domain_frame_and_observe_workflow() {
         .lines()
         .find_map(|line| line.strip_prefix("PROFILE\tCALCULATED\t"))
         .expect("measure output should identify its persisted profile");
+
+    let profile_yaml = unclip(&path, &["level", "profile", profile_id]);
+    assert!(
+        profile_yaml.status.success(),
+        "profile YAML failed: {}",
+        stderr(&profile_yaml)
+    );
+    assert!(stdout(&profile_yaml).contains("measurement_profile:"));
+    assert!(stdout(&profile_yaml).contains("sensor: sensor.coverage"));
+
+    let profile_json = unclip(&path, &["level", "profile", profile_id, "--format", "json"]);
+    assert!(
+        profile_json.status.success(),
+        "profile JSON failed: {}",
+        stderr(&profile_json)
+    );
+    let profile_value: serde_json::Value = serde_json::from_str(&stdout(&profile_json)).unwrap();
+    assert_eq!(
+        profile_value["measurement_profile"]["measurements"][0]["sensor"],
+        "sensor.coverage"
+    );
+
+    let profile_jsonl = unclip(
+        &path,
+        &["level", "profile", profile_id, "--format", "jsonl"],
+    );
+    assert!(!profile_jsonl.status.success());
+    assert!(stderr(&profile_jsonl).contains("JSONL is not supported"));
+
     let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
         .await
         .unwrap();

@@ -239,6 +239,9 @@ pub async fn run() -> anyhow::Result<()> {
             } => {
                 crate::leveling::measure(&repos, &observation_id, &profile).await?;
             }
+            LevelAction::Profile { profile_id, format } => {
+                crate::leveling::profile_show(&repos.measurements, &profile_id, format).await?;
+            }
             LevelAction::Observe { source, profile } => {
                 crate::leveling::observe(&repos, &source, &profile).await?;
             }

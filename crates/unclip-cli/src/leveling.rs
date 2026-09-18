@@ -242,6 +242,22 @@ pub(crate) async fn observe(
     Ok(())
 }
 
+pub(crate) async fn profile_show(
+    repository: &impl unclip_store::MeasurementRepository,
+    profile_id: &str,
+    format: unclip_io::Format,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        format != unclip_io::Format::Jsonl,
+        "JSONL is not supported for measurement profile display"
+    );
+    let profile = repository
+        .get_profile(profile_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("measurement profile not found: {profile_id}"))?;
+    crate::output::write_stdout(&unclip_io::render_measurement_profile(&profile, format)?)
+}
+
 pub(crate) async fn explain(
     repositories: &crate::db::Repos,
     observation_id: &str,

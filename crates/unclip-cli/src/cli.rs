@@ -263,6 +263,12 @@ pub(crate) enum LevelAction {
         profile: PathBuf,
     },
 
+    Profile {
+        profile_id: String,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+    },
+
     Observe {
         source: PathBuf,
         #[arg(long)]
