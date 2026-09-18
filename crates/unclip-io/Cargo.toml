@@ -13,8 +13,12 @@ description = "YAML, JSON, and JSONL import and export helpers for unclip."
 unclip-core.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
+unclip-measure.workspace = true
 unclip-observe.workspace = true
 serde.workspace = true
 serde_norway.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+semver.workspace = true

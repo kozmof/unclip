@@ -2584,12 +2584,14 @@ name = "unclip-io"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "semver",
  "serde",
  "serde_json",
  "serde_norway",
  "unclip-core",
  "unclip-domain",
  "unclip-epistemic",
+ "unclip-measure",
  "unclip-observe",
 ]
 

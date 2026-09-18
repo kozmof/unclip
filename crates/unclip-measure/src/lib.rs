@@ -99,7 +99,8 @@ pub struct MeasurementContext {
     pub values: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Measurement {
     pub sensor: PluginId,
     pub sensor_version: semver::Version,
@@ -109,7 +110,8 @@ pub struct Measurement {
     pub context: MeasurementContext,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MeasurementProfile {
     pub measurements: Vec<Measurement>,
 }
