@@ -322,6 +322,45 @@ pub fn co_foreground_frequency(
     }))
 }
 
+/// Calculates empirical mutual information between two rank trajectories.
+///
+/// The plug-in estimate is reported in bits. Unknown and missing samples are
+/// excluded pairwise; `None` indicates fewer than two comparable samples.
+pub fn mutual_information(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+) -> Result<Option<ScalarStatistic>, TrajectoryAlignmentError> {
+    let (left_values, right_values) = pairwise_rank_values(left, right)?;
+    let sample_count = left_values.len();
+    if sample_count < 2 {
+        return Ok(None);
+    }
+
+    let mut left_counts = BTreeMap::<usize, usize>::new();
+    let mut right_counts = BTreeMap::<usize, usize>::new();
+    let mut joint_counts = BTreeMap::<(usize, usize), usize>::new();
+    for (&left, &right) in left_values.iter().zip(&right_values) {
+        *left_counts.entry(left).or_default() += 1;
+        *right_counts.entry(right).or_default() += 1;
+        *joint_counts.entry((left, right)).or_default() += 1;
+    }
+
+    let count = sample_count as f64;
+    let value = joint_counts
+        .into_iter()
+        .map(|((left, right), joint_count)| {
+            let joint_probability = joint_count as f64 / count;
+            let left_probability = left_counts[&left] as f64 / count;
+            let right_probability = right_counts[&right] as f64 / count;
+            joint_probability * (joint_probability / (left_probability * right_probability)).log2()
+        })
+        .sum();
+    Ok(Some(ScalarStatistic {
+        value,
+        sample_count,
+    }))
+}
+
 fn pairwise_rank_values(
     left: &RankTrajectory,
     right: &RankTrajectory,
@@ -988,6 +1027,74 @@ mod tests {
             co_foreground_frequency(&foreground, &unknown, cutoff).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn mutual_information_measures_discrete_rank_dependency_in_bits() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+                ("three", RankPosition::Ranked { rank: 2 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        let same_partition = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 3 }),
+                ("two", RankPosition::Ranked { rank: 3 }),
+                ("three", RankPosition::Ranked { rank: 4 }),
+                ("four", RankPosition::Ranked { rank: 4 }),
+            ],
+        );
+        let independent = trajectory(
+            "c",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+
+        assert_eq!(
+            mutual_information(&left, &same_partition).unwrap(),
+            Some(ScalarStatistic {
+                value: 1.0,
+                sample_count: 4,
+            })
+        );
+        assert_eq!(
+            mutual_information(&left, &independent).unwrap(),
+            Some(ScalarStatistic {
+                value: 0.0,
+                sample_count: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn mutual_information_excludes_sparse_samples_and_requires_two() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Unknown),
+                ("three", RankPosition::Missing),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 2 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+                ("three", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+
+        assert_eq!(mutual_information(&left, &right).unwrap(), None);
     }
 
     #[test]
