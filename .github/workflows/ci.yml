@@ -24,6 +24,10 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      - name: Sensor dependency policy
+        shell: bash
+        run: bash .github/scripts/check-sensor-dependencies.sh
+
       - name: Clippy
         # Deny warnings on workspace crates only; --no-deps avoids treating
         # dependency build-script warnings as hard errors.

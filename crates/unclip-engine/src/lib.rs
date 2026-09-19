@@ -425,7 +425,7 @@ mod tests {
     use unclip_plugin::PluginSelection;
 
     #[test]
-    fn builtin_registry_contains_only_milestone_one_plugins() {
+    fn builtin_registry_contains_explicit_inference_and_measurement_plugins() {
         let registry = builtin_registry().unwrap();
         let inferrers = registry
             .inferrers()
@@ -449,10 +449,15 @@ mod tests {
             vec![
                 "sensor.coverage",
                 "sensor.kendall",
+                "sensor.kendall-association",
                 "sensor.lehmer",
+                "sensor.mutual-information",
                 "sensor.permutation",
                 "sensor.rbo",
+                "sensor.relative-rank-variance",
                 "sensor.residual",
+                "sensor.spearman",
+                "sensor.trajectories",
             ]
         );
         assert!(comparators.is_empty());

@@ -1,0 +1,12 @@
+{
+  "units": ["a", "b", "c"],
+  "observations": [
+    {"id": "obs-1", "tiers": [["a"], ["b"]], "unknown": ["c"]},
+    {"id": "obs-2", "tiers": [["b"], ["a"]], "unknown": ["c"]},
+    {"id": "obs-3", "tiers": [["a", "b"]], "unknown": ["c"]},
+    {"id": "obs-4", "tiers": [["a"], ["b"]], "unknown": ["c"]},
+    {"id": "obs-5", "tiers": null, "unknown": []},
+    {"id": "obs-6", "tiers": [["a"], ["b"]], "unknown": ["c"], "ambiguous_a": true}
+  ],
+  "expected": {"pair_samples": 4, "relative_variance": 0.6875}
+}
