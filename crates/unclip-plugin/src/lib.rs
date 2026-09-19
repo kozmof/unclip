@@ -54,9 +54,13 @@ pub enum Capability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvidenceRequirement {
     TotalOrder,
+    /// Minimum input observations; sensors must also check complete usable samples.
     MinSamples(usize),
     Ordered,
+    /// At least one distinct, nonempty conditioning-variable name in parameters.
     ConditioningVariables,
+    /// Minimum distinct configured conditioning variables. Sensors validate their data.
+    MinConditioningVariables(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,16 +209,29 @@ impl<'a> MeasureCtx<'a> {
                     need,
                 })
             }
-            EvidenceRequirement::ConditioningVariables => {
+            EvidenceRequirement::ConditioningVariables
+            | EvidenceRequirement::MinConditioningVariables(_) => {
+                let need = match requirement {
+                    EvidenceRequirement::MinConditioningVariables(need) => need,
+                    _ => 1,
+                };
                 let have = self
                     .params
                     .get("conditioning_variables")
                     .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len);
-                (have < 1).then_some(EvidenceGap {
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .filter(|name| !name.trim().is_empty())
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len()
+                    })
+                    .unwrap_or(0);
+                (have < need).then_some(EvidenceGap {
                     requirement,
                     have,
-                    need: 1,
+                    need,
                 })
             }
         }
@@ -571,6 +588,85 @@ mod tests {
             },
             applicable,
         })
+    }
+
+    #[test]
+    fn conditioning_requirements_count_distinct_valid_names() {
+        use unclip_domain::{DomainId, FrameId};
+        use unclip_epistemic::{DomainVersion, FrameVersion};
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test"),
+            version: FrameVersion::new("1"),
+            axes: vec![],
+        };
+        for (params, have) in [
+            (serde_json::json!({}), 0),
+            (serde_json::json!({"conditioning_variables": "genre"}), 0),
+            (
+                serde_json::json!({"conditioning_variables": [null, 1, "", " "]}),
+                0,
+            ),
+            (
+                serde_json::json!({"conditioning_variables": ["genre", "genre"]}),
+                1,
+            ),
+            (
+                serde_json::json!({"conditioning_variables": ["genre", "source"]}),
+                2,
+            ),
+        ] {
+            let ctx = MeasureCtx::new(
+                &domain,
+                &frame,
+                &[],
+                &[],
+                &[],
+                &params,
+                DependencyCollector::default(),
+            );
+            for requirement in [
+                EvidenceRequirement::ConditioningVariables,
+                EvidenceRequirement::MinConditioningVariables(2),
+            ] {
+                let need = if requirement == EvidenceRequirement::ConditioningVariables {
+                    1
+                } else {
+                    2
+                };
+                assert_eq!(
+                    ctx.evidence_gap(requirement),
+                    (have < need).then_some(EvidenceGap {
+                        requirement,
+                        have,
+                        need
+                    })
+                );
+            }
+            let decision = classify_sensor(
+                sensor_with(&[EvidenceRequirement::MinConditioningVariables(2)], true).as_ref(),
+                &ctx,
+                true,
+            );
+            assert_eq!(
+                decision,
+                if have < 2 {
+                    SensorDecision::Record(Reading::InsufficientEvidence { have, need: 2 })
+                } else {
+                    SensorDecision::Run
+                }
+            );
+            assert_eq!(
+                ctx.evidence_gap(EvidenceRequirement::MinConditioningVariables(0)),
+                None
+            );
+            assert_eq!(ctx.evidence_gap(EvidenceRequirement::MinSamples(0)), None);
+        }
     }
 
     #[test]
