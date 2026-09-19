@@ -16,6 +16,10 @@
 //! ```
 
 #![forbid(unsafe_code)]
+mod temporal;
+pub use temporal::{
+    dynamic_time_warping, lagged_dependency, ObservationSequence, OrderedObservation, TemporalError,
+};
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
