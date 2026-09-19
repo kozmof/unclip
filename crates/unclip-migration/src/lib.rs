@@ -16,6 +16,7 @@ mod m20260918_000009_create_domain;
 mod m20260918_000010_create_measurement_frames;
 mod m20260918_000011_create_observations;
 mod m20260918_000012_create_measurements;
+mod m20260919_000013_create_experiments;
 
 struct Migrator;
 
@@ -35,6 +36,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260918_000010_create_measurement_frames::Migration),
             Box::new(m20260918_000011_create_observations::Migration),
             Box::new(m20260918_000012_create_measurements::Migration),
+            Box::new(m20260919_000013_create_experiments::Migration),
         ]
     }
 }
