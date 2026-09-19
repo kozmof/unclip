@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -293,6 +294,32 @@ pub fn relative_rank_variance(trajectory: &RelativeRankTrajectory) -> Option<Sca
         value: variance,
         sample_count,
     })
+}
+
+/// Calculates how often two units are jointly within a foreground rank band.
+///
+/// The denominator contains only observations where both ranks are known.
+/// `None` indicates that there are no pairwise-complete observations.
+pub fn co_foreground_frequency(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+    foreground_rank: NonZeroUsize,
+) -> Result<Option<ScalarStatistic>, TrajectoryAlignmentError> {
+    let (left_values, right_values) = pairwise_rank_values(left, right)?;
+    let sample_count = left_values.len();
+    if sample_count == 0 {
+        return Ok(None);
+    }
+    let cutoff = foreground_rank.get();
+    let co_foreground = left_values
+        .iter()
+        .zip(&right_values)
+        .filter(|(left, right)| **left <= cutoff && **right <= cutoff)
+        .count();
+    Ok(Some(ScalarStatistic {
+        value: co_foreground as f64 / sample_count as f64,
+        sample_count,
+    }))
 }
 
 fn pairwise_rank_values(
@@ -888,6 +915,79 @@ mod tests {
         };
 
         assert_eq!(relative_rank_variance(&trajectory), None);
+    }
+
+    #[test]
+    fn co_foreground_frequency_uses_pairwise_complete_denominator() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Unknown),
+                ("four", RankPosition::Ranked { rank: 3 }),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 2 }),
+                ("two", RankPosition::Ranked { rank: 3 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+                ("four", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+
+        assert_eq!(
+            co_foreground_frequency(
+                &left,
+                &right,
+                NonZeroUsize::new(2).expect("nonzero fixture cutoff"),
+            )
+            .unwrap(),
+            Some(ScalarStatistic {
+                value: 1.0 / 3.0,
+                sample_count: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn co_foreground_frequency_retains_zero_and_requires_comparable_samples() {
+        let foreground = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Missing),
+            ],
+        );
+        let background = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 3 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+        let unknown = trajectory(
+            "c",
+            &[
+                ("one", RankPosition::Unknown),
+                ("two", RankPosition::Missing),
+            ],
+        );
+        let cutoff = NonZeroUsize::new(1).expect("nonzero fixture cutoff");
+
+        assert_eq!(
+            co_foreground_frequency(&foreground, &background, cutoff).unwrap(),
+            Some(ScalarStatistic {
+                value: 0.0,
+                sample_count: 1,
+            })
+        );
+        assert_eq!(
+            co_foreground_frequency(&foreground, &unknown, cutoff).unwrap(),
+            None
+        );
     }
 
     #[test]
