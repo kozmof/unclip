@@ -112,6 +112,13 @@ pub struct Correlation {
     pub sample_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScalarStatistic {
+    pub value: f64,
+    pub sample_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrajectoryAlignmentError {
     pub index: usize,
@@ -254,6 +261,38 @@ pub fn kendall_association(
         coefficient: (concordant as f64 - discordant as f64) / denominator,
         sample_count,
     }))
+}
+
+/// Calculates population variance over known relative-rank differences.
+///
+/// Unknown and missing samples are excluded. `None` indicates fewer than two
+/// known differences; zero variance is retained as a measured value.
+pub fn relative_rank_variance(trajectory: &RelativeRankTrajectory) -> Option<ScalarStatistic> {
+    let values = trajectory
+        .samples
+        .iter()
+        .filter_map(|sample| match sample.position {
+            RelativeRankPosition::Difference { value } => Some(value as f64),
+            RelativeRankPosition::Unknown | RelativeRankPosition::Missing => None,
+        })
+        .collect::<Vec<_>>();
+    let sample_count = values.len();
+    if sample_count < 2 {
+        return None;
+    }
+    let mean = values.iter().sum::<f64>() / sample_count as f64;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / sample_count as f64;
+    Some(ScalarStatistic {
+        value: variance,
+        sample_count,
+    })
 }
 
 fn pairwise_rank_values(
@@ -774,6 +813,81 @@ mod tests {
             -1.0
         );
         assert_eq!(kendall_association(&ascending, &constant).unwrap(), None);
+    }
+
+    #[test]
+    fn relative_rank_variance_excludes_sparse_samples_and_retains_zero() {
+        let moving = RelativeRankTrajectory {
+            left: unit("a"),
+            right: unit("b"),
+            samples: vec![
+                RelativeRankSample {
+                    observation: ObservationId::new("one"),
+                    position: RelativeRankPosition::Difference { value: -1 },
+                },
+                RelativeRankSample {
+                    observation: ObservationId::new("two"),
+                    position: RelativeRankPosition::Unknown,
+                },
+                RelativeRankSample {
+                    observation: ObservationId::new("three"),
+                    position: RelativeRankPosition::Difference { value: 1 },
+                },
+                RelativeRankSample {
+                    observation: ObservationId::new("four"),
+                    position: RelativeRankPosition::Missing,
+                },
+            ],
+        };
+        assert_eq!(
+            relative_rank_variance(&moving),
+            Some(ScalarStatistic {
+                value: 1.0,
+                sample_count: 2,
+            })
+        );
+
+        let stationary = RelativeRankTrajectory {
+            left: unit("a"),
+            right: unit("b"),
+            samples: vec![
+                RelativeRankSample {
+                    observation: ObservationId::new("one"),
+                    position: RelativeRankPosition::Difference { value: 2 },
+                },
+                RelativeRankSample {
+                    observation: ObservationId::new("two"),
+                    position: RelativeRankPosition::Difference { value: 2 },
+                },
+            ],
+        };
+        assert_eq!(
+            relative_rank_variance(&stationary),
+            Some(ScalarStatistic {
+                value: 0.0,
+                sample_count: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn relative_rank_variance_requires_two_known_differences() {
+        let trajectory = RelativeRankTrajectory {
+            left: unit("a"),
+            right: unit("b"),
+            samples: vec![
+                RelativeRankSample {
+                    observation: ObservationId::new("one"),
+                    position: RelativeRankPosition::Difference { value: 1 },
+                },
+                RelativeRankSample {
+                    observation: ObservationId::new("two"),
+                    position: RelativeRankPosition::Missing,
+                },
+            ],
+        };
+
+        assert_eq!(relative_rank_variance(&trajectory), None);
     }
 
     #[test]
