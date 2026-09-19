@@ -245,8 +245,13 @@ pub async fn run() -> anyhow::Result<()> {
             LevelAction::Provenance { derived_id } => {
                 crate::leveling::provenance(&repos.provenance, &derived_id).await?;
             }
-            LevelAction::Profile { profile_id, format } => {
-                crate::leveling::profile_show(&repos.measurements, &profile_id, format).await?;
+            LevelAction::Profile {
+                profile_id,
+                format,
+                table,
+            } => {
+                crate::leveling::profile_show(&repos.measurements, &profile_id, format, table)
+                    .await?;
             }
             LevelAction::Observe { source, profile } => {
                 crate::leveling::observe(&repos, &source, &profile).await?;

@@ -11,6 +11,8 @@ pub mod measurement_frame;
 pub mod measurement_profile;
 pub mod observation;
 pub mod packet;
+pub mod profile_table;
+pub use profile_table::render_measurement_profile_table;
 pub mod text;
 
 pub use branch_io::{load_branches_file, parse_branches, parse_branches_jsonl, render_branches};

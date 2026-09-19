@@ -140,6 +140,13 @@ Run `unclip <command> --help` for the full options of any command.
 
 ## Output and reproducibility
 
+`unclip level profile <profile-id> --table` displays calculated sensor results side
+by side, grouped by their full measurement context. Each sensor/version retains
+its own values, sample counts, confidence, and sparse states. Multiple readings
+are retained; `no result` means that sensor has no entry for the context. Values
+from different metrics remain on their own scales. Omit `--table` for YAML, or
+use `--format json` for JSON.
+
 `sample`, `compose`, and `export` write `--format yaml`, `json`, or `jsonl`.
 
 Sampling draws candidates by weighted random selection without replacement. Pass

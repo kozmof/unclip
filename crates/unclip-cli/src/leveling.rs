@@ -426,6 +426,7 @@ pub(crate) async fn profile_show(
     repository: &impl unclip_store::MeasurementRepository,
     profile_id: &str,
     format: unclip_io::Format,
+    table: bool,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         format != unclip_io::Format::Jsonl,
@@ -435,7 +436,12 @@ pub(crate) async fn profile_show(
         .get_profile(profile_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("measurement profile not found: {profile_id}"))?;
-    crate::output::write_stdout(&unclip_io::render_measurement_profile(&profile, format)?)
+    let rendered = if table {
+        unclip_io::render_measurement_profile_table(&profile)?
+    } else {
+        unclip_io::render_measurement_profile(&profile, format)?
+    };
+    crate::output::write_stdout(&rendered)
 }
 
 pub(crate) async fn explain(

@@ -274,10 +274,14 @@ pub(crate) enum LevelAction {
         derived_id: String,
     },
 
+    /// Display a stored profile, preserving independent sensor results.
     Profile {
         profile_id: String,
         #[arg(long, default_value = "yaml", value_parser = parse_format)]
         format: Format,
+        /// Show sensors side by side, retaining their individual metrics and scales.
+        #[arg(long, conflicts_with = "format")]
+        table: bool,
     },
 
     Observe {

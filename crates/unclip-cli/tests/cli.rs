@@ -522,6 +522,28 @@ async fn level_domain_frame_and_observe_workflow() {
         "sensor.coverage"
     );
 
+    let profile_table = unclip(&path, &["level", "profile", profile_id, "--table"]);
+    assert!(
+        profile_table.status.success(),
+        "profile table failed: {}",
+        stderr(&profile_table)
+    );
+    let table = stdout(&profile_table);
+    assert!(table.contains("CALCULATED SENSOR RESULTS"));
+    assert!(table.contains("| Context | sensor.coverage@0.1.0 |"));
+    assert!(table.contains("samples="));
+    let conflicting_format = unclip(
+        &path,
+        &[
+            "level", "profile", profile_id, "--table", "--format", "json",
+        ],
+    );
+    assert!(!conflicting_format.status.success());
+    assert!(stderr(&conflicting_format).contains("cannot be used with"));
+    let missing_table = unclip(&path, &["level", "profile", "missing-profile", "--table"]);
+    assert!(!missing_table.status.success());
+    assert!(stderr(&missing_table).contains("measurement profile not found"));
+
     let profile_jsonl = unclip(
         &path,
         &["level", "profile", profile_id, "--format", "jsonl"],
@@ -555,6 +577,10 @@ fn level_help_lists_plugins_command() {
     let verify_help = unclip(&db.path(), &["level", "verify", "--help"]);
     assert!(verify_help.status.success());
     assert!(stdout(&verify_help).contains("Replay persisted inference"));
+    let profile_help = unclip(&db.path(), &["level", "profile", "--help"]);
+    assert!(profile_help.status.success());
+    assert!(stdout(&profile_help).contains("--table"));
+    assert!(stdout(&profile_help).contains("side by side"));
     assert!(!db.path().exists());
 }
 
