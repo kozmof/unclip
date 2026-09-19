@@ -202,3 +202,17 @@ async fn invalid_or_stale_transitions_are_rejected() {
         .unwrap_err();
     assert!(matches!(error, StoreError::Conflict { .. }));
 }
+
+#[tokio::test]
+async fn malformed_measurement_input_snapshot_is_not_silently_replaced() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let runs = SeaOrmEngineRunRepository::new(db);
+    let mut record = run();
+    record.metadata = serde_json::json!({"measurement_inputs": {"observations": [], "alignments": [], "rankings": [], "unknown": true}});
+    runs.insert_run(record).await.unwrap();
+    let error = runs.replay_run("run").await.unwrap_err();
+    assert!(matches!(error, StoreError::InvalidRequest { .. }));
+    assert!(error
+        .to_string()
+        .contains("invalid measurement input snapshot"));
+}

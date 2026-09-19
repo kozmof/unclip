@@ -140,6 +140,18 @@ Run `unclip <command> --help` for the full options of any command.
 
 ## Output and reproducibility
 
+`unclip level measure obs-1 obs-2 --profile engine.yaml` calculates a profile over
+the explicitly selected observations. A single observation still uses the same
+command. Batch profiles can select `sensor.trajectories`, `sensor.spearman`,
+`sensor.kendall-association`, `sensor.relative-rank-variance`, and
+`sensor.mutual-information`. Selection order is recorded; these batch sensors
+use stable observation-ID order and make no temporal claims.
+
+Measurement runs store the exact inferred inputs and domain/frame selectors.
+`unclip level verify <run-id>` replays those inputs, recalculates the configured
+sensors, and compares the measurements and provenance with the stored results.
+Later alternative rankings do not change a recorded selection.
+
 `unclip level profile <profile-id> --table` displays calculated sensor results side
 by side, grouped by their full measurement context. Each sensor/version retains
 its own values, sample counts, confidence, and sparse states. Multiple readings

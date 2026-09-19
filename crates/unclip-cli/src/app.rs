@@ -234,10 +234,10 @@ pub async fn run() -> anyhow::Result<()> {
                 crate::leveling::explain(&repos, &observation_id).await?;
             }
             LevelAction::Measure {
-                observation_id,
+                observation_ids,
                 profile,
             } => {
-                crate::leveling::measure(&repos, &observation_id, &profile).await?;
+                crate::leveling::measure(&repos, &observation_ids, &profile).await?;
             }
             LevelAction::Verify { run_id } => {
                 crate::leveling::verify(&repos, &run_id).await?;

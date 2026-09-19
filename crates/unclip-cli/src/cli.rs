@@ -259,13 +259,17 @@ pub(crate) enum LevelAction {
         observation_id: String,
     },
 
+    /// Calculate a profile from one or more explicitly selected observations.
     Measure {
-        observation_id: String,
+        #[arg(required = true, num_args = 1..)]
+        observation_ids: Vec<String>,
         #[arg(long)]
         profile: PathBuf,
     },
 
-    #[command(about = "Replay persisted inference and rerun calculation stages only")]
+    #[command(
+        about = "Replay persisted inference, rerun calculations, and compare stored results"
+    )]
     Verify {
         run_id: String,
     },

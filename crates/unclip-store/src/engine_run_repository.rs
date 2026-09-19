@@ -5,6 +5,7 @@ use sea_orm::{
     sea_query::Expr, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder,
 };
+use serde::{Deserialize, Serialize};
 use unclip_entity::{
     alignments as alignment_rows, engine_runs, measurement_profiles,
     observations as observation_rows, provenance, rankings as ranking_rows, sensor_runs,
@@ -64,10 +65,22 @@ pub struct EngineRunRecord {
     pub metadata: serde_json::Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecordedInference<T> {
     pub provenance: unclip_epistemic::DerivedId,
     pub value: T,
+}
+
+/// Exact inference products selected by a measurement-only run. Keeping their
+/// values and provenance identities prevents later alignments or rankings from
+/// silently changing replay inputs. Sequence order is preserved as recorded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeasurementInputSnapshot {
+    pub observations: Vec<RecordedInference<unclip_observe::Observation>>,
+    pub alignments: Vec<RecordedInference<unclip_observe::Alignment>>,
+    pub rankings: Vec<RecordedInference<unclip_observe::PartialRanking>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,67 +247,80 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
             .map(|row| row.derived_id)
             .collect();
 
-        let observation_repo = crate::SeaOrmObservationRepository::new(self.db.clone());
-        let observation_rows = if provenance_ids.is_empty() {
-            Vec::new()
+        let (observations, alignments, rankings) = if let Some(snapshot) =
+            run.metadata.get("measurement_inputs")
+        {
+            let snapshot: MeasurementInputSnapshot = serde_json::from_value(snapshot.clone())
+                .map_err(|error| invalid(format!("invalid measurement input snapshot: {error}")))?;
+            (
+                snapshot.observations,
+                snapshot.alignments,
+                snapshot.rankings,
+            )
         } else {
-            observation_rows::Entity::find()
-                .filter(observation_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
-                .order_by_asc(observation_rows::Column::Id)
-                .all(&self.db)
-                .await?
+            let observation_repo = crate::SeaOrmObservationRepository::new(self.db.clone());
+            let observation_rows = if provenance_ids.is_empty() {
+                Vec::new()
+            } else {
+                observation_rows::Entity::find()
+                    .filter(observation_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .order_by_asc(observation_rows::Column::Id)
+                    .all(&self.db)
+                    .await?
+            };
+            let mut observations = Vec::with_capacity(observation_rows.len());
+            for row in observation_rows {
+                let value = observation_repo
+                    .get_observation(&unclip_observe::ObservationId::new(&row.id))
+                    .await?
+                    .ok_or_else(|| invalid(format!("missing replay observation: {}", row.id)))?;
+                observations.push(RecordedInference {
+                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                    value,
+                });
+            }
+            let alignment_rows = if provenance_ids.is_empty() {
+                Vec::new()
+            } else {
+                alignment_rows::Entity::find()
+                    .filter(alignment_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .order_by_asc(alignment_rows::Column::Id)
+                    .all(&self.db)
+                    .await?
+            };
+            let mut alignments = Vec::with_capacity(alignment_rows.len());
+            for row in alignment_rows {
+                let value = observation_repo
+                    .get_alignment(&row.id)
+                    .await?
+                    .ok_or_else(|| invalid(format!("missing replay alignment: {}", row.id)))?;
+                alignments.push(RecordedInference {
+                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                    value,
+                });
+            }
+            let ranking_rows = if provenance_ids.is_empty() {
+                Vec::new()
+            } else {
+                ranking_rows::Entity::find()
+                    .filter(ranking_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .order_by_asc(ranking_rows::Column::Id)
+                    .all(&self.db)
+                    .await?
+            };
+            let mut rankings = Vec::with_capacity(ranking_rows.len());
+            for row in ranking_rows {
+                let value = observation_repo
+                    .get_ranking(&row.id)
+                    .await?
+                    .ok_or_else(|| invalid(format!("missing replay ranking: {}", row.id)))?;
+                rankings.push(RecordedInference {
+                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                    value,
+                });
+            }
+            (observations, alignments, rankings)
         };
-        let mut observations = Vec::with_capacity(observation_rows.len());
-        for row in observation_rows {
-            let value = observation_repo
-                .get_observation(&unclip_observe::ObservationId::new(&row.id))
-                .await?
-                .ok_or_else(|| invalid(format!("missing replay observation: {}", row.id)))?;
-            observations.push(RecordedInference {
-                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
-                value,
-            });
-        }
-        let alignment_rows = if provenance_ids.is_empty() {
-            Vec::new()
-        } else {
-            alignment_rows::Entity::find()
-                .filter(alignment_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
-                .order_by_asc(alignment_rows::Column::Id)
-                .all(&self.db)
-                .await?
-        };
-        let mut alignments = Vec::with_capacity(alignment_rows.len());
-        for row in alignment_rows {
-            let value = observation_repo
-                .get_alignment(&row.id)
-                .await?
-                .ok_or_else(|| invalid(format!("missing replay alignment: {}", row.id)))?;
-            alignments.push(RecordedInference {
-                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
-                value,
-            });
-        }
-        let ranking_rows = if provenance_ids.is_empty() {
-            Vec::new()
-        } else {
-            ranking_rows::Entity::find()
-                .filter(ranking_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
-                .order_by_asc(ranking_rows::Column::Id)
-                .all(&self.db)
-                .await?
-        };
-        let mut rankings = Vec::with_capacity(ranking_rows.len());
-        for row in ranking_rows {
-            let value = observation_repo
-                .get_ranking(&row.id)
-                .await?
-                .ok_or_else(|| invalid(format!("missing replay ranking: {}", row.id)))?;
-            rankings.push(RecordedInference {
-                provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
-                value,
-            });
-        }
         let profile_ids = measurement_profiles::Entity::find()
             .filter(measurement_profiles::Column::EngineRunId.eq(id))
             .order_by_asc(measurement_profiles::Column::Id)

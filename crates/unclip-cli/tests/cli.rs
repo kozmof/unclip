@@ -544,6 +544,15 @@ async fn level_domain_frame_and_observe_workflow() {
     assert!(!missing_table.status.success());
     assert!(stderr(&missing_table).contains("measurement profile not found"));
 
+    let measurement_run_id = profile_id.strip_suffix("/profile").unwrap();
+    let verified_measurement = unclip(&path, &["level", "verify", measurement_run_id]);
+    assert!(
+        verified_measurement.status.success(),
+        "single-observation verification failed: {}",
+        stderr(&verified_measurement)
+    );
+    assert!(stdout(&verified_measurement).contains("observations=1"));
+
     let profile_jsonl = unclip(
         &path,
         &["level", "profile", profile_id, "--format", "jsonl"],
@@ -1229,4 +1238,286 @@ fn replay_reproduces_sample_and_compose_packets() {
     );
     assert!(reseeded.status.success());
     assert!(stdout(&reseeded).contains("seed: 8"));
+}
+
+#[tokio::test]
+async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() {
+    use sea_orm::ConnectionTrait;
+    use std::collections::BTreeMap;
+    use unclip_domain::{
+        DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, Unit, UnitId, UnitKind,
+    };
+    use unclip_epistemic::{
+        hash_params, DerivedId, DomainVersion, FrameVersion, Operation, PluginId, Provenance,
+        SourceRef, Timestamp,
+    };
+    use unclip_observe::{
+        Alignment, AlignmentCandidate, Observation, ObservationId, ObservedUnit, ObservedUnitId,
+        PartialRanking, RankTier,
+    };
+    use unclip_store::{
+        DomainWriter, EngineRunRepository, MeasurementRepository, ObservationRepository,
+        ProvenanceRepository,
+    };
+
+    let temp = TempDb::new();
+    let path = temp.path();
+    let db = unclip_store::connect_and_migrate(&format!("sqlite://{}?mode=rwc", path.display()))
+        .await
+        .unwrap();
+    let domains = unclip_store::SeaOrmDomainRepository::new(db.clone());
+    let observations = unclip_store::SeaOrmObservationRepository::new(db.clone());
+    let provenance = unclip_store::SeaOrmProvenanceRepository::new(db.clone());
+    let runs = unclip_store::SeaOrmEngineRunRepository::new(db.clone());
+    let measurements = unclip_store::SeaOrmMeasurementRepository::new(db.clone());
+    let domain = DomainSnapshot {
+        id: DomainId::new("batch"),
+        version: DomainVersion::new("1"),
+        relations: BTreeMap::new(),
+        units: ["a", "b"]
+            .map(|id| {
+                (
+                    UnitId::new(id),
+                    Unit {
+                        id: UnitId::new(id),
+                        kind: UnitKind::AtomicMeaning,
+                        label: None,
+                        properties: BTreeMap::new(),
+                    },
+                )
+            })
+            .into_iter()
+            .collect(),
+    };
+    let frame = MeasurementFrame {
+        id: FrameId::new("batch.general"),
+        version: FrameVersion::new("1"),
+        axes: ["a", "b"]
+            .map(|id| FrameAxis {
+                unit: UnitId::new(id),
+                label: None,
+            })
+            .into(),
+    };
+    domains.insert_domain_version(domain.clone()).await.unwrap();
+    domains
+        .insert_measurement_frame(&domain.id, &domain.version, frame)
+        .await
+        .unwrap();
+    for (id, order) in [
+        ("obs-1", ["a", "b"]),
+        ("obs-2", ["b", "a"]),
+        ("unselected", ["a", "b"]),
+    ] {
+        let derived_id = DerivedId::new(format!("inferred/{id}"));
+        provenance
+            .insert_provenance(unclip_store::StoredProvenance {
+                id: derived_id.clone(),
+                run_id: None,
+                provenance: Provenance {
+                    operation: Operation::Inferred,
+                    producer: PluginId::new("infer.fixture"),
+                    algorithm: "fixture".into(),
+                    version: "0.1.0".parse().unwrap(),
+                    params: serde_json::json!({}),
+                    params_hash: hash_params(&serde_json::json!({})),
+                    inputs: vec![],
+                    source: Some(SourceRef::new("fixture")),
+                    timestamp: Timestamp::new("then"),
+                    domain_version: Some(domain.version.clone()),
+                    frame_version: None,
+                    model: None,
+                },
+            })
+            .await
+            .unwrap();
+        let observation = Observation {
+            id: ObservationId::new(id),
+            source: SourceRef::new("fixture"),
+            observed_at: None,
+            relations: vec![],
+            context: BTreeMap::new(),
+            units: ["a", "b"]
+                .map(|id| ObservedUnit {
+                    id: ObservedUnitId::new(id),
+                    label: id.into(),
+                    salience: None,
+                    uncertainty: None,
+                    context: BTreeMap::new(),
+                })
+                .into(),
+        };
+        observations
+            .insert_observation(observation.clone(), &derived_id)
+            .await
+            .unwrap();
+        observations
+            .insert_alignment(
+                &format!("align/{id}"),
+                Alignment {
+                    observation: observation.id.clone(),
+                    candidates: ["a", "b"]
+                        .map(|id| AlignmentCandidate {
+                            observed: ObservedUnitId::new(id),
+                            domain: UnitId::new(id),
+                            confidence: 1.0,
+                            evidence: vec![],
+                        })
+                        .into(),
+                },
+                &domain.id,
+                &domain.version,
+                &derived_id,
+            )
+            .await
+            .unwrap();
+        observations
+            .insert_ranking(
+                &format!("rank/{id}"),
+                PartialRanking {
+                    observation: observation.id,
+                    tiers: order
+                        .map(|id| RankTier {
+                            units: vec![ObservedUnitId::new(id)],
+                        })
+                        .into(),
+                    unknown: vec![],
+                },
+                &derived_id,
+            )
+            .await
+            .unwrap();
+    }
+    let profile = temp.write("batch-engine.json", &serde_json::json!({
+        "domain":"batch@1", "frame":"batch.general@1", "sensors":[
+            {"id":"sensor.trajectories"}, {"id":"sensor.spearman"}, {"id":"sensor.mutual-information"}
+        ]
+    }).to_string());
+    let no_selection = unclip(
+        &path,
+        &["level", "measure", "--profile", profile.to_str().unwrap()],
+    );
+    assert!(!no_selection.status.success());
+    let duplicate = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-1",
+            "obs-1",
+            "--profile",
+            profile.to_str().unwrap(),
+        ],
+    );
+    assert!(!duplicate.status.success());
+    assert!(stderr(&duplicate).contains("must be unique"));
+    let missing = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-1",
+            "missing",
+            "--profile",
+            profile.to_str().unwrap(),
+        ],
+    );
+    assert!(!missing.status.success());
+    assert!(stderr(&missing).contains("observation not found"));
+    let measured = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-2",
+            "obs-1",
+            "--profile",
+            profile.to_str().unwrap(),
+        ],
+    );
+    assert!(measured.status.success(), "{}", stderr(&measured));
+    let measured_text = stdout(&measured);
+    let profile_id = measured_text
+        .lines()
+        .find_map(|line| line.strip_prefix("PROFILE\tCALCULATED\t"))
+        .unwrap();
+    let run_id = profile_id.strip_suffix("/profile").unwrap();
+    let replay = runs.replay_run(run_id).await.unwrap().unwrap();
+    assert_eq!(
+        replay
+            .observations
+            .iter()
+            .map(|record| record.value.id.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["obs-2", "obs-1"]
+    );
+    assert_eq!(replay.alignments.len(), 2);
+    assert_eq!(replay.rankings.len(), 2);
+    assert_eq!(replay.run.metadata["domain"], "batch@1");
+    assert_eq!(replay.run.metadata["frame"], "batch.general@1");
+    let stored = measurements.get_profile(profile_id).await.unwrap().unwrap();
+    assert_eq!(stored.measurements.len(), 3);
+    let verified = unclip(&path, &["level", "verify", run_id]);
+    assert!(verified.status.success(), "{}", stderr(&verified));
+    assert!(stdout(&verified).contains("observations=2 alignments=2 rankings=2 calculated=3"));
+    let table = unclip(&path, &["level", "profile", profile_id, "--table"]);
+    assert!(table.status.success());
+    assert!(stdout(&table).contains("sensor.spearman"));
+    assert!(stdout(&table).contains("sensor.mutual-information"));
+    // A newly persisted alternative ranking must not change the recorded selection.
+    observations
+        .insert_ranking(
+            "rank/later",
+            PartialRanking {
+                observation: ObservationId::new("obs-1"),
+                tiers: ["b", "a"]
+                    .map(|id| RankTier {
+                        units: vec![ObservedUnitId::new(id)],
+                    })
+                    .into(),
+                unknown: vec![],
+            },
+            &DerivedId::new("inferred/obs-1"),
+        )
+        .await
+        .unwrap();
+    let verified_again = unclip(&path, &["level", "verify", run_id]);
+    assert!(
+        verified_again.status.success(),
+        "{}",
+        stderr(&verified_again)
+    );
+    assert_eq!(stdout(&verified_again), stdout(&verified));
+    assert_eq!(
+        runs.replay_run(run_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .rankings
+            .len(),
+        2
+    );
+    // Alter a stored measurement to prove verify compares results, not just reruns.
+    db.execute_unprepared(
+        "UPDATE measurements SET sample_count = 999 WHERE id LIKE '%sensor.spearman%'",
+    )
+    .await
+    .unwrap();
+    let mismatched = unclip(&path, &["level", "verify", run_id]);
+    assert!(!mismatched.status.success());
+    assert!(stderr(&mismatched).contains("differ from stored profiles"));
+    assert!(!stdout(&mismatched).contains("VERIFIED"));
+    db.execute_unprepared(
+        "UPDATE measurements SET sample_count = 2 WHERE id LIKE '%sensor.spearman%'",
+    )
+    .await
+    .unwrap();
+    db.execute_unprepared(
+        "DELETE FROM provenance_inputs WHERE derived_id LIKE '%sensor.spearman%'",
+    )
+    .await
+    .unwrap();
+    let mismatched_provenance = unclip(&path, &["level", "verify", run_id]);
+    assert!(!mismatched_provenance.status.success());
+    assert!(stderr(&mismatched_provenance).contains("provenance differs"));
 }

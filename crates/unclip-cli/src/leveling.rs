@@ -358,11 +358,50 @@ pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> any
         &frame,
         &replay,
         unclip_engine::MeasurementRun {
-            id: &format!("verify-{run_id}"),
-            timestamp: unclip_epistemic::Timestamp::new(unclip_store::now()),
+            id: run_id,
+            timestamp: unclip_epistemic::Timestamp::new(replay.run.started_at.clone()),
             params: &params,
         },
     )?;
+    anyhow::ensure!(
+        !replay.profile_ids.is_empty(),
+        "engine run has no persisted measurement profiles: {run_id}"
+    );
+    let mut expected = Vec::new();
+    for profile_id in &replay.profile_ids {
+        let stored = unclip_store::MeasurementRepository::get_profile(
+            &repositories.measurements,
+            profile_id,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("measurement profile not found: {profile_id}"))?;
+        for measurement in stored.measurements {
+            expected.push(serde_json::to_vec(&measurement)?);
+        }
+    }
+    let mut actual = calculated
+        .iter()
+        .map(|value| serde_json::to_vec(value.value()))
+        .collect::<Result<Vec<_>, _>>()?;
+    for value in &calculated {
+        let recorded = unclip_store::ProvenanceRepository::get_provenance(
+            &repositories.provenance,
+            value.id(),
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("calculated provenance not found: {}", value.id()))?;
+        anyhow::ensure!(
+            recorded.provenance == *value.provenance(),
+            "calculated provenance differs from stored evidence for {}",
+            value.id()
+        );
+    }
+    expected.sort();
+    actual.sort();
+    anyhow::ensure!(
+        actual == expected,
+        "calculated measurements differ from stored profiles for run {run_id}"
+    );
     crate::output::outln!(
         "VERIFIED\tINFERENCE_REPLAY\trun={} observations={} alignments={} rankings={} calculated={}",
         run_id,
@@ -529,7 +568,7 @@ pub(crate) async fn explain(
 
 pub(crate) async fn measure(
     repositories: &crate::db::Repos,
-    observation_id: &str,
+    observation_ids: &[String],
     profile_path: &std::path::Path,
 ) -> anyhow::Result<()> {
     let document = unclip_io::load_engine_profile(profile_path)?;
@@ -558,34 +597,75 @@ pub(crate) async fn measure(
     .await?
     .ok_or_else(|| anyhow::anyhow!("measurement frame version not found: {frame_selector}"))?;
 
-    let observation_id = unclip_observe::ObservationId::new(observation_id);
-    let observation = unclip_store::ObservationRepository::get_recorded_observation(
-        &repositories.observations,
-        &observation_id,
-    )
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("observation not found: {}", observation_id.0))?;
-    let alignment_records = unclip_store::ObservationRepository::alignments_for_observation(
-        &repositories.observations,
-        &observation_id,
-    )
-    .await?;
-    let ranking_records = unclip_store::ObservationRepository::rankings_for_observation(
-        &repositories.observations,
-        &observation_id,
-    )
-    .await?;
-    let observations = vec![unclip_epistemic::Tracked::from_recorded(
-        observation.provenance,
-        observation.value,
-    )];
-    let alignments = alignment_records
-        .into_iter()
-        .map(|record| unclip_epistemic::Tracked::from_recorded(record.provenance, record.value))
+    anyhow::ensure!(
+        !observation_ids.is_empty(),
+        "select at least one observation"
+    );
+    let unique = observation_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    anyhow::ensure!(
+        unique.len() == observation_ids.len(),
+        "observation IDs must be unique"
+    );
+    let mut snapshot = unclip_store::MeasurementInputSnapshot {
+        observations: Vec::new(),
+        alignments: Vec::new(),
+        rankings: Vec::new(),
+    };
+    for id in observation_ids {
+        let observation_id = unclip_observe::ObservationId::new(id);
+        let observation = unclip_store::ObservationRepository::get_recorded_observation(
+            &repositories.observations,
+            &observation_id,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("observation not found: {id}"))?;
+        snapshot.observations.push(observation);
+        snapshot.alignments.extend(
+            unclip_store::ObservationRepository::alignments_for_observation(
+                &repositories.observations,
+                &observation_id,
+            )
+            .await?,
+        );
+        snapshot.rankings.extend(
+            unclip_store::ObservationRepository::rankings_for_observation(
+                &repositories.observations,
+                &observation_id,
+            )
+            .await?,
+        );
+    }
+    let observations = snapshot
+        .observations
+        .iter()
+        .map(|record| {
+            unclip_epistemic::Tracked::from_recorded(
+                record.provenance.clone(),
+                record.value.clone(),
+            )
+        })
         .collect::<Vec<_>>();
-    let rankings = ranking_records
-        .into_iter()
-        .map(|record| unclip_epistemic::Tracked::from_recorded(record.provenance, record.value))
+    let alignments = snapshot
+        .alignments
+        .iter()
+        .map(|record| {
+            unclip_epistemic::Tracked::from_recorded(
+                record.provenance.clone(),
+                record.value.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let rankings = snapshot
+        .rankings
+        .iter()
+        .map(|record| {
+            unclip_epistemic::Tracked::from_recorded(
+                record.provenance.clone(),
+                record.value.clone(),
+            )
+        })
         .collect::<Vec<_>>();
 
     let parsed = document.resolve()?;
@@ -604,7 +684,10 @@ pub(crate) async fn measure(
         &run_id,
         unclip_epistemic::Timestamp::new(timestamp.clone()),
         serde_json::json!({
-            "observation": observation_id.0,
+            "observations": observation_ids,
+            "measurement_inputs": snapshot,
+            "domain": domain_selector,
+            "frame": frame_selector,
             "profile": profile_path,
         }),
     );
@@ -705,7 +788,7 @@ pub(crate) async fn measure(
         unclip_store::MeasurementProfileHeader {
             id: profile_id.clone(),
             engine_run_id: run_id.clone(),
-            observation_id: Some(observation_id.0),
+            observation_id: (observation_ids.len() == 1).then(|| observation_ids[0].clone()),
             frame: frame_id,
             frame_version,
             provenance: profile_provenance,
