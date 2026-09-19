@@ -1,5 +1,7 @@
 //! Commands for the semantic leveling engine.
 
+pub(crate) mod empirical;
+
 pub(crate) fn plugins() -> anyhow::Result<()> {
     let registry = unclip_engine::builtin_registry()?;
     let mut found = false;
@@ -303,6 +305,17 @@ fn resolved_profile(
 }
 
 pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> anyhow::Result<()> {
+    let run = unclip_store::EngineRunRepository::get_run(&repositories.engine_runs, run_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("engine run not found: {run_id}"))?;
+    if run
+        .metadata
+        .get("stage")
+        .and_then(serde_json::Value::as_str)
+        == Some("empirical")
+    {
+        return empirical::verify(repositories, &run).await;
+    }
     let replay = unclip_store::EngineRunRepository::replay_run(&repositories.engine_runs, run_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("engine run not found: {run_id}"))?;

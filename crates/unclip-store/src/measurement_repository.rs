@@ -33,7 +33,8 @@ pub struct SensorRunRecord {
     pub completed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeasurementRecord {
     pub id: String,
     pub sensor_run_id: String,
@@ -78,6 +79,8 @@ pub trait MeasurementRepository: Sync {
         measurements: Vec<MeasurementRecord>,
     ) -> StoreResult<()>;
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>>;
+    /// Hydrate measurements with their stored provenance identities.
+    async fn get_profile_records(&self, id: &str) -> StoreResult<Option<Vec<MeasurementRecord>>>;
     async fn insert_empirical_structure(&self, record: EmpiricalStructureRecord)
         -> StoreResult<()>;
     /// Atomically persist calculated empirical structure, provenance, and input
@@ -330,6 +333,18 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
     }
 
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>> {
+        Ok(self
+            .get_profile_records(id)
+            .await?
+            .map(|records| MeasurementProfile {
+                measurements: records
+                    .into_iter()
+                    .map(|record| record.measurement)
+                    .collect(),
+            }))
+    }
+
+    async fn get_profile_records(&self, id: &str) -> StoreResult<Option<Vec<MeasurementRecord>>> {
         if measurement_profiles::Entity::find_by_id(id)
             .one(&self.db)
             .await?
@@ -371,23 +386,27 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
                 .one(&self.db)
                 .await?
                 .ok_or_else(|| invalid("measurement refers to a missing sensor run"))?;
-            hydrated.push(Measurement {
-                sensor: PluginId::new(run.sensor_id),
-                sensor_version: semver::Version::parse(&run.sensor_version)
-                    .context("invalid stored sensor version")?,
-                reading,
-                confidence: row.confidence,
-                sample_count: row
-                    .sample_count
-                    .map(usize::try_from)
-                    .transpose()
-                    .context("negative stored sample count")?,
-                context: stored.values,
+            hydrated.push(MeasurementRecord {
+                id: row.id,
+                sensor_run_id: row.sensor_run_id,
+                provenance: DerivedId::new(row.provenance_id),
+                kind,
+                measurement: Measurement {
+                    sensor: PluginId::new(run.sensor_id),
+                    sensor_version: semver::Version::parse(&run.sensor_version)
+                        .context("invalid stored sensor version")?,
+                    reading,
+                    confidence: row.confidence,
+                    sample_count: row
+                        .sample_count
+                        .map(usize::try_from)
+                        .transpose()
+                        .context("negative stored sample count")?,
+                    context: stored.values,
+                },
             });
         }
-        Ok(Some(MeasurementProfile {
-            measurements: hydrated,
-        }))
+        Ok(Some(hydrated))
     }
     async fn insert_empirical_structure(
         &self,

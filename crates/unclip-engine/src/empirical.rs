@@ -14,7 +14,8 @@ use unclip_plugin::{PluginError, Result};
 
 /// Each selected measurement is processed independently. Metrics and profiles
 /// are never averaged, and no semantic labels are generated.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EmpiricalMethod {
     Communities {
         threshold: f64,

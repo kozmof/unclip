@@ -170,7 +170,29 @@ or `EmpiricalMethod::Spectral` with explicit thresholds and evidence requirement
 Each source produces its own anonymous structure or an absent-evidence result;
 metrics are kept separate. Successful structures carry calculation provenance
 and can be stored with `MeasurementRepository::insert_calculated_structure`.
-This API is not yet exposed as a CLI command.
+Derive anonymous structures from stored profiles with an explicit YAML or JSON
+configuration:
+
+```sh
+unclip level derive profile-1 profile-2 --config communities.yaml
+unclip level structure '<structure-id>' --format json
+unclip level verify '<empirical-run-id>'
+```
+
+```yaml
+method: communities
+threshold: 0.5
+minimum_samples: 2
+```
+
+For spectral decomposition, use `method: spectral`, `minimum_samples: 2`,
+`tolerance: 0.000000000001`, and `max_sweeps: 100`. Each selected profile must
+contain matrix measurements; other measurement kinds are skipped. Each matrix
+produces an independent result, retaining its source profile and measurement
+provenance. Sparse matrices may report `INSUFFICIENT_EVIDENCE`; no structure is
+fabricated. Empirical runs snapshot their selected measurements and method,
+and verification recalculates both values and provenance against stored results.
+Results remain anonymous: this command assigns no semantic labels.
 
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured

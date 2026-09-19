@@ -1464,6 +1464,155 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
     assert!(table.status.success());
     assert!(stdout(&table).contains("sensor.spearman"));
     assert!(stdout(&table).contains("sensor.mutual-information"));
+    // Select matrices from two separately stored profiles and preserve each source.
+    let second = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-1",
+            "obs-2",
+            "--profile",
+            profile.to_str().unwrap(),
+        ],
+    );
+    assert!(second.status.success(), "{}", stderr(&second));
+    let second_text = stdout(&second);
+    let second_profile = second_text
+        .lines()
+        .find_map(|line| line.strip_prefix("PROFILE\tCALCULATED\t"))
+        .unwrap();
+    let config = temp.write(
+        "communities.yaml",
+        "method: communities\nthreshold: 0.5\nminimum_samples: 2\n",
+    );
+    let duplicate = unclip(
+        &path,
+        &[
+            "level",
+            "derive",
+            profile_id,
+            profile_id,
+            "--config",
+            config.to_str().unwrap(),
+        ],
+    );
+    assert!(!duplicate.status.success());
+    assert!(stderr(&duplicate).contains("duplicate profile"));
+    let missing = unclip(
+        &path,
+        &[
+            "level",
+            "derive",
+            "absent",
+            "--config",
+            config.to_str().unwrap(),
+        ],
+    );
+    assert!(!missing.status.success());
+    for invalid in [
+        "method: communities\nthreshold: 0.5\nminimum_samples: 0\n",
+        "method: communities\nthreshold: 0.5\nminimum_samples: 2\nlabel: invented\n",
+        "method: spectral\nminimum_samples: 2\ntolerance: 0\nmax_sweeps: 100\n",
+    ] {
+        let invalid_config = temp.write("invalid-empirical.yaml", invalid);
+        let rejected = unclip(
+            &path,
+            &[
+                "level",
+                "derive",
+                profile_id,
+                "--config",
+                invalid_config.to_str().unwrap(),
+            ],
+        );
+        assert!(!rejected.status.success());
+        assert!(!stdout(&rejected).contains("CALCULATED"));
+    }
+    let mut community_run = String::new();
+    let mut spectral_run = String::new();
+    for method in ["communities", "spectral", "sparse"] {
+        let config = match method {
+            "communities" => config.clone(),
+            "spectral" => temp.write("spectral.yaml", "method: spectral\nminimum_samples: 2\ntolerance: 0.000000000001\nmax_sweeps: 100\n"),
+            _ => temp.write("sparse.yaml", "method: communities\nthreshold: 0.5\nminimum_samples: 3\n"),
+        };
+        let derived = unclip(
+            &path,
+            &[
+                "level",
+                "derive",
+                profile_id,
+                second_profile,
+                "--config",
+                config.to_str().unwrap(),
+            ],
+        );
+        assert!(derived.status.success(), "{}", stderr(&derived));
+        let text = stdout(&derived);
+        let empirical_run = text
+            .lines()
+            .find_map(|line| line.strip_prefix("CALCULATED\tEMPIRICAL\trun="))
+            .unwrap();
+        let checked = unclip(&path, &["level", "verify", empirical_run]);
+        assert!(checked.status.success(), "{}", stderr(&checked));
+        assert!(stdout(&checked).contains(if method == "sparse" {
+            "calculated=0"
+        } else {
+            "calculated=4"
+        }));
+        if method == "sparse" {
+            assert_eq!(
+                text.lines()
+                    .filter(|line| line.starts_with("INSUFFICIENT_EVIDENCE"))
+                    .count(),
+                4
+            );
+        } else {
+            let ids = text
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("STRUCTURE\t")
+                        .and_then(|line| line.split_once("\tsource="))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(ids.len(), 4);
+            for (id, source) in ids {
+                let shown = unclip(&path, &["level", "structure", id, "--format", "json"]);
+                assert!(shown.status.success(), "{}", stderr(&shown));
+                let value: serde_json::Value = serde_json::from_str(&stdout(&shown)).unwrap();
+                assert_eq!(value["kind"], method);
+                assert!(value["value"].get("label").is_none());
+                assert_eq!(
+                    provenance.direct_inputs(&DerivedId::new(id)).await.unwrap(),
+                    vec![DerivedId::new(source)]
+                );
+            }
+        }
+        if method == "communities" {
+            community_run = empirical_run.into();
+        }
+        if method == "spectral" {
+            spectral_run = empirical_run.into();
+        }
+    }
+    db.execute_unprepared(
+        "UPDATE empirical_structures SET value_json = '{}' WHERE kind = 'communities'",
+    )
+    .await
+    .unwrap();
+    let corrupt = unclip(&path, &["level", "verify", &community_run]);
+    assert!(!corrupt.status.success());
+    assert!(stderr(&corrupt).contains("differs from stored result"));
+    assert!(!stdout(&corrupt).contains("VERIFIED"));
+    db.execute_unprepared(
+        "DELETE FROM provenance_inputs WHERE derived_id LIKE '%empirical.spectral%'",
+    )
+    .await
+    .unwrap();
+    let corrupt = unclip(&path, &["level", "verify", &spectral_run]);
+    assert!(!corrupt.status.success());
+    assert!(stderr(&corrupt).contains("provenance differs"));
     // A newly persisted alternative ranking must not change the recorded selection.
     observations
         .insert_ranking(

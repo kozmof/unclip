@@ -242,6 +242,18 @@ pub async fn run() -> anyhow::Result<()> {
             LevelAction::Verify { run_id } => {
                 crate::leveling::verify(&repos, &run_id).await?;
             }
+            LevelAction::Derive {
+                profile_ids,
+                config,
+            } => {
+                crate::leveling::empirical::derive(&repos, &profile_ids, &config).await?;
+            }
+            LevelAction::Structure {
+                structure_id,
+                format,
+            } => {
+                crate::leveling::empirical::show(&repos, &structure_id, format).await?;
+            }
             LevelAction::Provenance { derived_id } => {
                 crate::leveling::provenance(&repos.provenance, &derived_id).await?;
             }

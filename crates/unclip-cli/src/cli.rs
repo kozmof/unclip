@@ -274,6 +274,21 @@ pub(crate) enum LevelAction {
         run_id: String,
     },
 
+    /// Derive anonymous structures from explicitly selected stored profiles.
+    Derive {
+        #[arg(required = true, num_args = 1..)]
+        profile_ids: Vec<String>,
+        #[arg(long)]
+        config: PathBuf,
+    },
+
+    /// Display a stored anonymous empirical structure.
+    Structure {
+        structure_id: String,
+        #[arg(long, default_value = "yaml", value_parser = parse_format)]
+        format: Format,
+    },
+
     Provenance {
         derived_id: String,
     },
