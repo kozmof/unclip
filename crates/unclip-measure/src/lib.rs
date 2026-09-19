@@ -16,6 +16,8 @@
 //! ```
 
 #![forbid(unsafe_code)]
+mod empirical;
+
 mod community;
 pub use community::{
     detect_communities, CommunityDetection, InvalidCommunityThreshold, UnassessedPair,
@@ -25,6 +27,9 @@ mod pairwise;
 pub use pairwise::{
     pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,
 };
+
+mod regime;
+pub use regime::{InvalidRegimePartition, RegimePartition};
 
 mod spectral;
 pub use spectral::{spectral_decomposition, Eigenpair, SpectralDecomposition, SpectralError};

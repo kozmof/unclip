@@ -248,3 +248,232 @@ async fn pairwise_matrix_preserves_labels_sparse_cells_and_exact_values() {
         expected
     );
 }
+
+fn calculated_structure(
+    id: &str,
+    inputs: &[&str],
+    value: EmpiricalStructure,
+) -> unclip_epistemic::Calculated<EmpiricalStructure> {
+    use unclip_epistemic::{
+        hash_params, CalculationToken, DependencyCollector, DomainVersion, EmitMetadata, Timestamp,
+        Tracked,
+    };
+    let dependencies = DependencyCollector::default();
+    for input in inputs {
+        dependencies.read(&Tracked::from_recorded(DerivedId::new(*input), ()));
+    }
+    let params = json!({"threshold": 0.5, "minimum_samples": 2, "tolerance": 1e-12, "max_sweeps": 100, "window": 2, "minimum_shift": 2.0, "regime_starts": [0, 2]});
+    CalculationToken::from_harness(
+        EmitMetadata {
+            id: DerivedId::new(id),
+            producer: PluginId::new("structure.fixture"),
+            algorithm: value.kind.clone(),
+            version: semver::Version::new(1, 0, 0),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
+            domain_version: Some(DomainVersion::new("domain-version")),
+            frame_version: Some(FrameVersion::new("frame-version")),
+            model: None,
+        },
+        dependencies,
+    )
+    .emit(value)
+}
+
+#[tokio::test]
+async fn calculated_empirical_payloads_round_trip_with_complete_provenance() {
+    use std::num::NonZeroUsize;
+    use unclip_epistemic::Operation;
+    use unclip_measure::{
+        detect_change_points, detect_communities, pairwise_matrix, spectral_decomposition,
+        ChangePointDetection, CommunityDetection, ObservationSequence, OrderedObservation,
+        PairwiseMetric, RankPosition, RankSample, RankTrajectory, SpectralDecomposition,
+    };
+    use unclip_observe::ObservationId;
+    use unclip_store::{ProvenanceRepository, SeaOrmProvenanceRepository};
+
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let provenance = SeaOrmProvenanceRepository::new(db.clone());
+    let repo = SeaOrmMeasurementRepository::new(db);
+    repo.insert_profile(header("empirical-profile"), Vec::new())
+        .await
+        .unwrap();
+    let trajectories = ["a", "b"].map(|unit| RankTrajectory {
+        unit: UnitId::new(unit),
+        samples: [1, 1, 3, 3]
+            .iter()
+            .enumerate()
+            .map(|(index, &rank)| RankSample {
+                observation: ObservationId::new(index.to_string()),
+                position: RankPosition::Ranked { rank },
+            })
+            .collect(),
+    });
+    let matrix = pairwise_matrix(&trajectories, PairwiseMetric::Spearman).unwrap();
+    let two = NonZeroUsize::new(2).unwrap();
+    let communities = detect_communities(&matrix, 0.5, two).unwrap().unwrap();
+    let spectral = spectral_decomposition(&matrix, two, 1e-12, NonZeroUsize::new(100).unwrap())
+        .unwrap()
+        .unwrap();
+    let sequence = ObservationSequence::new(
+        (0..4)
+            .map(|index| OrderedObservation {
+                observation: ObservationId::new(index.to_string()),
+                position: index,
+            })
+            .collect(),
+    )
+    .unwrap();
+    let changes = detect_change_points(&sequence, &trajectories[0], two, 2.0)
+        .unwrap()
+        .unwrap();
+    let regimes = unclip_measure::RegimePartition::new(sequence.clone(), vec![0, 2]).unwrap();
+    let payloads = [
+        EmpiricalStructure::try_from(communities.clone()).unwrap(),
+        EmpiricalStructure::try_from(spectral.clone()).unwrap(),
+        EmpiricalStructure::try_from(changes.clone()).unwrap(),
+        EmpiricalStructure::try_from(regimes.clone()).unwrap(),
+    ];
+    for payload in payloads {
+        let derived = calculated_structure(
+            &payload.kind,
+            &["value-prov", "profile-prov"],
+            payload.clone(),
+        );
+        repo.insert_calculated_structure(
+            Some("run".into()),
+            Some("empirical-profile".into()),
+            derived.clone(),
+        )
+        .await
+        .unwrap();
+        let record = repo
+            .get_empirical_structure(&payload.kind)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.structure, payload);
+        assert_eq!(record.provenance, *derived.id());
+        assert_eq!(record.created_at, derived.provenance().timestamp.0);
+        assert_eq!(record.profile_id.as_deref(), Some("empirical-profile"));
+        let stored = provenance
+            .get_provenance(derived.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.provenance, *derived.provenance());
+        assert_eq!(stored.provenance.operation, Operation::Calculated);
+        assert_eq!(stored.run_id.as_deref(), Some("run"));
+        assert_eq!(
+            provenance.ancestors(derived.id()).await.unwrap(),
+            vec![DerivedId::new("profile-prov"), DerivedId::new("value-prov")]
+        );
+        repo.insert_calculated_structure(
+            Some("run".into()),
+            Some("empirical-profile".into()),
+            derived,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            repo.get_empirical_structure(&payload.kind)
+                .await
+                .unwrap()
+                .unwrap(),
+            record
+        );
+        match payload.kind.as_str() {
+            "communities" => assert_eq!(
+                CommunityDetection::try_from(&record.structure).unwrap(),
+                communities
+            ),
+            "spectral" => assert_eq!(
+                SpectralDecomposition::try_from(&record.structure).unwrap(),
+                spectral
+            ),
+            "change_points" => assert_eq!(
+                ChangePointDetection::try_from(&record.structure).unwrap(),
+                changes
+            ),
+            "regimes" => assert_eq!(
+                unclip_measure::RegimePartition::try_from(&record.structure).unwrap(),
+                regimes
+            ),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn calculated_structure_failures_roll_back_provenance_edges_and_payload() {
+    use unclip_store::{ProvenanceRepository, SeaOrmProvenanceRepository};
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let provenance = SeaOrmProvenanceRepository::new(db.clone());
+    let repo = SeaOrmMeasurementRepository::new(db);
+    let payload = EmpiricalStructure {
+        kind: "anonymous_test_structure".into(),
+        value: json!({"members":["a"]}),
+    };
+    for (id, inputs, profile, kind) in [
+        (
+            "missing-input",
+            vec!["profile-prov", "z-missing"],
+            None,
+            "test",
+        ),
+        (
+            "missing-profile",
+            vec!["value-prov"],
+            Some("absent-profile"),
+            "test",
+        ),
+        ("empty-kind", vec!["value-prov"], None, ""),
+        ("no-evidence", vec![], None, "test"),
+    ] {
+        let mut value = payload.clone();
+        value.kind = kind.into();
+        let derived = calculated_structure(id, &inputs, value);
+        repo.insert_calculated_structure(Some("run".into()), profile.map(str::to_owned), derived)
+            .await
+            .unwrap_err();
+        assert!(repo.get_empirical_structure(id).await.unwrap().is_none());
+        assert!(provenance
+            .get_provenance(&DerivedId::new(id))
+            .await
+            .unwrap()
+            .is_none());
+    }
+    let legacy = EmpiricalStructureRecord {
+        id: "collision".into(),
+        profile_id: None,
+        provenance: DerivedId::new("value-prov"),
+        created_at: "before".into(),
+        structure: payload.clone(),
+    };
+    repo.insert_empirical_structure(legacy.clone())
+        .await
+        .unwrap();
+    let derived = calculated_structure("collision", &["value-prov"], payload);
+    assert!(matches!(
+        repo.insert_calculated_structure(Some("run".into()), None, derived)
+            .await
+            .unwrap_err(),
+        StoreError::AlreadyExists { .. }
+    ));
+    assert!(provenance
+        .get_provenance(&DerivedId::new("collision"))
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        repo.get_empirical_structure("collision")
+            .await
+            .unwrap()
+            .unwrap(),
+        legacy
+    );
+}

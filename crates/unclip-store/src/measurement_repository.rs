@@ -11,13 +11,14 @@ use unclip_domain::FrameId;
 use unclip_entity::{
     empirical_structures, frame_versions, measurement_profiles, measurements, sensor_runs,
 };
-use unclip_epistemic::{DerivedId, FrameVersion, ParameterHash, PluginId};
+use unclip_epistemic::{Calculated, DerivedId, FrameVersion, ParameterHash, PluginId};
 use unclip_measure::{
     EmpiricalStructure, Measurement, MeasurementContext, MeasurementKind, MeasurementProfile,
     MeasurementValue, Reading,
 };
 
-use crate::{StoreError, StoreResult};
+use crate::provenance_repository::insert_provenance_in_transaction;
+use crate::{StoreError, StoreResult, StoredProvenance};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SensorRunRecord {
@@ -79,6 +80,15 @@ pub trait MeasurementRepository: Sync {
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>>;
     async fn insert_empirical_structure(&self, record: EmpiricalStructureRecord)
         -> StoreResult<()>;
+    /// Atomically persist calculated empirical structure, provenance, and input
+    /// edges. At least one existing evidence input is required. Structure ID
+    /// and creation timestamp come from the calculated value's provenance.
+    async fn insert_calculated_structure(
+        &self,
+        run_id: Option<String>,
+        profile_id: Option<String>,
+        structure: Calculated<EmpiricalStructure>,
+    ) -> StoreResult<()>;
     async fn get_empirical_structure(
         &self,
         id: &str,
@@ -383,31 +393,39 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
         &self,
         record: EmpiricalStructureRecord,
     ) -> StoreResult<()> {
-        if record.id.is_empty() {
-            return Err(invalid("empirical structure id must not be empty"));
+        let txn = self.db.begin().await?;
+        insert_structure_in_transaction(&txn, record).await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn insert_calculated_structure(
+        &self,
+        run_id: Option<String>,
+        profile_id: Option<String>,
+        structure: Calculated<EmpiricalStructure>,
+    ) -> StoreResult<()> {
+        if structure.provenance().inputs.is_empty() {
+            return Err(invalid(
+                "calculated empirical structures require recorded evidence inputs",
+            ));
         }
-        if record.structure.kind.is_empty() {
-            return Err(invalid("empirical structure kind must not be empty"));
-        }
-        if empirical_structures::Entity::find_by_id(&record.id)
-            .one(&self.db)
-            .await?
-            .is_some()
-        {
-            return Err(StoreError::AlreadyExists { path: record.id });
-        }
-        empirical_structures::Entity::insert(empirical_structures::ActiveModel {
-            id: Set(record.id),
-            profile_id: Set(record.profile_id),
-            kind: Set(record.structure.kind),
-            value_json: Set(
-                serde_json::to_string(&record.structure.value).map_err(anyhow::Error::from)?
-            ),
-            provenance_id: Set(record.provenance.0),
-            created_at: Set(record.created_at),
-        })
-        .exec(&self.db)
-        .await?;
+        let provenance = StoredProvenance {
+            id: structure.id().clone(),
+            run_id,
+            provenance: structure.provenance().clone(),
+        };
+        let record = EmpiricalStructureRecord {
+            id: structure.id().0.clone(),
+            profile_id,
+            provenance: structure.id().clone(),
+            created_at: structure.provenance().timestamp.0.clone(),
+            structure: structure.into_value(),
+        };
+        let txn = self.db.begin().await?;
+        insert_provenance_in_transaction(&txn, provenance).await?;
+        insert_structure_in_transaction(&txn, record).await?;
+        txn.commit().await?;
         Ok(())
     }
 
@@ -433,4 +451,36 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
             })
             .transpose()
     }
+}
+
+async fn insert_structure_in_transaction(
+    txn: &DatabaseTransaction,
+    record: EmpiricalStructureRecord,
+) -> StoreResult<()> {
+    if record.id.is_empty() {
+        return Err(invalid("empirical structure id must not be empty"));
+    }
+    if record.structure.kind.is_empty() {
+        return Err(invalid("empirical structure kind must not be empty"));
+    }
+    if empirical_structures::Entity::find_by_id(&record.id)
+        .one(txn)
+        .await?
+        .is_some()
+    {
+        return Err(StoreError::AlreadyExists { path: record.id });
+    }
+    empirical_structures::Entity::insert(empirical_structures::ActiveModel {
+        id: Set(record.id),
+        profile_id: Set(record.profile_id),
+        kind: Set(record.structure.kind),
+        value_json: Set(
+            serde_json::to_string(&record.structure.value).map_err(anyhow::Error::from)?
+        ),
+        provenance_id: Set(record.provenance.0),
+        created_at: Set(record.created_at),
+    })
+    .exec(txn)
+    .await?;
+    Ok(())
 }

@@ -83,77 +83,8 @@ async fn inputs_in_txn(txn: &DatabaseTransaction, id: &DerivedId) -> StoreResult
 #[async_trait]
 impl ProvenanceRepository for SeaOrmProvenanceRepository {
     async fn insert_provenance(&self, value: StoredProvenance) -> StoreResult<()> {
-        if value.id.0.is_empty() {
-            return Err(invalid("derived id must not be empty"));
-        }
-        if value.provenance.params_hash != hash_params(&value.provenance.params) {
-            return Err(invalid(
-                "provenance parameter hash does not match its parameters",
-            ));
-        }
-        let mut unique_inputs = BTreeSet::new();
-        for input in &value.provenance.inputs {
-            if input == &value.id {
-                return Err(invalid("provenance cannot depend on itself"));
-            }
-            if !unique_inputs.insert(input.clone()) {
-                return Err(invalid("provenance inputs must be unique"));
-            }
-        }
-
         let txn = self.db.begin().await?;
-        if provenance::Entity::find_by_id(&value.id.0)
-            .one(&txn)
-            .await?
-            .is_some()
-        {
-            return Err(StoreError::AlreadyExists { path: value.id.0 });
-        }
-
-        let StoredProvenance {
-            id,
-            run_id,
-            provenance: details,
-        } = value;
-        let inputs = details.inputs;
-        provenance::Entity::insert(provenance::ActiveModel {
-            derived_id: Set(id.0.clone()),
-            run_id: Set(run_id),
-            operation: Set(operation_name(details.operation).into()),
-            producer: Set(details.producer.0),
-            algorithm: Set(details.algorithm),
-            version: Set(details.version.to_string()),
-            params_json: Set(serde_json::to_string(&details.params).map_err(anyhow::Error::from)?),
-            params_hash: Set(details.params_hash.0),
-            source: Set(details.source.map(|value| value.0)),
-            timestamp: Set(details.timestamp.0),
-            domain_version: Set(details.domain_version.map(|value| value.0)),
-            frame_version: Set(details.frame_version.map(|value| value.0)),
-            model: Set(details.model.map(|value| value.0)),
-        })
-        .exec(&txn)
-        .await?;
-
-        for (position, input) in inputs.into_iter().enumerate() {
-            if provenance::Entity::find_by_id(&input.0)
-                .one(&txn)
-                .await?
-                .is_none()
-            {
-                return Err(StoreError::NotFound {
-                    path: format!("provenance input {}", input.0),
-                });
-            }
-            let position = i32::try_from(position).context("too many provenance inputs")?;
-            provenance_inputs::Entity::insert(provenance_inputs::ActiveModel {
-                derived_id: Set(id.0.clone()),
-                input_derived_id: Set(input.0),
-                position: Set(position),
-            })
-            .exec(&txn)
-            .await?;
-        }
-
+        insert_provenance_in_transaction(&txn, value).await?;
         txn.commit().await?;
         Ok(())
     }
@@ -232,4 +163,81 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
         txn.commit().await?;
         Ok(result)
     }
+}
+
+pub(crate) async fn insert_provenance_in_transaction(
+    txn: &DatabaseTransaction,
+    value: StoredProvenance,
+) -> StoreResult<()> {
+    if value.id.0.is_empty() {
+        return Err(invalid("derived id must not be empty"));
+    }
+    if value.provenance.params_hash != hash_params(&value.provenance.params) {
+        return Err(invalid(
+            "provenance parameter hash does not match its parameters",
+        ));
+    }
+    let mut unique_inputs = BTreeSet::new();
+    for input in &value.provenance.inputs {
+        if input == &value.id {
+            return Err(invalid("provenance cannot depend on itself"));
+        }
+        if !unique_inputs.insert(input.clone()) {
+            return Err(invalid("provenance inputs must be unique"));
+        }
+    }
+
+    if provenance::Entity::find_by_id(&value.id.0)
+        .one(txn)
+        .await?
+        .is_some()
+    {
+        return Err(StoreError::AlreadyExists { path: value.id.0 });
+    }
+
+    let StoredProvenance {
+        id,
+        run_id,
+        provenance: details,
+    } = value;
+    let inputs = details.inputs;
+    provenance::Entity::insert(provenance::ActiveModel {
+        derived_id: Set(id.0.clone()),
+        run_id: Set(run_id),
+        operation: Set(operation_name(details.operation).into()),
+        producer: Set(details.producer.0),
+        algorithm: Set(details.algorithm),
+        version: Set(details.version.to_string()),
+        params_json: Set(serde_json::to_string(&details.params).map_err(anyhow::Error::from)?),
+        params_hash: Set(details.params_hash.0),
+        source: Set(details.source.map(|value| value.0)),
+        timestamp: Set(details.timestamp.0),
+        domain_version: Set(details.domain_version.map(|value| value.0)),
+        frame_version: Set(details.frame_version.map(|value| value.0)),
+        model: Set(details.model.map(|value| value.0)),
+    })
+    .exec(txn)
+    .await?;
+
+    for (position, input) in inputs.into_iter().enumerate() {
+        if provenance::Entity::find_by_id(&input.0)
+            .one(txn)
+            .await?
+            .is_none()
+        {
+            return Err(StoreError::NotFound {
+                path: format!("provenance input {}", input.0),
+            });
+        }
+        let position = i32::try_from(position).context("too many provenance inputs")?;
+        provenance_inputs::Entity::insert(provenance_inputs::ActiveModel {
+            derived_id: Set(id.0.clone()),
+            input_derived_id: Set(input.0),
+            position: Set(position),
+        })
+        .exec(txn)
+        .await?;
+    }
+
+    Ok(())
 }
