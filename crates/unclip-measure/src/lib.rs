@@ -361,22 +361,145 @@ pub fn mutual_information(
     }))
 }
 
+/// Calculates empirical mutual information conditioned on a third trajectory.
+///
+/// The plug-in estimate is reported in bits over triple-complete samples.
+/// `None` indicates fewer than two comparable triples.
+pub fn conditional_mutual_information(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+    conditioning: &RankTrajectory,
+) -> Result<Option<ScalarStatistic>, TrajectoryAlignmentError> {
+    validate_trajectory_alignment(left, right)?;
+    validate_trajectory_alignment(left, conditioning)?;
+
+    let values = left
+        .samples
+        .iter()
+        .zip(&right.samples)
+        .zip(&conditioning.samples)
+        .filter_map(|((left, right), conditioning)| {
+            match (left.position, right.position, conditioning.position) {
+                (
+                    RankPosition::Ranked { rank: left },
+                    RankPosition::Ranked { rank: right },
+                    RankPosition::Ranked { rank: conditioning },
+                ) => Some((left, right, conditioning)),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let sample_count = values.len();
+    if sample_count < 2 {
+        return Ok(None);
+    }
+
+    let mut conditioning_counts = BTreeMap::<usize, usize>::new();
+    let mut left_conditioning_counts = BTreeMap::<(usize, usize), usize>::new();
+    let mut right_conditioning_counts = BTreeMap::<(usize, usize), usize>::new();
+    let mut joint_counts = BTreeMap::<(usize, usize, usize), usize>::new();
+    for &(left, right, conditioning) in &values {
+        *conditioning_counts.entry(conditioning).or_default() += 1;
+        *left_conditioning_counts
+            .entry((left, conditioning))
+            .or_default() += 1;
+        *right_conditioning_counts
+            .entry((right, conditioning))
+            .or_default() += 1;
+        *joint_counts.entry((left, right, conditioning)).or_default() += 1;
+    }
+
+    let count = sample_count as f64;
+    let value = joint_counts
+        .into_iter()
+        .map(|((left, right, conditioning), joint_count)| {
+            let joint_probability = joint_count as f64 / count;
+            let ratio = (joint_count * conditioning_counts[&conditioning]) as f64
+                / (left_conditioning_counts[&(left, conditioning)]
+                    * right_conditioning_counts[&(right, conditioning)]) as f64;
+            joint_probability * ratio.log2()
+        })
+        .sum();
+    Ok(Some(ScalarStatistic {
+        value,
+        sample_count,
+    }))
+}
+
+/// First-order partial Pearson correlation of rank positions, controlling for
+/// one trajectory. Only triple-complete samples participate. Returns `None`
+/// for fewer than four samples, constant conditioning, or zero residual
+/// variance. The result measures association, not causality.
+pub fn partial_correlation(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+    conditioning: &RankTrajectory,
+) -> Result<Option<Correlation>, TrajectoryAlignmentError> {
+    validate_trajectory_alignment(left, right)?;
+    validate_trajectory_alignment(left, conditioning)?;
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    let mut zs = Vec::new();
+    for ((x, y), z) in left
+        .samples
+        .iter()
+        .zip(&right.samples)
+        .zip(&conditioning.samples)
+    {
+        if let (
+            RankPosition::Ranked { rank: x },
+            RankPosition::Ranked { rank: y },
+            RankPosition::Ranked { rank: z },
+        ) = (x.position, y.position, z.position)
+        {
+            xs.push(x as f64);
+            ys.push(y as f64);
+            zs.push(z as f64);
+        }
+    }
+    let sample_count = zs.len();
+    if sample_count < 4 {
+        return Ok(None);
+    }
+    for values in [&mut xs, &mut ys, &mut zs] {
+        let mean = values.iter().sum::<f64>() / sample_count as f64;
+        for value in values {
+            *value -= mean;
+        }
+    }
+    let variance = zs.iter().map(|z| z * z).sum::<f64>();
+    if variance == 0.0 {
+        return Ok(None);
+    }
+    for values in [&mut xs, &mut ys] {
+        let original = values.iter().map(|v| v * v).sum::<f64>();
+        let slope = values.iter().zip(&zs).map(|(v, z)| v * z).sum::<f64>() / variance;
+        for (value, z) in values.iter_mut().zip(&zs) {
+            *value -= slope * z;
+        }
+        let residual = values.iter().map(|v| v * v).sum::<f64>();
+        // Do not interpret floating-point residue as unexplained variation.
+        if residual <= original * (64.0 * f64::EPSILON).powi(2) {
+            return Ok(None);
+        }
+    }
+    Ok(
+        pearson_correlation(&xs, &ys).map(|coefficient| Correlation {
+            coefficient: coefficient.clamp(-1.0, 1.0),
+            sample_count,
+        }),
+    )
+}
+
 fn pairwise_rank_values(
     left: &RankTrajectory,
     right: &RankTrajectory,
 ) -> Result<(Vec<usize>, Vec<usize>), TrajectoryAlignmentError> {
+    validate_trajectory_alignment(left, right)?;
     let mut left_values = Vec::new();
     let mut right_values = Vec::new();
 
-    for (index, (left_sample, right_sample)) in left.samples.iter().zip(&right.samples).enumerate()
-    {
-        if left_sample.observation != right_sample.observation {
-            return Err(TrajectoryAlignmentError {
-                index,
-                left: Some(left_sample.observation.clone()),
-                right: Some(right_sample.observation.clone()),
-            });
-        }
+    for (left_sample, right_sample) in left.samples.iter().zip(&right.samples) {
         if let (
             RankPosition::Ranked { rank: left_rank },
             RankPosition::Ranked { rank: right_rank },
@@ -386,7 +509,23 @@ fn pairwise_rank_values(
             right_values.push(right_rank);
         }
     }
+    Ok((left_values, right_values))
+}
 
+fn validate_trajectory_alignment(
+    left: &RankTrajectory,
+    right: &RankTrajectory,
+) -> Result<(), TrajectoryAlignmentError> {
+    for (index, (left_sample, right_sample)) in left.samples.iter().zip(&right.samples).enumerate()
+    {
+        if left_sample.observation != right_sample.observation {
+            return Err(TrajectoryAlignmentError {
+                index,
+                left: Some(left_sample.observation.clone()),
+                right: Some(right_sample.observation.clone()),
+            });
+        }
+    }
     if left.samples.len() != right.samples.len() {
         let index = left.samples.len().min(right.samples.len());
         return Err(TrajectoryAlignmentError {
@@ -401,7 +540,7 @@ fn pairwise_rank_values(
                 .map(|sample| sample.observation.clone()),
         });
     }
-    Ok((left_values, right_values))
+    Ok(())
 }
 
 fn average_ranks(values: &[usize]) -> Vec<f64> {
@@ -1095,6 +1234,150 @@ mod tests {
         );
 
         assert_eq!(mutual_information(&left, &right).unwrap(), None);
+    }
+
+    #[test]
+    fn conditional_mutual_information_detects_xor_dependency() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 1 }),
+                ("three", RankPosition::Ranked { rank: 2 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 1 }),
+                ("four", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        let xor = trajectory(
+            "condition",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+                ("three", RankPosition::Ranked { rank: 2 }),
+                ("four", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+
+        assert_eq!(
+            mutual_information(&left, &right).unwrap(),
+            Some(ScalarStatistic {
+                value: 0.0,
+                sample_count: 4,
+            })
+        );
+        assert_eq!(
+            conditional_mutual_information(&left, &right, &xor).unwrap(),
+            Some(ScalarStatistic {
+                value: 1.0,
+                sample_count: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn conditional_mutual_information_uses_triple_complete_samples() {
+        let left = trajectory(
+            "a",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        let right = trajectory(
+            "b",
+            &[
+                ("one", RankPosition::Ranked { rank: 1 }),
+                ("two", RankPosition::Ranked { rank: 2 }),
+            ],
+        );
+        let sparse_condition = trajectory(
+            "condition",
+            &[
+                ("one", RankPosition::Unknown),
+                ("two", RankPosition::Ranked { rank: 1 }),
+            ],
+        );
+
+        assert_eq!(
+            conditional_mutual_information(&left, &right, &sparse_condition).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn partial_correlation_controls_shared_variation_and_preserves_sparse_states() {
+        let make = |ranks: &[usize]| RankTrajectory {
+            unit: UnitId::new("unit"),
+            samples: ranks
+                .iter()
+                .enumerate()
+                .map(|(i, &rank)| RankSample {
+                    observation: ObservationId::new(i.to_string()),
+                    position: RankPosition::Ranked { rank },
+                })
+                .collect(),
+        };
+        let x = make(&[2, 2, 4, 4]);
+        let y = make(&[2, 4, 2, 4]);
+        let z = make(&[1, 2, 3, 4]);
+        let result = partial_correlation(&x, &y, &z).unwrap().unwrap();
+        assert!((result.coefficient + 1.0).abs() < 1e-12);
+        assert_eq!(result.sample_count, 4);
+        assert_eq!(Some(result), partial_correlation(&x, &y, &z).unwrap());
+        assert!(
+            (partial_correlation(&x, &x, &z)
+                .unwrap()
+                .unwrap()
+                .coefficient
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
+        assert_eq!(
+            partial_correlation(&x, &y, &make(&[1, 2, 2, 1])).unwrap(),
+            Some(Correlation {
+                coefficient: 0.0,
+                sample_count: 4
+            })
+        );
+        assert_eq!(partial_correlation(&x, &y, &x).unwrap(), None);
+        assert_eq!(
+            partial_correlation(&x, &y, &make(&[1, 1, 1, 1])).unwrap(),
+            None
+        );
+        assert_eq!(
+            partial_correlation(&make(&[1, 1, 1, 1]), &y, &z).unwrap(),
+            None
+        );
+        let mut sparse = z.clone();
+        sparse.samples[0].position = RankPosition::Unknown;
+        sparse.samples[1].position = RankPosition::Missing;
+        assert_eq!(partial_correlation(&x, &y, &sparse).unwrap(), None);
+        let mut longer_x = x.clone();
+        let mut longer_y = y.clone();
+        let mut longer_z = z.clone();
+        for trajectory in [&mut longer_x, &mut longer_y, &mut longer_z] {
+            trajectory.samples.push(RankSample {
+                observation: ObservationId::new("extra"),
+                position: RankPosition::Missing,
+            });
+        }
+        assert_eq!(
+            partial_correlation(&longer_x, &longer_y, &longer_z).unwrap(),
+            Some(result)
+        );
+        assert!(partial_correlation(&x, &y, &longer_z).is_err());
+        assert!(partial_correlation(&x, &longer_y, &z).is_err());
+        sparse.samples.swap(0, 1);
+        assert!(partial_correlation(&x, &y, &sparse).is_err());
     }
 
     #[test]
