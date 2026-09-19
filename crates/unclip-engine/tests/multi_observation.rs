@@ -588,6 +588,69 @@ async fn assert_persisted_batch(
                 .collect()
         }
     );
+    let matrix_inputs = results
+        .iter()
+        .filter(|result| {
+            matches!(
+                result.value().reading,
+                Reading::Value {
+                    value: MeasurementValue::PairwiseMatrix(_)
+                }
+            )
+        })
+        .map(|result| Tracked::from_derived(result, result.value().clone()))
+        .collect::<Vec<_>>();
+    if !matrix_inputs.is_empty() {
+        for method in [
+            unclip_engine::EmpiricalMethod::Communities {
+                threshold: 0.5,
+                minimum_samples: std::num::NonZeroUsize::new(2).unwrap(),
+            },
+            unclip_engine::EmpiricalMethod::Spectral {
+                minimum_samples: std::num::NonZeroUsize::new(2).unwrap(),
+                tolerance: 1e-12,
+                max_sweeps: std::num::NonZeroUsize::new(100).unwrap(),
+            },
+        ] {
+            let outputs = engine
+                .derive_empirical(&matrix_inputs, method, "batch-g", Timestamp::new("now"))
+                .unwrap();
+            for output in outputs {
+                if let Some(structure) = output.structure {
+                    measurements
+                        .insert_calculated_structure(
+                            Some("batch".into()),
+                            Some("batch-profile".into()),
+                            structure.clone(),
+                        )
+                        .await
+                        .unwrap();
+                    let stored = measurements
+                        .get_empirical_structure(&structure.id().0)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        serde_json::to_vec(&stored.structure).unwrap(),
+                        serde_json::to_vec(structure.value()).unwrap()
+                    );
+                    assert_eq!(
+                        provenance.direct_inputs(structure.id()).await.unwrap(),
+                        vec![output.measurement]
+                    );
+                    assert_eq!(
+                        provenance
+                            .get_provenance(structure.id())
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .provenance,
+                        *structure.provenance()
+                    );
+                }
+            }
+        }
+    }
     let replay = runs.replay_run("batch").await.unwrap().unwrap();
     assert_eq!(replay.observations.len(), fixture.observations.len());
     let verified = engine

@@ -164,6 +164,14 @@ Lagged association is directional evidence without a causal claim. DTW compares
 two units over the same complete sequence using unnormalized absolute rank cost.
 Missing evidence stays distinct from a measured zero or an empty change-event list.
 
+The engine library exposes `Engine::derive_empirical` for explicitly selected,
+tracked matrix measurements from profiles. Choose `EmpiricalMethod::Communities`
+or `EmpiricalMethod::Spectral` with explicit thresholds and evidence requirements.
+Each source produces its own anonymous structure or an absent-evidence result;
+metrics are kept separate. Successful structures carry calculation provenance
+and can be stored with `MeasurementRepository::insert_calculated_structure`.
+This API is not yet exposed as a CLI command.
+
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured
 sensors, and compares the measurements and provenance with the stored results.

@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod empirical;
+pub use empirical::{EmpiricalMethod, EmpiricalResult};
+
 use std::collections::BTreeMap;
 
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
