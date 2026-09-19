@@ -18,7 +18,8 @@
 #![forbid(unsafe_code)]
 mod temporal;
 pub use temporal::{
-    dynamic_time_warping, lagged_dependency, ObservationSequence, OrderedObservation, TemporalError,
+    detect_change_points, dynamic_time_warping, lagged_dependency, ChangePoint,
+    ChangePointDetection, ObservationSequence, OrderedObservation, TemporalError,
 };
 
 use std::collections::BTreeMap;

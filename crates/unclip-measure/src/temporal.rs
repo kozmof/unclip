@@ -24,6 +24,7 @@ pub struct ObservationSequence(Vec<OrderedObservation>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemporalError {
+    InvalidChangeThreshold,
     NonIncreasingPosition { index: usize },
     DuplicateObservation { index: usize },
     TrajectoryMismatch { index: usize },
@@ -32,6 +33,9 @@ pub enum TemporalError {
 impl std::fmt::Display for TemporalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidChangeThreshold => {
+                write!(f, "change threshold must be finite and strictly positive")
+            }
             Self::NonIncreasingPosition { index } => {
                 write!(f, "sequence position must increase at index {index}")
             }
@@ -174,6 +178,88 @@ pub fn dynamic_time_warping(
     Ok(Some(previous[ys.len()]))
 }
 
+/// A boundary whose adjacent windows differ by the configured rank threshold.
+/// The observation and index identify the first sample in the right window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangePoint {
+    pub observation: ObservationId,
+    pub index: usize,
+    pub before_mean: f64,
+    pub after_mean: f64,
+    pub sample_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangePointDetection {
+    pub events: Vec<ChangePoint>,
+    pub evaluated_boundaries: usize,
+    pub window: NonZeroUsize,
+    pub minimum_shift: f64,
+}
+
+/// Detects rank-mean changes using two adjacent windows of `window` samples.
+/// A boundary is flagged when the absolute mean difference is at least the
+/// finite, strictly positive `minimum_shift` (in rank units). Every qualifying
+/// boundary is retained; adjacent flags may describe the same transition.
+/// This is descriptive threshold detection, not a significance or causal test.
+///
+/// Windows containing unknown or missing ranks are skipped without closing
+/// gaps. `None` means no complete boundary could be evaluated. An empty event
+/// list with a positive evaluated count means no threshold crossing was found.
+/// Window size counts observations, not elapsed time. Reduction order is fixed.
+pub fn detect_change_points(
+    sequence: &ObservationSequence,
+    trajectory: &RankTrajectory,
+    window: NonZeroUsize,
+    minimum_shift: f64,
+) -> Result<Option<ChangePointDetection>, TemporalError> {
+    sequence.validate(trajectory)?;
+    if !minimum_shift.is_finite() || minimum_shift <= 0.0 {
+        return Err(TemporalError::InvalidChangeThreshold);
+    }
+    let width = window.get();
+    let count = trajectory.samples.len();
+    if width > count / 2 {
+        return Ok(None);
+    }
+    let mean = |samples: &[crate::RankSample]| {
+        samples
+            .iter()
+            .try_fold(0.0, |sum, sample| match sample.position {
+                RankPosition::Ranked { rank } => Some(sum + rank as f64),
+                RankPosition::Unknown | RankPosition::Missing => None,
+            })
+            .map(|sum| sum / width as f64)
+    };
+    let mut result = ChangePointDetection {
+        events: Vec::new(),
+        evaluated_boundaries: 0,
+        window,
+        minimum_shift,
+    };
+    for index in width..=count - width {
+        let (Some(before_mean), Some(after_mean)) = (
+            mean(&trajectory.samples[index - width..index]),
+            mean(&trajectory.samples[index..index + width]),
+        ) else {
+            continue;
+        };
+        result.evaluated_boundaries += 1;
+        if (after_mean - before_mean).abs() >= minimum_shift {
+            result.events.push(ChangePoint {
+                observation: sequence.observations()[index].observation.clone(),
+                index,
+                before_mean,
+                after_mean,
+                sample_count: width * 2,
+            });
+        }
+    }
+    Ok((result.evaluated_boundaries > 0).then_some(result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +290,132 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn change_sequence(count: usize) -> ObservationSequence {
+        ObservationSequence::new(
+            (0..count)
+                .map(|i| OrderedObservation {
+                    observation: ObservationId::new(i.to_string()),
+                    position: (i * 10) as i64,
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn change_points_detect_both_directions_with_exact_boundaries() {
+        let sequence = change_sequence(9);
+        let ranks = trajectory(&[1, 1, 1, 5, 5, 5, 1, 1, 1]);
+        let window = NonZeroUsize::new(3).unwrap();
+        let result = detect_change_points(&sequence, &ranks, window, 4.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.evaluated_boundaries, 4);
+        assert_eq!(
+            result.events,
+            vec![
+                ChangePoint {
+                    observation: ObservationId::new("3"),
+                    index: 3,
+                    before_mean: 1.0,
+                    after_mean: 5.0,
+                    sample_count: 6
+                },
+                ChangePoint {
+                    observation: ObservationId::new("6"),
+                    index: 6,
+                    before_mean: 5.0,
+                    after_mean: 1.0,
+                    sample_count: 6
+                },
+            ]
+        );
+        assert_eq!(
+            detect_change_points(&sequence, &ranks, window, 4.0).unwrap(),
+            Some(result.clone())
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ChangePointDetection>(&encoded).unwrap(),
+            result
+        );
+        assert!(detect_change_points(&sequence, &ranks, window, 4.1)
+            .unwrap()
+            .unwrap()
+            .events
+            .is_empty());
+    }
+
+    #[test]
+    fn change_points_distinguish_no_change_from_insufficient_evidence() {
+        let sequence = change_sequence(6);
+        let window = NonZeroUsize::new(2).unwrap();
+        let constant = trajectory(&[3; 6]);
+        let result = detect_change_points(&sequence, &constant, window, 0.5)
+            .unwrap()
+            .unwrap();
+        assert!(result.events.is_empty());
+        assert_eq!(result.evaluated_boundaries, 3);
+        for position in [RankPosition::Unknown, RankPosition::Missing] {
+            let mut sparse = trajectory(&[1, 1, 4, 4, 4, 4]);
+            sparse.samples[0].position = position;
+            let result = detect_change_points(&sequence, &sparse, window, 3.0)
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.evaluated_boundaries, 2);
+            assert!(result.events.is_empty());
+            sparse.samples[3].position = position;
+            assert_eq!(
+                detect_change_points(&sequence, &sparse, window, 3.0).unwrap(),
+                None
+            );
+        }
+        assert_eq!(
+            detect_change_points(
+                &sequence,
+                &constant,
+                NonZeroUsize::new(usize::MAX).unwrap(),
+                1.0
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            detect_change_points(&change_sequence(0), &trajectory(&[]), window, 1.0).unwrap(),
+            None
+        );
+        let adjacent = detect_change_points(
+            &change_sequence(4),
+            &trajectory(&[1, 3, 1, 3]),
+            NonZeroUsize::new(1).unwrap(),
+            2.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(adjacent.events.len(), 3);
+    }
+
+    #[test]
+    fn change_points_reject_invalid_thresholds_and_order_mismatches() {
+        let sequence = change_sequence(4);
+        let ranks = trajectory(&[1, 1, 3, 3]);
+        let window = NonZeroUsize::new(2).unwrap();
+        for threshold in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                detect_change_points(&sequence, &ranks, window, threshold),
+                Err(TemporalError::InvalidChangeThreshold)
+            );
+        }
+        assert_eq!(
+            TemporalError::InvalidChangeThreshold.to_string(),
+            "change threshold must be finite and strictly positive"
+        );
+        assert!(detect_change_points(&change_sequence(3), &ranks, window, 1.0).is_err());
+        let mut reordered = ranks.clone();
+        reordered.samples.swap(0, 1);
+        assert!(detect_change_points(&sequence, &reordered, window, 1.0).is_err());
     }
 
     #[test]
