@@ -38,6 +38,10 @@ struct Fixture {
 fn fixture() -> Fixture {
     let json: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/multi_observation.json")).unwrap();
+    fixture_document(json)
+}
+
+fn fixture_document(json: serde_json::Value) -> Fixture {
     let units = json["units"]
         .as_array()
         .unwrap()
@@ -405,7 +409,14 @@ fn batch_sensors_reject_duplicate_or_unselected_inputs_and_unknown_parameters() 
 
 #[tokio::test]
 async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
-    let fixture = fixture();
+    assert_persisted_batch(fixture(), profile(), BTreeMap::new()).await;
+}
+
+async fn assert_persisted_batch(
+    fixture: Fixture,
+    profile: EngineProfile,
+    params: BTreeMap<PluginId, serde_json::Value>,
+) {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let domains = SeaOrmDomainRepository::new(db.clone());
     let provenance = SeaOrmProvenanceRepository::new(db.clone());
@@ -425,8 +436,7 @@ async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
         .await
         .unwrap();
     let engine = Engine::with_builtins().unwrap();
-    let plan = engine.plan(&profile()).unwrap();
-    let params = BTreeMap::new();
+    let plan = engine.plan(&profile).unwrap();
     runs.insert_run(engine.run_record(
         &plan,
         &params,
@@ -519,8 +529,16 @@ async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
                 engine_run_id: "batch".into(),
                 sensor: result.value().sensor.clone(),
                 sensor_version: result.value().sensor_version.clone(),
-                params: serde_json::json!({}),
-                params_hash: hash_params(&serde_json::json!({})),
+                params: params
+                    .get(&result.value().sensor)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
+                params_hash: hash_params(
+                    &params
+                        .get(&result.value().sensor)
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({})),
+                ),
                 status: "completed".into(),
                 started_at: "now".into(),
                 completed_at: Some("now".into()),
@@ -571,7 +589,7 @@ async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
         }
     );
     let replay = runs.replay_run("batch").await.unwrap().unwrap();
-    assert_eq!(replay.observations.len(), 6);
+    assert_eq!(replay.observations.len(), fixture.observations.len());
     let verified = engine
         .verify(
             &plan,
@@ -605,7 +623,245 @@ async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
         assert_eq!(stored_provenance.provenance, *result.provenance());
         assert_eq!(
             provenance.direct_inputs(result.id()).await.unwrap().len(),
-            17
+            fixture.observations.len() + fixture.alignments.len() + fixture.rankings.len()
         );
     }
+}
+
+const SELECTED_SENSORS: &[&str] = &[
+    "sensor.co-foreground",
+    "sensor.conditional-mutual-information",
+    "sensor.partial-correlation",
+];
+
+fn conditioned_fixture() -> Fixture {
+    fixture_document(
+        serde_json::from_str(include_str!("fixtures/conditioned_observations.json")).unwrap(),
+    )
+}
+
+fn selected_profile() -> EngineProfile {
+    EngineProfile {
+        sensors: SELECTED_SENSORS
+            .iter()
+            .copied()
+            .map(PluginSelection::any)
+            .collect(),
+        ..Default::default()
+    }
+}
+
+fn selected_params() -> BTreeMap<PluginId, serde_json::Value> {
+    SELECTED_SENSORS
+        .iter()
+        .map(|id| {
+            (
+                PluginId::new(*id),
+                if *id == "sensor.co-foreground" {
+                    serde_json::json!({"left":"a","right":"b","foreground_rank":2})
+                } else {
+                    serde_json::json!({"left":"a","right":"b","conditioning_variables":["c"]})
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
+    let fixture = conditioned_fixture();
+    let inputs = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&selected_profile()).unwrap();
+    let params = selected_params();
+    for sensor in &plan.sensors {
+        conformance::assert_sensor(sensor.as_ref(), |plugin| {
+            let configured = &params[&plugin.descriptor().id];
+            let ctx = inputs.ctx(&fixture, configured);
+            let mut meta = metadata("selected", &plugin.descriptor().id.0);
+            meta.params = configured.clone();
+            meta.params_hash = hash_params(configured);
+            let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
+            assert_eq!(results[0].provenance().inputs.len(), 12);
+            assert_eq!(results[0].provenance().params, *configured);
+            assert_eq!(results[0].value().sample_count, Some(4));
+            let Reading::Value {
+                value: MeasurementValue::Scalar(value),
+            } = results[0].value().reading
+            else {
+                panic!("expected a measured scalar")
+            };
+            let expected = match plugin.descriptor().id.0.as_str() {
+                "sensor.co-foreground" => 0.25,
+                "sensor.conditional-mutual-information" => 0.0,
+                "sensor.partial-correlation" => -1.0,
+                _ => unreachable!(),
+            };
+            assert!((value - expected).abs() < 1e-12);
+            Ok(results)
+        });
+        let mut sparse = fixture.clone();
+        sparse.rankings.remove(0);
+        let sparse_inputs = Inputs::new(&sparse);
+        let configured = &params[&sensor.descriptor().id];
+        let ctx = sparse_inputs.ctx(&sparse, configured);
+        let results = sensor
+            .measure(
+                &ctx,
+                ctx.calculation_token(metadata("sparse", &sensor.descriptor().id.0)),
+            )
+            .unwrap();
+        assert_eq!(results[0].value().sample_count, Some(3));
+        if sensor.descriptor().id.0 == "sensor.partial-correlation" {
+            assert_eq!(
+                results[0].value().reading,
+                Reading::InsufficientEvidence { have: 3, need: 4 }
+            );
+        }
+        let empty_params = serde_json::json!({"left":"a","right":"b"});
+        if sensor.descriptor().id.0 != "sensor.co-foreground" {
+            let ctx = inputs.ctx(&fixture, &empty_params);
+            conformance::assert_planning(
+                sensor.as_ref(),
+                &ctx,
+                true,
+                SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 1 }),
+            );
+            let result = sensor
+                .measure(
+                    &ctx,
+                    ctx.calculation_token(metadata("missing-condition", &sensor.descriptor().id.0)),
+                )
+                .unwrap();
+            assert_eq!(result[0].value().sample_count, Some(0));
+        }
+    }
+}
+
+#[test]
+fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_variance() {
+    let fixture = conditioned_fixture();
+    let inputs = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&selected_profile()).unwrap();
+    let params = selected_params();
+    for sensor in &plan.sensors {
+        let base = &params[&sensor.descriptor().id];
+        for field in ["left", "same", "extra", "invalid-evidence"] {
+            let mut config = base.clone();
+            match field {
+                "left" => config["left"] = serde_json::json!("absent"),
+                "same" => config["right"] = config["left"].clone(),
+                "extra" => config["unexpected"] = serde_json::json!(true),
+                _ if sensor.descriptor().id.0 == "sensor.co-foreground" => {
+                    config["foreground_rank"] = serde_json::json!(0)
+                }
+                _ => config["conditioning_variables"] = serde_json::json!(["c", "f1"]),
+            }
+            let ctx = inputs.ctx(&fixture, &config);
+            assert!(sensor
+                .measure(
+                    &ctx,
+                    ctx.calculation_token(metadata("invalid", &sensor.descriptor().id.0))
+                )
+                .is_err());
+        }
+    }
+    let constant = fixture_document(serde_json::json!({"units":["a","b","c"],"observations":[
+        {"id":"1","tiers":[["c"],["a"],["b"]],"unknown":[]},
+        {"id":"2","tiers":[["c"],["b"],["a"]],"unknown":[]},
+        {"id":"3","tiers":[["c"],["a"],["b"]],"unknown":[]},
+        {"id":"4","tiers":[["c"],["b"],["a"]],"unknown":[]}
+    ]}));
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&constant).engine_inputs(&constant),
+            MeasurementRun {
+                id: "constant",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    let partial = results
+        .iter()
+        .find(|value| value.value().sensor.0 == "sensor.partial-correlation")
+        .unwrap();
+    assert_eq!(partial.value().sample_count, Some(4));
+    assert_eq!(
+        partial.value().reading,
+        Reading::InsufficientEvidence { have: 0, need: 1 }
+    );
+    assert!(partial
+        .value()
+        .context
+        .values
+        .contains_key("missing_evidence"));
+}
+
+#[test]
+fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
+    let fixture = fixture_document(serde_json::json!({"units":["a","b","c"],"observations":[
+        {"id":"1","tiers":[["a","b","c"]],"unknown":[]},
+        {"id":"2","tiers":[["a"],["b","c"]],"unknown":[]},
+        {"id":"3","tiers":[["b"],["a","c"]],"unknown":[]},
+        {"id":"4","tiers":[["c"],["a","b"]],"unknown":[]}
+    ]}));
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&selected_profile()).unwrap();
+    let params = selected_params();
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&fixture).engine_inputs(&fixture),
+            MeasurementRun {
+                id: "xor",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    let cmi = results
+        .iter()
+        .find(|value| value.value().sensor.0 == "sensor.conditional-mutual-information")
+        .unwrap();
+    assert_eq!(
+        cmi.value().reading,
+        Reading::Value {
+            value: MeasurementValue::Scalar(1.0)
+        }
+    );
+    let mut params = selected_params();
+    params
+        .get_mut(&PluginId::new("sensor.co-foreground"))
+        .unwrap()["foreground_rank"] = serde_json::json!(1);
+    let fixture = conditioned_fixture();
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&fixture).engine_inputs(&fixture),
+            MeasurementRun {
+                id: "zero",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        results
+            .iter()
+            .find(|value| value.value().sensor.0 == "sensor.co-foreground")
+            .unwrap()
+            .value()
+            .reading,
+        Reading::Value {
+            value: MeasurementValue::Scalar(0.0)
+        }
+    );
+}
+
+#[tokio::test]
+async fn conditioned_profiles_persist_parameters_and_replay_bit_for_bit() {
+    assert_persisted_batch(conditioned_fixture(), selected_profile(), selected_params()).await;
 }

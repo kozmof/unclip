@@ -2677,6 +2677,7 @@ name = "unclip-sensors"
 version = "0.1.0"
 dependencies = [
  "semver",
+ "serde",
  "serde_json",
  "unclip-domain",
  "unclip-epistemic",

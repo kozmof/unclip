@@ -1,0 +1,9 @@
+{
+  "units": ["a", "b", "c", "f1", "f2", "f3"],
+  "observations": [
+    {"id": "obs-1", "tiers": [["c"], ["a", "b"]], "unknown": []},
+    {"id": "obs-2", "tiers": [["f1"], ["a", "c"], ["f3"], ["b"]], "unknown": []},
+    {"id": "obs-3", "tiers": [["f1"], ["b"], ["c"], ["a"]], "unknown": []},
+    {"id": "obs-4", "tiers": [["f1"], ["f2"], ["f3"], ["a", "b", "c"]], "unknown": []}
+  ]
+}

@@ -147,6 +147,13 @@ command. Batch profiles can select `sensor.trajectories`, `sensor.spearman`,
 `sensor.mutual-information`. Selection order is recorded; these batch sensors
 use stable observation-ID order and make no temporal claims.
 
+Pair-specific sensors use explicit parameters in the engine profile.
+`sensor.co-foreground` accepts `left`, `right`, and a positive `foreground_rank`.
+`sensor.conditional-mutual-information` and `sensor.partial-correlation` accept
+`left`, `right`, and `conditioning_variables: [unit-id]`; each currently supports
+one conditioning unit. They report complete-case sample counts and preserve
+insufficient evidence separately from measured zero.
+
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured
 sensors, and compares the measurements and provenance with the stored results.

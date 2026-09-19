@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use unclip_plugin::{Registry, Result};
 
+mod conditioned;
 mod coverage;
 mod kendall;
 mod lehmer;
@@ -19,6 +20,7 @@ mod rbo;
 mod residual;
 mod support;
 
+pub use conditioned::{SelectedPairSensor, SelectedPairStatistic};
 pub use coverage::CoverageSensor;
 pub use kendall::KendallSensor;
 pub use lehmer::LehmerSensor;
@@ -43,6 +45,13 @@ pub fn register_all(registry: &mut Registry) -> Result<()> {
         unclip_measure::PairwiseMetric::MutualInformation,
     ] {
         registry.register_sensor(Arc::new(MultiObservationSensor::matrix(metric)))?;
+    }
+    for statistic in [
+        SelectedPairStatistic::CoForeground,
+        SelectedPairStatistic::ConditionalMutualInformation,
+        SelectedPairStatistic::PartialCorrelation,
+    ] {
+        registry.register_sensor(Arc::new(SelectedPairSensor::new(statistic)))?;
     }
     Ok(())
 }
@@ -69,6 +78,6 @@ mod tests {
     fn registration_is_explicit() {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
-        assert_eq!(registry.sensors().count(), 11);
+        assert_eq!(registry.sensors().count(), 14);
     }
 }

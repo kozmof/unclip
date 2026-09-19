@@ -12,6 +12,7 @@ description = "Built-in deterministic calculation sensors for Unclip."
 [dependencies]
 semver.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-measure.workspace = true

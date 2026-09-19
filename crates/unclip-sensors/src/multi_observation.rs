@@ -100,64 +100,7 @@ impl Sensor for MultiObservationSensor {
                 "batch rank sensors accept only an empty parameter object".into(),
             ));
         }
-        let frame_units = ctx
-            .frame()
-            .axes
-            .iter()
-            .map(|axis| axis.unit.clone())
-            .collect::<BTreeSet<_>>();
-        let alignments = alignment_index(ctx, &frame_units);
-        let mut rankings = BTreeMap::new();
-        for tracked in ctx.rankings() {
-            let ranking = ctx.read(tracked);
-            if rankings
-                .insert(ranking.observation.clone(), ranking)
-                .is_some()
-            {
-                return Err(PluginError::Message(format!(
-                    "multiple rankings for observation {} require explicit selection",
-                    ranking.observation.0
-                )));
-            }
-        }
-        let mut observations = BTreeSet::new();
-        for tracked in ctx.observations() {
-            let observation = ctx.read(tracked);
-            if !observations.insert(observation.id.clone()) {
-                return Err(PluginError::Message(format!(
-                    "duplicate observation {}",
-                    observation.id.0
-                )));
-            }
-        }
-        if rankings
-            .keys()
-            .chain(alignments.keys())
-            .any(|id| !observations.contains(id))
-        {
-            return Err(PluginError::Message(
-                "rankings and alignments must belong to the selected observations".into(),
-            ));
-        }
-        // Non-temporal batches use stable observation-ID order. No temporal
-        // ordering is inferred from IDs or timestamps.
-        let states = observations
-            .iter()
-            .map(|id| {
-                let state = match (rankings.get(id), alignments.get(id)) {
-                    (Some(ranking), Some(alignment)) => {
-                        ranked_state(ranking, alignment, &frame_units)
-                    }
-                    _ => RankedState {
-                        tiers: vec![],
-                        unknown: vec![],
-                        unresolved: vec![],
-                    },
-                };
-                (id.clone(), state)
-            })
-            .collect::<Vec<_>>();
-        let frame_units = frame_units.into_iter().collect::<Vec<_>>();
+        let (frame_units, states) = batch_states(ctx)?;
         let ranks = construct_rank_trajectories(&frame_units, &states);
         let reading = if let Some(metric) = self.metric {
             let matrix = pairwise_matrix(&ranks, metric)
@@ -178,10 +121,78 @@ impl Sensor for MultiObservationSensor {
             sensor_version: self.descriptor.version.clone(),
             reading,
             confidence: None,
-            sample_count: Some(observations.len()),
+            sample_count: Some(states.len()),
             context: MeasurementContext {
-                values: BTreeMap::from([("observations".into(), serde_json::json!(observations))]),
+                values: BTreeMap::from([(
+                    "observations".into(),
+                    serde_json::json!(states.iter().map(|(id, _)| id).collect::<Vec<_>>()),
+                )]),
             },
         })])
     }
+}
+
+type BatchStates = (
+    Vec<unclip_domain::UnitId>,
+    Vec<(unclip_observe::ObservationId, RankedState)>,
+);
+
+pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
+    let frame_units = ctx
+        .frame()
+        .axes
+        .iter()
+        .map(|axis| axis.unit.clone())
+        .collect::<BTreeSet<_>>();
+    let alignments = alignment_index(ctx, &frame_units);
+    let mut rankings = BTreeMap::new();
+    for tracked in ctx.rankings() {
+        let ranking = ctx.read(tracked);
+        if rankings
+            .insert(ranking.observation.clone(), ranking)
+            .is_some()
+        {
+            return Err(PluginError::Message(format!(
+                "multiple rankings for observation {} require explicit selection",
+                ranking.observation.0
+            )));
+        }
+    }
+    let mut observations = BTreeSet::new();
+    for tracked in ctx.observations() {
+        let observation = ctx.read(tracked);
+        if !observations.insert(observation.id.clone()) {
+            return Err(PluginError::Message(format!(
+                "duplicate observation {}",
+                observation.id.0
+            )));
+        }
+    }
+    if rankings
+        .keys()
+        .chain(alignments.keys())
+        .any(|id| !observations.contains(id))
+    {
+        return Err(PluginError::Message(
+            "rankings and alignments must belong to the selected observations".into(),
+        ));
+    }
+    // Non-temporal batches use stable observation-ID order. No temporal
+    // ordering is inferred from IDs or timestamps.
+    let states = observations
+        .iter()
+        .map(|id| {
+            let state = match (rankings.get(id), alignments.get(id)) {
+                (Some(ranking), Some(alignment)) => ranked_state(ranking, alignment, &frame_units),
+                _ => RankedState {
+                    tiers: vec![],
+                    unknown: vec![],
+                    unresolved: vec![],
+                },
+            };
+            (id.clone(), state)
+        })
+        .collect::<Vec<_>>();
+    let frame_units = frame_units.into_iter().collect::<Vec<_>>();
+    Ok((frame_units, states))
 }
