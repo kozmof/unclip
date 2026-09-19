@@ -8,6 +8,7 @@
 mod domain_repository;
 mod engine_run_repository;
 mod error;
+mod experiment_repository;
 mod frame_mapper;
 mod frame_repository;
 mod history;
@@ -26,6 +27,12 @@ pub use engine_run_repository::{
     MeasurementInputSnapshot, RecordedInference, SeaOrmEngineRunRepository,
 };
 pub use error::{StoreError, StoreResult};
+pub use experiment_repository::{
+    CandidateKind, CandidateProposal, CandidateRecord, CandidateRepository,
+    CompletedExperimentRecord, DomainRevision, DomainRevisionRecord, DomainRevisionRepository,
+    ExperimentDelta, ExperimentDeltaRecord, ExperimentOutcome, ExperimentRepository,
+    SeaOrmExperimentRepository,
+};
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{
     now, HistoryRepository, PacketUsageRecord, SeaOrmHistoryRepository, UsageSummary,

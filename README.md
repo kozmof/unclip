@@ -194,6 +194,14 @@ fabricated. Empirical runs snapshot their selected measurements and method,
 and verification recalculates both values and provenance against stored results.
 Results remain anonymous: this command assigns no semantic labels.
 
+The storage library also exposes `CandidateRepository`, `ExperimentRepository`,
+and `DomainRevisionRepository` through `SeaOrmExperimentRepository`. Candidate
+proposals require calculated evidence; completed experiments require experimental
+evidence, disjoint observation splits with held-out data, and tracked calculated
+deltas. Each write commits its records and provenance atomically. Revision records
+reference existing domain versions. These APIs provide storage; candidate
+generation and counterfactual execution are not yet exposed in the CLI.
+
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured
 sensors, and compares the measurements and provenance with the stored results.
