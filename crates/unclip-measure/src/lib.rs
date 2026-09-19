@@ -16,6 +16,11 @@
 //! ```
 
 #![forbid(unsafe_code)]
+mod pairwise;
+pub use pairwise::{
+    pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,
+};
+
 mod temporal;
 pub use temporal::{
     detect_change_points, dynamic_time_warping, lagged_dependency, ChangePoint,
@@ -619,6 +624,7 @@ pub enum MeasurementValue {
     Scalar(f64),
     Vector(Vec<f64>),
     Matrix(Vec<Vec<f64>>),
+    PairwiseMatrix(PairwiseMatrix),
     Distribution(Vec<(String, f64)>),
     Events(Vec<serde_json::Value>),
     Graph(serde_json::Value),
@@ -632,7 +638,7 @@ impl MeasurementValue {
         match self {
             Self::Scalar(_) => MeasurementKind::Scalar,
             Self::Vector(_) => MeasurementKind::Vector,
-            Self::Matrix(_) => MeasurementKind::Matrix,
+            Self::Matrix(_) | Self::PairwiseMatrix(_) => MeasurementKind::Matrix,
             Self::Distribution(_) => MeasurementKind::Distribution,
             Self::Events(_) => MeasurementKind::Events,
             Self::Graph(_) => MeasurementKind::Graph,

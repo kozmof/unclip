@@ -204,3 +204,47 @@ async fn empirical_structure_round_trips_with_profile_link() {
         structure
     );
 }
+
+#[tokio::test]
+async fn pairwise_matrix_preserves_labels_sparse_cells_and_exact_values() {
+    use unclip_measure::{
+        pairwise_matrix, PairwiseMetric, RankPosition, RankSample, RankTrajectory,
+    };
+    use unclip_observe::ObservationId;
+
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let repo = SeaOrmMeasurementRepository::new(db);
+    repo.insert_sensor_run(sensor_run("value-run", "sensor.value"))
+        .await
+        .unwrap();
+    let trajectories = ["a", "b", "c"].map(|unit| RankTrajectory {
+        unit: UnitId::new(unit),
+        samples: (0..3)
+            .map(|i| RankSample {
+                observation: ObservationId::new(i.to_string()),
+                position: if unit == "c" {
+                    RankPosition::Unknown
+                } else {
+                    RankPosition::Ranked { rank: i + 1 }
+                },
+            })
+            .collect(),
+    });
+    let matrix = pairwise_matrix(&trajectories, PairwiseMetric::MutualInformation).unwrap();
+    let mut record = value_record("matrix", 0.0);
+    record.kind = MeasurementKind::Matrix;
+    record.measurement.reading = Reading::Value {
+        value: MeasurementValue::PairwiseMatrix(matrix),
+    };
+    let expected = MeasurementProfile {
+        measurements: vec![record.measurement.clone()],
+    };
+    repo.insert_profile(header("matrix-profile"), vec![record])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.get_profile("matrix-profile").await.unwrap().unwrap(),
+        expected
+    );
+}
