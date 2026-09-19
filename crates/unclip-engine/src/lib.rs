@@ -207,12 +207,30 @@ impl Engine {
                 entry(&descriptor.id, &descriptor.version, params)
             })
             .collect::<Vec<_>>();
+        let mut candidate_generators = plan
+            .candidate_generators
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
+        let mut null_models = plan
+            .null_models
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
         let by_id = |left: &serde_json::Value, right: &serde_json::Value| {
             left["id"].as_str().cmp(&right["id"].as_str())
         };
         inferrers.sort_by(by_id);
         sensors.sort_by(by_id);
         comparators.sort_by(by_id);
+        candidate_generators.sort_by(by_id);
+        null_models.sort_by(by_id);
 
         unclip_store::EngineRunRecord {
             id: id.into(),
@@ -220,6 +238,8 @@ impl Engine {
                 "inferrers": inferrers,
                 "sensors": sensors,
                 "comparators": comparators,
+                "candidate_generators": candidate_generators,
+                "null_models": null_models,
             }),
             status: unclip_store::EngineRunStatus::Planned,
             started_at: started_at.0,

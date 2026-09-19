@@ -44,6 +44,10 @@ pub struct EngineProfileDocument {
     pub inferrers: Vec<PluginConfig>,
     #[serde(default)]
     pub comparators: Vec<PluginConfig>,
+    #[serde(default)]
+    pub candidate_generators: Vec<PluginConfig>,
+    #[serde(default)]
+    pub null_models: Vec<PluginConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +77,8 @@ fn validate(document: &EngineProfileDocument) -> anyhow::Result<()> {
         .iter()
         .chain(&document.inferrers)
         .chain(&document.comparators)
+        .chain(&document.candidate_generators)
+        .chain(&document.null_models)
     {
         ensure!(!plugin.id.0.is_empty(), "plugin id must not be empty");
         ensure!(
@@ -108,6 +114,8 @@ impl EngineProfileDocument {
             .iter()
             .chain(&self.inferrers)
             .chain(&self.comparators)
+            .chain(&self.candidate_generators)
+            .chain(&self.null_models)
             .map(|plugin| (plugin.id.clone(), plugin.params.clone()))
             .collect();
         Ok(ParsedEngineProfile {
@@ -115,6 +123,8 @@ impl EngineProfileDocument {
                 sensors: selections(&self.sensors),
                 inferrers: selections(&self.inferrers),
                 comparators: selections(&self.comparators),
+                candidate_generators: selections(&self.candidate_generators),
+                null_models: selections(&self.null_models),
             },
             params,
         })
@@ -208,5 +218,56 @@ sensors:
     typo: true
 "#;
         assert!(parse_engine_profile(unknown).is_err());
+    }
+}
+
+#[cfg(test)]
+mod discovery_profile_tests {
+    use super::*;
+    #[test]
+    fn discovery_selections_round_trip_and_old_profiles_default_to_empty() {
+        let document = parse_engine_profile(
+            r#"
+candidate_generators:
+  - id: generate.fixture
+    version: ^1.2
+    params: {minimum_samples: 4}
+null_models:
+  - id: null.fixture
+    version: '=1.0.0'
+    params: {seed: 7}
+"#,
+        )
+        .unwrap();
+        let parsed = document.resolve().unwrap();
+        assert_eq!(
+            parsed.profile.candidate_generators[0].id.0,
+            "generate.fixture"
+        );
+        assert_eq!(parsed.profile.null_models[0].id.0, "null.fixture");
+        assert!(parsed.profile.candidate_generators[0]
+            .version
+            .matches(&semver::Version::new(1, 3, 0)));
+        assert_eq!(parsed.params[&PluginId::new("null.fixture")]["seed"], 7);
+        let encoded = serde_json::to_string(&document).unwrap();
+        assert_eq!(parse_engine_profile(&encoded).unwrap(), document);
+        let old = parse_engine_profile("sensors: []")
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert!(old.profile.candidate_generators.is_empty() && old.profile.null_models.is_empty());
+    }
+    #[test]
+    fn discovery_configuration_rejects_duplicate_ids_and_invalid_parameters() {
+        for text in [
+            "candidate_generators: [{id: same}]\nnull_models: [{id: same}]",
+            "candidate_generators: [{id: generator, params: []}]",
+            "null_models: [{id: null.fixture, params: null}]",
+            "candidate_generators: [{id: '', params: {}}]",
+            "null_models: [{id: null.fixture, version: not-semver}]",
+            "candidate_generators: [{id: generator, typo: true}]",
+        ] {
+            assert!(parse_engine_profile(text).is_err(), "accepted {text}");
+        }
     }
 }

@@ -194,6 +194,13 @@ fabricated. Empirical runs snapshot their selected measurements and method,
 and verification recalculates both values and provenance against stored results.
 Results remain anonymous: this command assigns no semantic labels.
 
+Engine-profile YAML and JSON accept optional `candidate_generators` and
+`null_models` lists, using the same `id`, `version`, and object-valued `params`
+fields as sensors. Selections are explicit and version-checked; recorded plans
+pin resolved versions, parameters, and hashes. Older profiles default these
+lists to empty. No built-in generator or null-model algorithm is registered yet;
+this configuration support does not run discovery or experiments.
+
 The storage library also exposes `CandidateRepository`, `ExperimentRepository`,
 and `DomainRevisionRepository` through `SeaOrmExperimentRepository`. Candidate
 proposals require calculated evidence; completed experiments require experimental

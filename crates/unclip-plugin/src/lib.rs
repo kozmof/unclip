@@ -474,7 +474,28 @@ impl Registry {
         self.comparators.values()
     }
 
+    pub fn candidate_generators(&self) -> impl Iterator<Item = &Arc<dyn CandidateGenerator>> {
+        self.generators.values()
+    }
+
+    pub fn null_models(&self) -> impl Iterator<Item = &Arc<dyn NullModel>> {
+        self.null_models.values()
+    }
+
     pub fn resolve(&self, profile: &EngineProfile) -> Result<RunPlan> {
+        let mut ids = std::collections::BTreeSet::new();
+        for selection in profile
+            .sensors
+            .iter()
+            .chain(&profile.inferrers)
+            .chain(&profile.comparators)
+            .chain(&profile.candidate_generators)
+            .chain(&profile.null_models)
+        {
+            if !ids.insert(&selection.id) {
+                return Err(PluginError::DuplicatePlugin(selection.id.clone()));
+            }
+        }
         Ok(RunPlan {
             sensors: resolve_ids(&self.sensors, &profile.sensors, |plugin| {
                 &plugin.descriptor().version
@@ -483,6 +504,14 @@ impl Registry {
                 &plugin.descriptor().version
             })?,
             comparators: resolve_ids(&self.comparators, &profile.comparators, |plugin| {
+                &plugin.descriptor().version
+            })?,
+            candidate_generators: resolve_ids(
+                &self.generators,
+                &profile.candidate_generators,
+                |plugin| &plugin.descriptor().version,
+            )?,
+            null_models: resolve_ids(&self.null_models, &profile.null_models, |plugin| {
                 &plugin.descriptor().version
             })?,
         })
@@ -545,12 +574,16 @@ pub struct EngineProfile {
     pub sensors: Vec<PluginSelection>,
     pub inferrers: Vec<PluginSelection>,
     pub comparators: Vec<PluginSelection>,
+    pub candidate_generators: Vec<PluginSelection>,
+    pub null_models: Vec<PluginSelection>,
 }
 
 pub struct RunPlan {
     pub sensors: Vec<Arc<dyn Sensor>>,
     pub inferrers: Vec<Arc<dyn Inferrer>>,
     pub comparators: Vec<Arc<dyn Comparator>>,
+    pub candidate_generators: Vec<Arc<dyn CandidateGenerator>>,
+    pub null_models: Vec<Arc<dyn NullModel>>,
 }
 
 #[cfg(test)]

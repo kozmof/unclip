@@ -38,6 +38,25 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         );
     }
 
+    for plugin in registry.candidate_generators() {
+        found = true;
+        let descriptor = plugin.descriptor();
+        crate::output::outln!(
+            "{}\tCANDIDATE_GENERATOR\t{}\t-\tcandidate",
+            descriptor.id,
+            descriptor.version
+        );
+    }
+    for plugin in registry.null_models() {
+        found = true;
+        let descriptor = plugin.descriptor();
+        crate::output::outln!(
+            "{}\tNULL_MODEL\t{}\t-\treading",
+            descriptor.id,
+            descriptor.version
+        );
+    }
+
     if !found {
         crate::output::outln!("no leveling plugins registered");
     }
@@ -294,11 +313,23 @@ fn resolved_profile(
     let inferrers = section(value, "inferrers", &mut params)?;
     let sensors = section(value, "sensors", &mut params)?;
     let comparators = section(value, "comparators", &mut params)?;
+    let candidate_generators = if value.get("candidate_generators").is_some() {
+        section(value, "candidate_generators", &mut params)?
+    } else {
+        Vec::new()
+    };
+    let null_models = if value.get("null_models").is_some() {
+        section(value, "null_models", &mut params)?
+    } else {
+        Vec::new()
+    };
     Ok((
         unclip_plugin::EngineProfile {
             sensors,
             inferrers,
             comparators,
+            candidate_generators,
+            null_models,
         },
         params,
     ))
@@ -933,5 +964,35 @@ mod tests {
         assert_eq!(frame.0, "coffee.general");
         assert_eq!(frame_version.0, "2");
         assert!(parse_frame_selector("coffee.general").is_err());
+    }
+}
+
+#[cfg(test)]
+mod discovery_replay_tests {
+    use super::resolved_profile;
+    #[test]
+    fn replay_restores_exact_discovery_selections_and_accepts_legacy_plans() {
+        let mut plan = serde_json::json!({"sensors":[],"inferrers":[],"comparators":[]});
+        let (legacy, _) = resolved_profile(&plan).unwrap();
+        assert!(legacy.candidate_generators.is_empty() && legacy.null_models.is_empty());
+        plan["candidate_generators"] =
+            serde_json::json!([{"id":"generate.fixture","version":"1.2.3","params":{"count":2}}]);
+        plan["null_models"] =
+            serde_json::json!([{"id":"null.fixture","version":"1.0.0","params":{"seed":7}}]);
+        let (profile, params) = resolved_profile(&plan).unwrap();
+        assert_eq!(
+            profile.candidate_generators[0].version.to_string(),
+            "=1.2.3"
+        );
+        assert_eq!(profile.null_models[0].version.to_string(), "=1.0.0");
+        assert_eq!(
+            params[&unclip_epistemic::PluginId::new("generate.fixture")]["count"],
+            2
+        );
+        for key in ["candidate_generators", "null_models"] {
+            let mut invalid = plan.clone();
+            invalid[key] = serde_json::Value::Null;
+            assert!(resolved_profile(&invalid).is_err());
+        }
     }
 }
