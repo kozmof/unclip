@@ -154,6 +154,16 @@ Pair-specific sensors use explicit parameters in the engine profile.
 one conditioning unit. They report complete-case sample counts and preserve
 insufficient evidence separately from measured zero.
 
+Temporal profiles select `sensor.lagged-dependency` (`source`, `target`, positive
+`lag`), `sensor.dtw` (`left`, `right`), or `sensor.change-points` (`unit`, positive
+`window` and `minimum_shift`). Each requires a `sequence` parameter, for example
+`[{observation: obs-1, position: 0}, {observation: obs-2, position: 10}]`, covering
+every selected observation exactly once with strictly increasing positions. Lag
+and window sizes count sequence steps; timestamps alone do not establish order.
+Lagged association is directional evidence without a causal claim. DTW compares
+two units over the same complete sequence using unnormalized absolute rank cost.
+Missing evidence stays distinct from a measured zero or an empty change-event list.
+
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured
 sensors, and compares the measurements and provenance with the stored results.

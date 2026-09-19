@@ -447,11 +447,14 @@ mod tests {
         assert_eq!(
             sensors,
             vec![
+                "sensor.change-points",
                 "sensor.co-foreground",
                 "sensor.conditional-mutual-information",
                 "sensor.coverage",
+                "sensor.dtw",
                 "sensor.kendall",
                 "sensor.kendall-association",
+                "sensor.lagged-dependency",
                 "sensor.lehmer",
                 "sensor.mutual-information",
                 "sensor.partial-correlation",

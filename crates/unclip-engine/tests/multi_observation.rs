@@ -865,3 +865,305 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
 async fn conditioned_profiles_persist_parameters_and_replay_bit_for_bit() {
     assert_persisted_batch(conditioned_fixture(), selected_profile(), selected_params()).await;
 }
+
+const TEMPORAL_SENSORS: &[&str] = &[
+    "sensor.lagged-dependency",
+    "sensor.dtw",
+    "sensor.change-points",
+];
+
+fn temporal_fixture() -> Fixture {
+    fixture_document(
+        serde_json::from_str(include_str!("fixtures/temporal_observations.json")).unwrap(),
+    )
+}
+fn temporal_profile() -> EngineProfile {
+    EngineProfile {
+        sensors: TEMPORAL_SENSORS
+            .iter()
+            .copied()
+            .map(PluginSelection::any)
+            .collect(),
+        ..Default::default()
+    }
+}
+fn temporal_params() -> BTreeMap<PluginId, serde_json::Value> {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/temporal_observations.json")).unwrap();
+    TEMPORAL_SENSORS
+        .iter()
+        .map(|id| {
+            let mut value = match *id {
+                "sensor.lagged-dependency" => {
+                    serde_json::json!({"source":"a","target":"b","lag":1})
+                }
+                "sensor.dtw" => serde_json::json!({"left":"a","right":"b"}),
+                _ => serde_json::json!({"unit":"a","window":2,"minimum_shift":2.0}),
+            };
+            value["sequence"] = fixture["sequence"].clone();
+            (PluginId::new(*id), value)
+        })
+        .collect()
+}
+
+#[test]
+fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
+    let fixture = temporal_fixture();
+    let inputs = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&temporal_profile()).unwrap();
+    let params = temporal_params();
+    for sensor in &plan.sensors {
+        serde_json::from_str::<serde_json::Value>(sensor.descriptor().params_schema)
+            .expect("valid parameter schema");
+        conformance::assert_sensor(sensor.as_ref(), |plugin| {
+            let configured = &params[&plugin.descriptor().id];
+            let ctx = inputs.ctx(&fixture, configured);
+            let mut meta = metadata("temporal", &plugin.descriptor().id.0);
+            meta.params = configured.clone();
+            meta.params_hash = hash_params(configured);
+            let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
+            assert_eq!(results[0].provenance().inputs.len(), 12);
+            assert_eq!(results[0].provenance().params, *configured);
+            let value = results[0].value();
+            match plugin.descriptor().id.0.as_str() {
+                "sensor.lagged-dependency" => {
+                    assert_eq!(
+                        value.reading,
+                        Reading::Value {
+                            value: MeasurementValue::Scalar(1.0)
+                        }
+                    );
+                    assert_eq!(value.sample_count, Some(3));
+                    assert_eq!(
+                        value.context.values["evidence"],
+                        "directional association, not causality"
+                    );
+                }
+                "sensor.dtw" => {
+                    assert_eq!(
+                        value.reading,
+                        Reading::Value {
+                            value: MeasurementValue::Scalar(2.0)
+                        }
+                    );
+                    assert_eq!(value.sample_count, Some(4));
+                }
+                _ => {
+                    let Reading::Value {
+                        value: MeasurementValue::Events(events),
+                    } = &value.reading
+                    else {
+                        panic!("expected change events")
+                    };
+                    assert_eq!(events.len(), 1);
+                    assert_eq!(events[0]["observation"], "t-3");
+                    assert_eq!(events[0]["index"], 2);
+                    assert_eq!(value.context.values["evaluated_boundaries"], 1);
+                }
+            }
+            Ok(results)
+        });
+    }
+    let calculate = |fixture: &Fixture| {
+        engine
+            .measure(
+                &plan,
+                Inputs::new(fixture).engine_inputs(fixture),
+                MeasurementRun {
+                    id: "stable",
+                    timestamp: Timestamp::new("now"),
+                    params: &params,
+                },
+            )
+            .unwrap()
+    };
+    let expected = calculate(&fixture);
+    let mut shuffled = fixture.clone();
+    shuffled.observations.reverse();
+    shuffled.rankings.reverse();
+    shuffled.alignments.reverse();
+    assert_eq!(calculate(&shuffled), expected);
+}
+
+#[test]
+fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence() {
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&temporal_profile()).unwrap();
+    let params = temporal_params();
+    let mut fixture = temporal_fixture();
+    fixture
+        .rankings
+        .retain(|ranking| ranking.observation.0 != "t-1");
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&fixture).engine_inputs(&fixture),
+            MeasurementRun {
+                id: "sparse-time",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    for result in &results {
+        let expected = match result.value().sensor.0.as_str() {
+            "sensor.lagged-dependency" => Reading::InsufficientEvidence { have: 1, need: 2 },
+            "sensor.dtw" => Reading::InsufficientEvidence { have: 3, need: 4 },
+            _ => Reading::InsufficientEvidence { have: 2, need: 4 },
+        };
+        assert_eq!(result.value().reading, expected);
+    }
+    let fixture = temporal_fixture();
+    let mut params = temporal_params();
+    params
+        .get_mut(&PluginId::new("sensor.change-points"))
+        .unwrap()["minimum_shift"] = serde_json::json!(3.0);
+    params.get_mut(&PluginId::new("sensor.dtw")).unwrap()["right"] = serde_json::json!("a");
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&fixture).engine_inputs(&fixture),
+            MeasurementRun {
+                id: "zero-time",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        results
+            .iter()
+            .find(|r| r.value().sensor.0 == "sensor.dtw")
+            .unwrap()
+            .value()
+            .reading,
+        Reading::Value {
+            value: MeasurementValue::Scalar(0.0)
+        }
+    );
+    assert_eq!(
+        results
+            .iter()
+            .find(|r| r.value().sensor.0 == "sensor.change-points")
+            .unwrap()
+            .value()
+            .reading,
+        Reading::Value {
+            value: MeasurementValue::Events(vec![])
+        }
+    );
+    let mut constant = fixture.clone();
+    for ranking in &mut constant.rankings {
+        ranking.tiers = vec![RankTier {
+            units: vec![ObservedUnitId::new("a"), ObservedUnitId::new("b")],
+        }];
+    }
+    let results = engine
+        .measure(
+            &plan,
+            Inputs::new(&constant).engine_inputs(&constant),
+            MeasurementRun {
+                id: "constant-time",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+        .unwrap();
+    let lag = results
+        .iter()
+        .find(|r| r.value().sensor.0 == "sensor.lagged-dependency")
+        .unwrap();
+    assert_eq!(lag.value().sample_count, Some(3));
+    assert_eq!(
+        lag.value().reading,
+        Reading::InsufficientEvidence { have: 0, need: 1 }
+    );
+    assert!(lag.value().context.values.contains_key("missing_evidence"));
+}
+
+#[test]
+fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_parameters() {
+    let mut fixture = temporal_fixture();
+    for observation in &mut fixture.observations {
+        observation.observed_at = Some("2026-09-19T00:00:00Z".into());
+    }
+    let inputs = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&temporal_profile()).unwrap();
+    let params = temporal_params();
+    for sensor in &plan.sensors {
+        let base = &params[&sensor.descriptor().id];
+        let mut missing = base.clone();
+        missing.as_object_mut().unwrap().remove("sequence");
+        let ctx = inputs.ctx(&fixture, &missing);
+        conformance::assert_planning(
+            sensor.as_ref(),
+            &ctx,
+            true,
+            SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 1 }),
+        );
+        assert_eq!(
+            sensor
+                .measure(
+                    &ctx,
+                    ctx.calculation_token(metadata("missing-time", &sensor.descriptor().id.0))
+                )
+                .unwrap()[0]
+                .value()
+                .reading,
+            Reading::InsufficientEvidence { have: 0, need: 1 }
+        );
+        for case in [
+            "duplicate",
+            "positions",
+            "unselected",
+            "incomplete",
+            "parameter",
+            "unknown-unit",
+            "unknown-field",
+        ] {
+            let mut config = base.clone();
+            match case {
+                "duplicate" => {
+                    config["sequence"][1]["observation"] =
+                        config["sequence"][0]["observation"].clone()
+                }
+                "positions" => config["sequence"][1]["position"] = serde_json::json!(0),
+                "unselected" => config["sequence"][0]["observation"] = serde_json::json!("absent"),
+                "incomplete" => {
+                    config["sequence"].as_array_mut().unwrap().pop();
+                }
+                "parameter" => match sensor.descriptor().id.0.as_str() {
+                    "sensor.lagged-dependency" => config["lag"] = serde_json::json!(0),
+                    "sensor.dtw" => config["left"] = serde_json::json!(17),
+                    _ => config["minimum_shift"] = serde_json::json!(-1.0),
+                },
+                "unknown-unit" => {
+                    let key = match sensor.descriptor().id.0.as_str() {
+                        "sensor.lagged-dependency" => "source",
+                        "sensor.dtw" => "left",
+                        _ => "unit",
+                    };
+                    config[key] = serde_json::json!("absent");
+                }
+                _ => config["extra"] = serde_json::json!(true),
+            }
+            let ctx = inputs.ctx(&fixture, &config);
+            assert!(
+                sensor
+                    .measure(
+                        &ctx,
+                        ctx.calculation_token(metadata("invalid-time", &sensor.descriptor().id.0))
+                    )
+                    .is_err(),
+                "{case}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn temporal_profiles_persist_explicit_sequence_and_replay_bit_for_bit() {
+    assert_persisted_batch(temporal_fixture(), temporal_profile(), temporal_params()).await;
+}

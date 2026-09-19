@@ -19,6 +19,7 @@ mod permutation;
 mod rbo;
 mod residual;
 mod support;
+mod temporal;
 
 pub use conditioned::{SelectedPairSensor, SelectedPairStatistic};
 pub use coverage::CoverageSensor;
@@ -28,6 +29,7 @@ pub use multi_observation::MultiObservationSensor;
 pub use permutation::PermutationSensor;
 pub use rbo::RboSensor;
 pub use residual::ResidualSensor;
+pub use temporal::{TemporalSensor, TemporalStatistic};
 
 /// Register every built-in calculation sensor.
 pub fn register_all(registry: &mut Registry) -> Result<()> {
@@ -52,6 +54,13 @@ pub fn register_all(registry: &mut Registry) -> Result<()> {
         SelectedPairStatistic::PartialCorrelation,
     ] {
         registry.register_sensor(Arc::new(SelectedPairSensor::new(statistic)))?;
+    }
+    for statistic in [
+        TemporalStatistic::LaggedDependency,
+        TemporalStatistic::DynamicTimeWarping,
+        TemporalStatistic::ChangePoints,
+    ] {
+        registry.register_sensor(Arc::new(TemporalSensor::new(statistic)))?;
     }
     Ok(())
 }
@@ -78,6 +87,6 @@ mod tests {
     fn registration_is_explicit() {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
-        assert_eq!(registry.sensors().count(), 14);
+        assert_eq!(registry.sensors().count(), 17);
     }
 }

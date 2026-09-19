@@ -1,0 +1,15 @@
+{
+  "units": ["a", "b", "f1", "f2"],
+  "observations": [
+    {"id": "t-4", "tiers": [["a"], ["f1"], ["b"]], "unknown": []},
+    {"id": "t-1", "tiers": [["a", "b"]], "unknown": []},
+    {"id": "t-3", "tiers": [["b"], ["f1"], ["a"]], "unknown": []},
+    {"id": "t-2", "tiers": [["f1"], ["f2"], ["a", "b"]], "unknown": []}
+  ],
+  "sequence": [
+    {"observation": "t-4", "position": 0},
+    {"observation": "t-1", "position": 10},
+    {"observation": "t-3", "position": 20},
+    {"observation": "t-2", "position": 30}
+  ]
+}

@@ -57,6 +57,8 @@ pub enum EvidenceRequirement {
     /// Minimum input observations; sensors must also check complete usable samples.
     MinSamples(usize),
     Ordered,
+    /// An explicitly configured observation sequence; the sensor validates its contents.
+    ExplicitOrder,
     /// At least one distinct, nonempty conditioning-variable name in parameters.
     ConditioningVariables,
     /// Minimum distinct configured conditioning variables. Sensors validate their data.
@@ -207,6 +209,18 @@ impl<'a> MeasureCtx<'a> {
                     requirement,
                     have,
                     need,
+                })
+            }
+            EvidenceRequirement::ExplicitOrder => {
+                let have = usize::from(
+                    self.params
+                        .get("sequence")
+                        .is_some_and(|value| !value.is_null()),
+                );
+                (have == 0).then_some(EvidenceGap {
+                    requirement,
+                    have,
+                    need: 1,
                 })
             }
             EvidenceRequirement::ConditioningVariables
