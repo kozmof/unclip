@@ -26,6 +26,9 @@ pub use pairwise::{
     pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,
 };
 
+mod spectral;
+pub use spectral::{spectral_decomposition, Eigenpair, SpectralDecomposition, SpectralError};
+
 mod temporal;
 pub use temporal::{
     detect_change_points, dynamic_time_warping, lagged_dependency, ChangePoint,
