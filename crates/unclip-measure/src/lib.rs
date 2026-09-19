@@ -16,6 +16,11 @@
 //! ```
 
 #![forbid(unsafe_code)]
+mod community;
+pub use community::{
+    detect_communities, CommunityDetection, InvalidCommunityThreshold, UnassessedPair,
+};
+
 mod pairwise;
 pub use pairwise::{
     pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,
