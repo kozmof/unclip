@@ -339,7 +339,19 @@ none qualify. Probabilities are not pooled. This controls only the selected
 recorded categories under within-group exchangeability; it neither proves bias
 removal nor adjusts for candidate selection or multiple testing.
 
-Observation and measurement CLI commands reject discovery selections; a dedicated
+The first comparator, `compare.scalar-difference`, is selected explicitly in the
+profile `comparators` list with empty parameters. The library runs it through
+`Engine::compare_measurements` on a tracked before/after measurement pair. Both
+measurements must share sensor identity, version, and context. The structured
+`Delta` uses the `ScalarDifference` payload: `value` retains before, after, and
+`after - before`; `unavailable` retains both original readings; `not_applicable`
+rejects structured inputs without scalarizing them. Nonfinite readings and
+overflowing differences are errors. Provenance records both measurements and
+the exact comparator configuration. Pair selection is explicit; the caller must
+ensure comparable coordinate frames. Ranking and other comparator families,
+profile-wide pairing, and experiment orchestration remain pending.
+
+Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.
 
 The storage library also exposes `CandidateRepository`, `ExperimentRepository`,

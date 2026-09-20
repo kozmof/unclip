@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 
 mod candidate;
+mod comparison;
+pub use comparison::CompareCtx;
 mod null;
 pub use candidate::CandidateCtx;
 pub use null::NullCtx;
@@ -342,12 +344,7 @@ pub trait Inferrer: Send + Sync {
 
 pub trait Comparator: Send + Sync {
     fn descriptor(&self) -> &ComparatorDescriptor;
-    fn compare(
-        &self,
-        before: &Reading,
-        after: &Reading,
-        token: CalculationToken,
-    ) -> Result<Calculated<Delta>>;
+    fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>>;
 }
 
 pub trait Interpreter: Send + Sync {

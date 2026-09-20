@@ -227,6 +227,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(out.status.success(), "plugins failed: {}", stderr(&out));
     let plugins = stdout(&out);
     assert!(plugins.contains("sensor.coverage"));
+    assert!(plugins.contains("compare.scalar-difference"));
     assert!(plugins.contains("sensor.residual"));
     assert!(plugins.contains("sensor.permutation"));
     assert!(plugins.contains("sensor.lehmer"));
@@ -1428,6 +1429,21 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
     );
     assert!(!unsupported.status.success());
     assert!(stderr(&unsupported).contains("do not execute candidate generators"));
+    let comparator_profile=temp.write("comparator-engine.json",&serde_json::json!({"domain":"batch@1","frame":"batch.general@1","comparators":[{"id":"compare.scalar-difference"}]}).to_string());
+    let unsupported = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-1",
+            "obs-2",
+            "--profile",
+            comparator_profile.to_str().unwrap(),
+        ],
+    );
+    assert!(!unsupported.status.success());
+    assert!(stderr(&unsupported).contains("or comparators"));
+
     let no_selection = unclip(
         &path,
         &["level", "measure", "--profile", profile.to_str().unwrap()],

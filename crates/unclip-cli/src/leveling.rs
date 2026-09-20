@@ -193,8 +193,8 @@ pub(crate) async fn observe(
     .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
     let parsed = document.resolve()?;
     anyhow::ensure!(
-        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty(),
-        "observation and measurement commands do not execute candidate generators or null models"
+        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty() && parsed.profile.comparators.is_empty(),
+        "observation and measurement commands do not execute candidate generators, null models, or comparators"
     );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
@@ -718,8 +718,8 @@ pub(crate) async fn measure(
 
     let parsed = document.resolve()?;
     anyhow::ensure!(
-        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty(),
-        "observation and measurement commands do not execute candidate generators or null models"
+        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty() && parsed.profile.comparators.is_empty(),
+        "observation and measurement commands do not execute candidate generators, null models, or comparators"
     );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
