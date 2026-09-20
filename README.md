@@ -202,7 +202,7 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.missing-relation`, `generate.recurring-motif`, and
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
-the first null model is `null.random-cooccurrence`.
+null models are `null.random-cooccurrence` and `null.ranking-constraints`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -271,8 +271,20 @@ return `NotApplicable`; small samples return `InsufficientEvidence`.
 This null tests endpoint co-presence only, not relation direction or kind. It assumes
 exchangeable observations and does not control source, time, genre, extraction bias,
 or candidate selection. Results do not automatically accept or reject candidates.
-Ranking and other null families, held-out split enforcement, and persisted experiment
+Other null families, held-out split enforcement, and persisted experiment
 execution remain pending.
+
+`null.ranking-constraints` uses the same minimum-observation parameter, applied to
+untied, comparable endpoint pairs. Supply tracked partial rankings through
+`Engine::evaluate_null_models_with_rankings`. For observed-label relation proposals,
+each endpoint label must identify a unique observed unit. The null conditions on
+endpoint availability and pair tie status, then independently swaps the two labels
+within each untied pair. The number of source-before-target observations follows
+a binomial distribution with probability one half. Results retain counts of ties,
+skipped pairs, per-observation status, and an upper-tail probability. Unknown or
+missing ranks are never completed. This bounded null explains endpoint order, not
+general rank correlations, relation kind, or temporal dependence; selection and
+source biases are not adjusted.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

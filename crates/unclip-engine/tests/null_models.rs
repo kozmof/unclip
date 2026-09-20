@@ -149,3 +149,115 @@ fn repeated_identities_and_invalid_configuration_are_errors() {
     }
     assert!(evaluate(&candidate(CandidateKind::Relation, "", "b"), &[], params()).is_err());
 }
+
+fn ranking(
+    id: &str,
+    tiers: &[&[&str]],
+    unknown: &[&str],
+) -> Tracked<unclip_observe::PartialRanking> {
+    Tracked::from_recorded(
+        DerivedId::new(format!("ranking/{id}")),
+        unclip_observe::PartialRanking {
+            observation: ObservationId::new(id),
+            tiers: tiers
+                .iter()
+                .map(|tier| unclip_observe::RankTier {
+                    units: tier.iter().map(|unit| ObservedUnitId::new(*unit)).collect(),
+                })
+                .collect(),
+            unknown: unknown
+                .iter()
+                .map(|unit| ObservedUnitId::new(*unit))
+                .collect(),
+        },
+    )
+}
+fn evaluate_ranking(
+    observations: &[Tracked<Observation>],
+    rankings: &[Tracked<unclip_observe::PartialRanking>],
+) -> unclip_plugin::Result<Vec<Calculated<Reading>>> {
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            null_models: vec![PluginSelection::any("null.ranking-constraints")],
+            ..Default::default()
+        })
+        .unwrap();
+    engine.evaluate_null_models_with_rankings(
+        &plan,
+        &candidate(CandidateKind::Relation, "a", "b"),
+        observations,
+        rankings,
+        MeasurementRun {
+            id: "ranking-null",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(PluginId::new("null.ranking-constraints"), params())]),
+        },
+    )
+}
+#[test]
+fn ranking_constraints_preserve_ties_and_unknowns_and_replay() {
+    let mut observations = (0..5)
+        .map(|i| observation(&i.to_string(), &["a", "b"]))
+        .collect::<Vec<_>>();
+    let mut rankings = vec![
+        ranking("0", &[&["0"], &["1"]], &[]),
+        ranking("1", &[&["0"], &["1"]], &[]),
+        ranking("2", &[&["0", "1"]], &[]),
+        ranking("3", &[&["0"]], &["1"]),
+    ];
+    let results = evaluate_ranking(&observations, &rankings).unwrap();
+    let Reading::Value {
+        value: MeasurementValue::Structured(value),
+    } = results[0].value()
+    else {
+        panic!()
+    };
+    assert_eq!(value["sample_count"], 2);
+    assert_eq!(value["source_before_target"], 2);
+    assert_eq!(value["source_after_target"], 0);
+    assert_eq!(value["ties"], 1);
+    assert_eq!(value["skipped"], 2);
+    assert_eq!(value["expected_source_before_target"], 1.0);
+    assert_eq!(value["upper_tail_probability"], 0.25);
+    assert_eq!(results[0].provenance().inputs.len(), 10);
+    observations.reverse();
+    rankings.reverse();
+    assert_eq!(evaluate_ranking(&observations, &rankings).unwrap(), results);
+    let reversed = vec![
+        ranking("0", &[&["1"], &["0"]], &[]),
+        ranking("1", &[&["1"], &["0"]], &[]),
+    ];
+    let result = evaluate_ranking(&observations, &reversed).unwrap();
+    let Reading::Value {
+        value: MeasurementValue::Structured(value),
+    } = result[0].value()
+    else {
+        panic!()
+    };
+    assert_eq!(value["upper_tail_probability"], 1.0);
+    assert_eq!(value["source_after_target"], 2);
+}
+#[test]
+fn ranking_sparse_and_invalid_evidence_are_not_completed_or_duplicated() {
+    let observations = vec![observation("0", &["a", "b"]), observation("1", &["a", "b"])];
+    let result = evaluate_ranking(&observations, &[ranking("0", &[&["0"], &["1"]], &[])]).unwrap();
+    assert_eq!(
+        *result[0].value(),
+        Reading::InsufficientEvidence { have: 1, need: 2 }
+    );
+    for rankings in [
+        vec![ranking("missing", &[], &[])],
+        vec![ranking("0", &[&[]], &[])],
+        vec![ranking("0", &[&["0"]], &["0"])],
+        vec![ranking("0", &[&["absent"]], &[])],
+        vec![ranking("0", &[], &[]), ranking("0", &[], &[])],
+    ] {
+        assert!(evaluate_ranking(&observations, &rankings).is_err());
+    }
+    assert!(evaluate_ranking(
+        &[observation("0", &["a", "a", "b"])],
+        &[ranking("0", &[&["0"], &["2"]], &["1"])]
+    )
+    .is_err());
+}

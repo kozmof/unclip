@@ -19,8 +19,10 @@ pub use relation_discovery::MissingRelationGenerator;
 
 mod discovery;
 mod null_models;
+mod ranking_null;
 pub use discovery::{CandidateInputs, PersistentResidualGenerator};
 pub use null_models::RandomCooccurrenceNull;
+pub use ranking_null::RankingConstraintNull;
 
 mod empirical;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
@@ -51,6 +53,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_generator(std::sync::Arc::new(CommunityCandidateGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(LatentAxisGenerator::default()))?;
     registry.register_null_model(std::sync::Arc::new(RandomCooccurrenceNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(RankingConstraintNull::default()))?;
     Ok(registry)
 }
 

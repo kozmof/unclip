@@ -146,6 +146,16 @@ impl super::Engine {
         observations: &[Tracked<Observation>],
         run: super::MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Reading>>> {
+        self.evaluate_null_models_with_rankings(plan, candidate, observations, &[], run)
+    }
+    pub fn evaluate_null_models_with_rankings(
+        &self,
+        plan: &RunPlan,
+        candidate: &Tracked<CandidateProposal>,
+        observations: &[Tracked<Observation>],
+        rankings: &[Tracked<unclip_observe::PartialRanking>],
+        run: super::MeasurementRun<'_>,
+    ) -> Result<Vec<Calculated<Reading>>> {
         let mut models = plan.null_models.iter().collect::<Vec<_>>();
         models.sort_by_key(|model| &model.descriptor().id);
         let mut results = Vec::new();
@@ -158,7 +168,8 @@ impl super::Engine {
                 observations,
                 params,
                 DependencyCollector::default(),
-            );
+            )
+            .with_rankings(rankings);
             let token = ctx.calculation_token(EmitMetadata {
                 id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 producer: descriptor.id.clone(),
