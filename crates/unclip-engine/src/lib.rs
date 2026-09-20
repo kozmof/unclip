@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod pairwise_discovery;
+pub use pairwise_discovery::PairwiseCouplingGenerator;
+
 mod motif_discovery;
 pub use motif_discovery::RecurringMotifGenerator;
 
@@ -35,6 +38,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(PairwiseCouplingGenerator::default()))?;
     Ok(registry)
 }
 

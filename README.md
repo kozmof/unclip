@@ -199,7 +199,8 @@ Engine-profile YAML and JSON accept optional `candidate_generators` and
 fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
 lists to empty. Built-in generators are `generate.persistent-residual`,
-`generate.missing-relation`, and `generate.recurring-motif`;
+`generate.missing-relation`, `generate.recurring-motif`, and
+`generate.pairwise-coupling`;
 no null-model algorithm is registered yet.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
@@ -224,6 +225,17 @@ on disconnected units do not establish connectivity. The same minimum-observatio
 parameter applies. Each proposal retains the graph shape and both edges’ evidence
 and uncertainty. Additional edges do not disqualify a path; this generator does
 not enumerate arbitrary larger motifs.
+
+`generate.pairwise-coupling` reads typed pairwise matrices from tracked
+measurements. Configure, for example, `params: {metric: spearman, threshold: 0.8,
+minimum_samples: 4}`. Supported metrics are `spearman`, `kendall`,
+`mutual_information`, and `relative_rank_variance`. Correlation thresholds are
+in [-1, 1]; other thresholds are nonnegative. The sample floor is at least 2.
+Variance qualifies at or below its threshold; other metrics qualify at or above
+it, preserving correlation signs. Only measured off-diagonal cells qualify.
+Each source matrix produces separate coupling hypotheses with its own metric,
+cell sample count, context, and evidence. Nothing is averaged across profiles,
+and these hypotheses make no causal claim.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

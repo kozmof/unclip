@@ -422,6 +422,7 @@ async fn assert_persisted_batch(
     let provenance = SeaOrmProvenanceRepository::new(db.clone());
     let observations = SeaOrmObservationRepository::new(db.clone());
     let measurements = SeaOrmMeasurementRepository::new(db.clone());
+    let candidates = unclip_store::SeaOrmExperimentRepository::new(db.clone());
     let runs = SeaOrmEngineRunRepository::new(db);
     domains
         .insert_domain_version(fixture.domain.clone())
@@ -601,6 +602,75 @@ async fn assert_persisted_batch(
         .map(|result| Tracked::from_derived(result, result.value().clone()))
         .collect::<Vec<_>>();
     if !matrix_inputs.is_empty() {
+        let discovery_plan = engine
+            .plan(&EngineProfile {
+                candidate_generators: vec![unclip_plugin::PluginSelection::any(
+                    "generate.pairwise-coupling",
+                )],
+                ..Default::default()
+            })
+            .unwrap();
+        let domain_key =
+            serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap();
+        let mut generated = 0;
+        for (metric, threshold) in [
+            ("spearman", -1.0),
+            ("kendall", -1.0),
+            ("relative_rank_variance", 10.0),
+            ("mutual_information", 0.0),
+        ] {
+            let candidate_params = BTreeMap::from([(
+                PluginId::new("generate.pairwise-coupling"),
+                serde_json::json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
+            )]);
+            let discovery_id = format!("batch-candidates/{metric}");
+            let calculate = || {
+                engine
+                    .generate_candidates(
+                        &discovery_plan,
+                        unclip_engine::CandidateInputs {
+                            domain_version_id: &domain_key,
+                            observations: &[],
+                            measurements: &matrix_inputs,
+                        },
+                        MeasurementRun {
+                            id: &discovery_id,
+                            timestamp: Timestamp::new("now"),
+                            params: &candidate_params,
+                        },
+                    )
+                    .unwrap()
+            };
+            let outputs = calculate();
+            assert_eq!(outputs, calculate());
+            generated += outputs.len();
+            for output in outputs {
+                unclip_store::CandidateRepository::insert_candidate(
+                    &candidates,
+                    Some("batch".into()),
+                    output.clone(),
+                )
+                .await
+                .unwrap();
+                let stored =
+                    unclip_store::CandidateRepository::get_candidate(&candidates, output.id())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(stored.proposal, *output.value());
+                assert_eq!(
+                    provenance
+                        .get_provenance(output.id())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .provenance,
+                    *output.provenance()
+                );
+            }
+        }
+        assert!(generated > 0);
+
         for method in [
             unclip_engine::EmpiricalMethod::Communities {
                 threshold: 0.5,
