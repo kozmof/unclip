@@ -35,7 +35,7 @@ fn invalid(message: &str) -> PluginError {
 
 // Relative hypergeometric masses expanded from the mode avoid factorial overflow
 // and underflow of the initial mass in large, concentrated distributions.
-fn overlap_tail(n: usize, a: usize, b: usize, observed: usize) -> f64 {
+pub(super) fn overlap_tail(n: usize, a: usize, b: usize, observed: usize) -> f64 {
     let low = a.saturating_sub(n - b);
     let high = a.min(b);
     let mode = ((((a as f64) + 1.0) * ((b as f64) + 1.0) / ((n as f64) + 2.0)).floor() as usize)

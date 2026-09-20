@@ -261,3 +261,163 @@ fn ranking_sparse_and_invalid_evidence_are_not_completed_or_duplicated() {
     )
     .is_err());
 }
+
+fn context_observation(
+    id: &str,
+    source: &str,
+    labels: &[&str],
+    context: serde_json::Value,
+) -> Tracked<Observation> {
+    let collector = unclip_epistemic::DependencyCollector::default();
+    let original = observation(id, labels);
+    let mut observation = collector.read(&original).clone();
+    observation.source = SourceRef::new(source);
+    observation.context = serde_json::from_value(context).unwrap();
+    Tracked::from_recorded(DerivedId::new(id), observation)
+}
+fn evaluate_context(
+    observations: &[Tracked<Observation>],
+    params: serde_json::Value,
+) -> unclip_plugin::Result<Vec<Calculated<Reading>>> {
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            null_models: vec![PluginSelection::any("null.contextual-cooccurrence")],
+            ..Default::default()
+        })
+        .unwrap();
+    engine.evaluate_null_models(
+        &plan,
+        &candidate(CandidateKind::Relation, "a", "b"),
+        observations,
+        MeasurementRun {
+            id: "context-null",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(PluginId::new("null.contextual-cooccurrence"), params)]),
+        },
+    )
+}
+fn structured(reading: &Reading) -> &serde_json::Value {
+    let Reading::Value {
+        value: MeasurementValue::Structured(value),
+    } = reading
+    else {
+        panic!("expected structured result")
+    };
+    value
+}
+#[test]
+fn source_strata_explain_pooled_overlap_without_merging_probabilities() {
+    let mut observations = vec![];
+    for i in 0..8 {
+        observations.push(context_observation(
+            &i.to_string(),
+            if i < 4 { "first" } else { "second" },
+            if i < 4 { &["a", "b"] } else { &[] },
+            json!({}),
+        ));
+    }
+    let params = json!({"strata":[{"field":"source"}],"minimum_observations":2});
+    let result = evaluate_context(&observations, params.clone()).unwrap();
+    let value = structured(result[0].value());
+    assert_eq!(value["assessed_strata"], 2);
+    assert_eq!(value["results"].as_array().unwrap().len(), 2);
+    for group in value["results"].as_array().unwrap() {
+        let reading: Reading = serde_json::from_value(group["reading"].clone()).unwrap();
+        assert_eq!(structured(&reading)["upper_tail_probability"], 1.0);
+    }
+    assert!(value.get("upper_tail_probability").is_none());
+    let pooled = evaluate(
+        &candidate(CandidateKind::Relation, "a", "b"),
+        &observations,
+        json!({"minimum_observations":2}),
+    )
+    .unwrap();
+    assert!(
+        structured(pooled[0].value())["upper_tail_probability"]
+            .as_f64()
+            .unwrap()
+            < 0.02
+    );
+    assert_eq!(result[0].provenance().inputs.len(), 9);
+    observations.reverse();
+    assert_eq!(evaluate_context(&observations, params).unwrap(), result);
+}
+#[test]
+fn recorded_categories_preserve_sparse_groups_missing_metadata_and_scalar_types() {
+    let observations = vec![
+        context_observation(
+            "a",
+            "source",
+            &["a", "b"],
+            json!({"genre":1,"time_bucket":"early","extractor":"v1"}),
+        ),
+        context_observation(
+            "b",
+            "source",
+            &["a"],
+            json!({"genre":"1","time_bucket":"early","extractor":"v1"}),
+        ),
+        context_observation(
+            "c",
+            "source",
+            &[],
+            json!({"genre":1,"time_bucket":"early","extractor":"v1"}),
+        ),
+        context_observation("missing", "source", &[], json!({"genre":1})),
+    ];
+    let params = json!({"strata":[{"field":"context","key":"genre"},{"field":"context","key":"time_bucket"},{"field":"context","key":"extractor"}],"minimum_observations":2});
+    let result = evaluate_context(&observations, params).unwrap();
+    let value = structured(result[0].value());
+    assert_eq!(value["assessed_strata"], 1);
+    assert_eq!(value["results"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        value["excluded_missing_metadata"][0]["observation"],
+        "missing"
+    );
+    assert_eq!(
+        value["excluded_missing_metadata"][0]["missing"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let readings = value["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|group| serde_json::from_value::<Reading>(group["reading"].clone()).unwrap())
+        .collect::<Vec<_>>();
+    assert!(readings.contains(&Reading::InsufficientEvidence { have: 1, need: 2 }));
+    let empty = evaluate_context(
+        &[],
+        json!({"strata":[{"field":"source"}],"minimum_observations":2}),
+    )
+    .unwrap();
+    assert_eq!(structured(empty[0].value())["assessed_strata"], 0);
+}
+#[test]
+fn contextual_null_rejects_ambiguous_configuration_and_invalid_metadata() {
+    for params in [
+        json!({"strata":[],"minimum_observations":2}),
+        json!({"strata":[{"field":"source"},{"field":"source"}],"minimum_observations":2}),
+        json!({"strata":[{"field":"context","key":" "}],"minimum_observations":2}),
+        json!({"strata":[{"field":"source"}],"minimum_observations":1}),
+    ] {
+        assert!(evaluate_context(&[], params).is_err());
+    }
+    let params = json!({"strata":[{"field":"context","key":"genre"}],"minimum_observations":2});
+    assert!(evaluate_context(
+        &[context_observation("a", "s", &[], json!({"genre":["x"]}))],
+        params.clone()
+    )
+    .is_err());
+    assert!(evaluate_context(
+        &[
+            context_observation("a", "s", &[], json!({})),
+            context_observation("a", "s", &[], json!({}))
+        ],
+        params
+    )
+    .is_err());
+}

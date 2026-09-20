@@ -17,9 +17,11 @@ pub use motif_discovery::RecurringMotifGenerator;
 mod relation_discovery;
 pub use relation_discovery::MissingRelationGenerator;
 
+mod context_null;
 mod discovery;
 mod domain_null;
 mod weight_null;
+pub use context_null::ContextualCooccurrenceNull;
 pub use weight_null::WeightChangeNull;
 mod null_models;
 pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
@@ -61,6 +63,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(ExistingUnitNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingRelationNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(WeightChangeNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(ContextualCooccurrenceNull::default()))?;
     Ok(registry)
 }
 

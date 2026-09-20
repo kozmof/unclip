@@ -244,6 +244,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("null.existing-unit"));
     assert!(plugins.contains("null.existing-relation"));
     assert!(plugins.contains("null.weight-change"));
+    assert!(plugins.contains("null.contextual-cooccurrence"));
     for line in plugins.lines() {
         let operation = line.split("\t").nth(1).expect("plugin operation column");
         assert!(

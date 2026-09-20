@@ -203,7 +203,8 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
 null models are `null.random-cooccurrence`, `null.ranking-constraints`,
-`null.existing-unit`, `null.existing-relation`, and `null.weight-change`.
+`null.existing-unit`, `null.existing-relation`, `null.weight-change`, and
+`null.contextual-cooccurrence`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -315,6 +316,28 @@ nonfinite values, differences that overflow, and integer conversions that lose
 precision are rejected. This is a baseline-retention diagnostic, not a statistical
 significance test or a measure of explanatory improvement. Held-out comparison
 and application of weight revisions remain experiment-harness work.
+
+`null.contextual-cooccurrence` repeats the fixed-margin endpoint co-presence null
+within explicit metadata groups. For example:
+
+```yaml
+minimum_observations: 2
+strata:
+  - {field: source}
+  - {field: context, key: genre}
+  - {field: context, key: time_bucket}
+  - {field: context, key: extractor}
+```
+
+All selected categories define each group jointly. Context keys must already be
+recorded on observations; time buckets and extraction metadata are never inferred.
+String, number, and boolean categories remain distinct. Missing, null, or blank
+metadata is reported with excluded observation identities. Each group retains
+its observations, counts, and a calculated probability or insufficient-evidence
+reading. The result envelope reports assessed group count, including zero when
+none qualify. Probabilities are not pooled. This controls only the selected
+recorded categories under within-group exchangeability; it neither proves bias
+removal nor adjusts for candidate selection or multiple testing.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.
