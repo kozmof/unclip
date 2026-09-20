@@ -203,7 +203,7 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
 null models are `null.random-cooccurrence`, `null.ranking-constraints`,
-`null.existing-unit`, and `null.existing-relation`.
+`null.existing-unit`, `null.existing-relation`, and `null.weight-change`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -297,7 +297,24 @@ identity without claiming semantic equivalence or accepting or rejecting a candi
 The baseline must match the candidate domain version; malformed domain identities
 or dangling relation endpoints are errors. A missing baseline is insufficient
 evidence, while a valid baseline with no matches yields an explicit empty result.
-These checks never mutate the domain. Weight-change nulls remain pending.
+These checks never mutate the domain.
+
+`null.weight-change` checks the alternative of retaining an existing numeric
+property. Configure `{absolute_tolerance: 0}` or an explicit nonnegative tolerance.
+It accepts `WeightRevision` candidates with a pattern such as:
+
+```json
+{"matching":"numeric_property_revision","target":{"kind":"unit","id":"a"},"property":"weight","proposed_value":0.5}
+```
+
+Targets can be units or relations. The property name is explicit; no field is
+automatically treated as a weight. The result retains baseline and proposed values,
+signed difference, tolerance, and whether the change falls within that tolerance.
+Missing properties are insufficient evidence, not zero. Non-numeric values,
+nonfinite values, differences that overflow, and integer conversions that lose
+precision are rejected. This is a baseline-retention diagnostic, not a statistical
+significance test or a measure of explanatory improvement. Held-out comparison
+and application of weight revisions remain experiment-harness work.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

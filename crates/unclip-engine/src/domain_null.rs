@@ -50,7 +50,7 @@ fn label<'a>(pattern: &'a serde_json::Value, key: &str) -> Result<&'a str> {
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| invalid("missing or empty exact-match pattern field"))
 }
-fn validate(domain: &DomainSnapshot) -> Result<()> {
+pub(super) fn validate(domain: &DomainSnapshot) -> Result<()> {
     if domain.id.0.is_empty() || domain.version.0.is_empty() {
         return Err(invalid("empty baseline domain identity"));
     }

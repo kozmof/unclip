@@ -19,6 +19,8 @@ pub use relation_discovery::MissingRelationGenerator;
 
 mod discovery;
 mod domain_null;
+mod weight_null;
+pub use weight_null::WeightChangeNull;
 mod null_models;
 pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
 mod ranking_null;
@@ -58,6 +60,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(RankingConstraintNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingUnitNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingRelationNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(WeightChangeNull::default()))?;
     Ok(registry)
 }
 
