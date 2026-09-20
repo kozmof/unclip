@@ -236,6 +236,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("generate.missing-relation"));
     assert!(plugins.contains("generate.recurring-motif"));
     assert!(plugins.contains("generate.pairwise-coupling"));
+    assert!(plugins.contains("generate.temporal-coupling"));
     for line in plugins.lines() {
         let operation = line.split("\t").nth(1).expect("plugin operation column");
         assert!(

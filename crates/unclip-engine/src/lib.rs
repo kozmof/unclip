@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod temporal_discovery;
+pub use temporal_discovery::TemporalCouplingGenerator;
+
 mod pairwise_discovery;
 pub use pairwise_discovery::PairwiseCouplingGenerator;
 
@@ -39,6 +42,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(PairwiseCouplingGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(TemporalCouplingGenerator::default()))?;
     Ok(registry)
 }
 

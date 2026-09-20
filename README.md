@@ -200,7 +200,7 @@ fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
 lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.missing-relation`, `generate.recurring-motif`, and
-`generate.pairwise-coupling`;
+`generate.pairwise-coupling`, and `generate.temporal-coupling`;
 no null-model algorithm is registered yet.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
@@ -236,6 +236,15 @@ it, preserving correlation signs. Only measured off-diagonal cells qualify.
 Each source matrix produces separate coupling hypotheses with its own metric,
 cell sample count, context, and evidence. Nothing is averaged across profiles,
 and these hypotheses make no causal claim.
+
+`generate.temporal-coupling` uses measured `sensor.lagged-dependency` results.
+Configure `params: {threshold: 0.8, minimum_samples: 3}`; the signed coefficient
+must meet the threshold in [-1, 1] and the sample floor must be at least 2.
+Proposals preserve source, target, lag in sequence steps, explicit observation
+order, and complete-pair sample count. Missing order or inconsistent measured
+evidence is rejected; sparse readings produce no proposal. Each source remains
+separate and carries no causal claim. DTW and change-point results are not used
+by this generator.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

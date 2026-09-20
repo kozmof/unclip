@@ -721,6 +721,72 @@ async fn assert_persisted_batch(
             }
         }
     }
+    if results
+        .iter()
+        .any(|result| result.value().sensor.0 == "sensor.lagged-dependency")
+    {
+        let discovery_plan = engine
+            .plan(&EngineProfile {
+                candidate_generators: vec![unclip_plugin::PluginSelection::any(
+                    "generate.temporal-coupling",
+                )],
+                ..Default::default()
+            })
+            .unwrap();
+        let domain_key =
+            serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap();
+        let candidate_params = BTreeMap::from([(
+            PluginId::new("generate.temporal-coupling"),
+            serde_json::json!({"threshold":0.5,"minimum_samples":2}),
+        )]);
+        let selected = results
+            .iter()
+            .map(|result| Tracked::from_derived(result, result.value().clone()))
+            .collect::<Vec<_>>();
+        let calculate = || {
+            engine
+                .generate_candidates(
+                    &discovery_plan,
+                    unclip_engine::CandidateInputs {
+                        domain_version_id: &domain_key,
+                        observations: &[],
+                        measurements: &selected,
+                    },
+                    MeasurementRun {
+                        id: "temporal-candidates",
+                        timestamp: Timestamp::new("now"),
+                        params: &candidate_params,
+                    },
+                )
+                .unwrap()
+        };
+        let outputs = calculate();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs, calculate());
+        for output in outputs {
+            unclip_store::CandidateRepository::insert_candidate(
+                &candidates,
+                Some("batch".into()),
+                output.clone(),
+            )
+            .await
+            .unwrap();
+            let stored = unclip_store::CandidateRepository::get_candidate(&candidates, output.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.proposal, *output.value());
+            assert_eq!(
+                provenance
+                    .get_provenance(output.id())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .provenance,
+                *output.provenance()
+            );
+        }
+    }
     let replay = runs.replay_run("batch").await.unwrap().unwrap();
     assert_eq!(replay.observations.len(), fixture.observations.len());
     let verified = engine
