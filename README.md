@@ -198,8 +198,8 @@ Engine-profile YAML and JSON accept optional `candidate_generators` and
 `null_models` lists, using the same `id`, `version`, and object-valued `params`
 fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
-lists to empty. `generate.persistent-residual` and `generate.missing-relation`
-are built-in generators;
+lists to empty. Built-in generators are `generate.persistent-residual`,
+`generate.missing-relation`, and `generate.recurring-motif`;
 no null-model algorithm is registered yet.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
@@ -215,7 +215,15 @@ label or changing the domain. Sparse evidence produces no proposal.
 tracked inputs, but reads unexplained-relation residuals. It groups exact directed
 (source label, relation kind, target label) patterns, retaining relation identities
 and uncertainty in the examples. Reversed edges and different relation kinds
-remain separate. It emits relation proposals; recurring graph motifs are pending.
+remain separate. It emits relation proposals.
+
+`generate.recurring-motif` proposes directed two-edge paths through three distinct
+observed units. Both edges must be unexplained residuals in the same observation.
+Exact node labels and directed relation kinds define a pattern; matching labels
+on disconnected units do not establish connectivity. The same minimum-observation
+parameter applies. Each proposal retains the graph shape and both edges’ evidence
+and uncertainty. Additional edges do not disqualify a path; this generator does
+not enumerate arbitrary larger motifs.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod motif_discovery;
+pub use motif_discovery::RecurringMotifGenerator;
+
 mod relation_discovery;
 pub use relation_discovery::MissingRelationGenerator;
 
@@ -31,6 +34,7 @@ pub fn builtin_registry() -> Result<Registry> {
     unclip_sensors::register_all(&mut registry)?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
     Ok(registry)
 }
 

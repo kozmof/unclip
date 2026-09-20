@@ -506,6 +506,7 @@ fn relation_fixture() -> Fixture {
 async fn generated_proposals_and_evidence_persist_without_changing_domain() {
     assert_stored(fixture(), "generate.persistent-residual").await;
     assert_stored(relation_fixture(), "generate.missing-relation").await;
+    assert_stored(motif_fixture(), "generate.recurring-motif").await;
 }
 
 #[test]
@@ -621,4 +622,238 @@ fn missing_relation_generation_rejects_invalid_graphs_and_unselected_residuals()
         .unwrap()
         .is_empty());
     }
+}
+
+fn remeasure_relations(fixture: &mut Fixture) {
+    let reader = DependencyCollector::default();
+    let alignments = fixture
+        .observations
+        .iter()
+        .enumerate()
+        .map(|(index, tracked)| {
+            Tracked::from_recorded(
+                DerivedId::new(format!("alignment-{index}")),
+                Alignment {
+                    observation: reader.read(tracked).id.clone(),
+                    candidates: vec![],
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            sensors: vec![PluginSelection::any("sensor.residual")],
+            ..Default::default()
+        })
+        .unwrap();
+    let frame = MeasurementFrame {
+        id: FrameId::new("frame"),
+        version: FrameVersion::new("1"),
+        axes: vec![],
+    };
+    fixture.measurements = engine
+        .measure(
+            &plan,
+            MeasurementInputs {
+                domain: &fixture.domain,
+                frame: &frame,
+                observations: &fixture.observations,
+                alignments: &alignments,
+                rankings: &[],
+            },
+            MeasurementRun {
+                id: "residual",
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::new(),
+            },
+        )
+        .unwrap();
+}
+fn motif_fixture() -> Fixture {
+    use unclip_observe::{ObservedRelation, ObservedRelationId};
+    let mut fixture = relation_fixture();
+    let reader = DependencyCollector::default();
+    for (index, tracked) in fixture.observations.iter_mut().enumerate() {
+        let mut observation = reader.read(tracked).clone();
+        observation.units = ["source", "middle", "target"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, label)| ObservedUnit {
+                id: ObservedUnitId::new(format!("unit-{i}")),
+                label: label.into(),
+                salience: None,
+                uncertainty: None,
+                context: BTreeMap::new(),
+            })
+            .collect();
+        let (a, b, c) = if index == 2 { (2, 1, 0) } else { (0, 1, 2) };
+        observation.relations = [("first", a, b, "supports"), ("second", b, c, "enables")]
+            .into_iter()
+            .map(|(id, source, target, kind)| ObservedRelation {
+                id: ObservedRelationId::new(id),
+                source: ObservedUnitId::new(format!("unit-{source}")),
+                target: ObservedUnitId::new(format!("unit-{target}")),
+                kind: kind.into(),
+                uncertainty: Some(0.2),
+            })
+            .collect();
+        if index == 0 {
+            let mut duplicate = observation.relations[0].clone();
+            duplicate.id = ObservedRelationId::new("first-copy");
+            observation.relations.push(duplicate);
+        }
+        *tracked = Tracked::from_recorded(tracked.id().clone(), observation);
+    }
+    remeasure_relations(&mut fixture);
+    fixture
+}
+
+#[test]
+fn motifs_preserve_graph_structure_and_count_observations_instead_of_occurrences() {
+    let mut fixture = motif_fixture();
+    let mut measured = measurements(&fixture);
+    measured.push(Tracked::from_recorded(
+        DerivedId::new("repeated-profile"),
+        fixture.measurements[1].value().clone(),
+    ));
+    let params = serde_json::json!({"minimum_observations":2});
+    let candidates = run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &measured,
+        params.clone(),
+    )
+    .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let proposal = candidates[0].value();
+    assert_eq!(proposal.kind, CandidateKind::GraphMotif);
+    assert_eq!(proposal.value["observation_count"], 2);
+    assert_eq!(proposal.value["examples"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        proposal.value["pattern"]["nodes"][1]["observed_label"],
+        "middle"
+    );
+    assert_eq!(
+        proposal.value["pattern"]["edges"],
+        serde_json::json!([{"source":0,"target":1,"kind":"supports"},{"source":1,"target":2,"kind":"enables"}])
+    );
+    assert_eq!(
+        proposal.value["examples"][0]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        proposal.value["examples"][0]["edges"][0]["uncertainty"],
+        0.2
+    );
+    assert!(!proposal.value.contains_key("label"));
+    fixture.observations.reverse();
+    measured.reverse();
+    let reader = DependencyCollector::default();
+    for tracked in &mut fixture.observations {
+        let mut observation = reader.read(tracked).clone();
+        observation.units.reverse();
+        observation.relations.reverse();
+        *tracked = Tracked::from_recorded(tracked.id().clone(), observation);
+    }
+    assert_eq!(
+        run_generator(
+            "generate.recurring-motif",
+            &fixture.observations,
+            &measured,
+            params
+        )
+        .unwrap(),
+        candidates
+    );
+    assert!(run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &measured,
+        serde_json::json!({"minimum_observations":3})
+    )
+    .unwrap()
+    .is_empty());
+}
+
+#[test]
+fn motifs_require_connected_distinct_units_and_two_residual_edges() {
+    let params = serde_json::json!({"minimum_observations":2});
+    let reader = DependencyCollector::default();
+    for change in 0..3 {
+        let mut fixture = motif_fixture();
+        for tracked in &mut fixture.observations {
+            let mut observation = reader.read(tracked).clone();
+            match change {
+                0 => {
+                    // Equal labels on different units are not connectivity.
+                    let mut separate = observation.units[1].clone();
+                    separate.id = ObservedUnitId::new("separate-middle");
+                    observation.units.push(separate);
+                    observation.relations[1].source = ObservedUnitId::new("separate-middle");
+                }
+                1 => observation.relations[1].target = observation.relations[0].source.clone(),
+                _ => {
+                    // Keep only one edge per observation in residual evidence below.
+                    observation
+                        .relations
+                        .retain(|relation| relation.id.0 == "first");
+                }
+            }
+            *tracked = Tracked::from_recorded(tracked.id().clone(), observation);
+        }
+        remeasure_relations(&mut fixture);
+        assert!(run_generator(
+            "generate.recurring-motif",
+            &fixture.observations,
+            &measurements(&fixture),
+            params.clone()
+        )
+        .unwrap()
+        .is_empty());
+    }
+    let fixture = motif_fixture();
+    let mut residual = fixture.measurements[1].value().clone();
+    residual.reading = Reading::InsufficientEvidence { have: 1, need: 2 };
+    assert!(run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &[Tracked::from_recorded(DerivedId::new("sparse"), residual)],
+        params
+    )
+    .unwrap()
+    .is_empty());
+}
+
+#[test]
+fn motif_matching_keeps_relation_kinds_separate_and_rejects_dangling_edges() {
+    let mut fixture = motif_fixture();
+    let reader = DependencyCollector::default();
+    let mut observation = reader.read(&fixture.observations[1]).clone();
+    observation.relations[1].kind = "different".into();
+    fixture.observations[1] =
+        Tracked::from_recorded(fixture.observations[1].id().clone(), observation.clone());
+    remeasure_relations(&mut fixture);
+    let params = serde_json::json!({"minimum_observations":2});
+    assert!(run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &measurements(&fixture),
+        params.clone()
+    )
+    .unwrap()
+    .is_empty());
+    observation.relations[1].target = ObservedUnitId::new("absent");
+    fixture.observations[1] =
+        Tracked::from_recorded(fixture.observations[1].id().clone(), observation);
+    assert!(run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &measurements(&fixture),
+        params
+    )
+    .is_err());
 }
