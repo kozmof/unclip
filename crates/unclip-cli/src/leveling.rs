@@ -51,7 +51,7 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         found = true;
         let descriptor = plugin.descriptor();
         crate::output::outln!(
-            "{}\tNULL_MODEL\t{}\t-\treading",
+            "{}\tCALCULATED\t{}\t-\tnull_reading",
             descriptor.id,
             descriptor.version
         );

@@ -25,7 +25,11 @@ impl NullModel for Stub {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.0
     }
-    fn evaluate(&self, _: &serde_json::Value) -> unclip_plugin::Result<Reading> {
+    fn evaluate(
+        &self,
+        _: &unclip_plugin::NullCtx<'_>,
+        _: unclip_epistemic::CalculationToken,
+    ) -> unclip_plugin::Result<unclip_epistemic::Calculated<Reading>> {
         panic!("planning must not execute a null model")
     }
 }

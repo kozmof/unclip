@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 
 mod candidate;
+mod null;
 pub use candidate::CandidateCtx;
+pub use null::NullCtx;
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -377,7 +379,7 @@ pub trait CandidateGenerator: Send + Sync {
 
 pub trait NullModel: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
-    fn evaluate(&self, candidate: &serde_json::Value) -> Result<Reading>;
+    fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>>;
 }
 
 /// Reusable checks for first-party and cooperative third-party sensors.

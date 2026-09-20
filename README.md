@@ -202,7 +202,7 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.missing-relation`, `generate.recurring-motif`, and
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
-no null-model algorithm is registered yet.
+the first null model is `null.random-cooccurrence`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -258,6 +258,21 @@ Each qualifying axis retains signed eigenvalues and loadings; negative eigenvalu
 are not interpreted as explained variance. Both generators keep sources separate
 and produce anonymous proposals, without changing the domain or assigning labels.
 Axes in degenerate eigenspaces need not have a unique interpretation.
+
+The library evaluates selected null models through `Engine::evaluate_null_models`,
+using a tracked candidate and an explicit observation set. Configure
+`null.random-cooccurrence` with `{minimum_observations: 2}`. For exact observed-label
+relation candidates with distinct endpoint labels, it counts label presence once
+per observation and computes the hypergeometric upper-tail overlap probability
+conditional on both observed frequencies. It reports expected and observed overlap,
+counts, assumptions, and full input provenance. Same-label or unsupported candidates
+return `NotApplicable`; small samples return `InsufficientEvidence`.
+
+This null tests endpoint co-presence only, not relation direction or kind. It assumes
+exchangeable observations and does not control source, time, genre, extraction bias,
+or candidate selection. Results do not automatically accept or reject candidates.
+Ranking and other null families, held-out split enforcement, and persisted experiment
+execution remain pending.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.

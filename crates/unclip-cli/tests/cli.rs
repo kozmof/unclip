@@ -239,6 +239,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("generate.temporal-coupling"));
     assert!(plugins.contains("generate.community"));
     assert!(plugins.contains("generate.latent-axis"));
+    assert!(plugins.contains("null.random-cooccurrence"));
     for line in plugins.lines() {
         let operation = line.split("\t").nth(1).expect("plugin operation column");
         assert!(
