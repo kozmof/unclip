@@ -41,6 +41,58 @@ impl Default for PersistentResidualGenerator {
 fn invalid(message: impl ToString) -> PluginError {
     PluginError::Message(message.to_string())
 }
+pub(super) fn residual_evidence(
+    ctx: &CandidateCtx<'_>,
+    kind: &str,
+) -> Result<BTreeMap<String, BTreeSet<DerivedId>>> {
+    let mut measurements = BTreeSet::new();
+    let mut residuals = BTreeMap::<String, BTreeSet<DerivedId>>::new();
+    for tracked in ctx.measurements() {
+        if !measurements.insert(tracked.id()) {
+            return Err(invalid("duplicate discovery measurement"));
+        }
+        let measurement = ctx.read(tracked);
+        if measurement.sensor.0 != "sensor.residual"
+            || measurement
+                .context
+                .values
+                .get("residual_kind")
+                .and_then(serde_json::Value::as_str)
+                != Some(kind)
+        {
+            continue;
+        }
+        let Reading::Value { value } = &measurement.reading else {
+            continue;
+        };
+        let MeasurementValue::Structured(value) = value else {
+            return Err(invalid("residual measurement must be structured"));
+        };
+        let residual: Residual = serde_json::from_value(value.clone()).map_err(invalid)?;
+        let unique = residual.ids.iter().collect::<BTreeSet<_>>();
+        if residual.count != residual.ids.len() || unique.len() != residual.ids.len() {
+            return Err(invalid("residual count and unique identities must agree"));
+        }
+        for id in residual.ids {
+            residuals
+                .entry(id)
+                .or_default()
+                .insert(tracked.id().clone());
+        }
+    }
+    Ok(residuals)
+}
+
+pub(super) fn minimum_observations(ctx: &CandidateCtx<'_>) -> Result<usize> {
+    let params: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
+    if params.minimum_observations < 2 || ctx.domain_version_id().is_empty() {
+        return Err(invalid(
+            "persistent residuals require a domain version and at least two observations",
+        ));
+    }
+    Ok(params.minimum_observations)
+}
+
 impl CandidateGenerator for PersistentResidualGenerator {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
@@ -50,12 +102,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
         ctx: &CandidateCtx<'_>,
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
-        let params: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
-        if params.minimum_observations < 2 || ctx.domain_version_id().is_empty() {
-            return Err(invalid(
-                "persistent residuals require a domain version and at least two observations",
-            ));
-        }
+        let minimum = minimum_observations(ctx)?;
         // Qualified residual IDs are resolved against actual observations rather
         // than split on '/', which may occur in either kind of identifier.
         let mut units = BTreeMap::new();
@@ -78,46 +125,12 @@ impl CandidateGenerator for PersistentResidualGenerator {
                 }
             }
         }
-        let mut measurements = BTreeSet::new();
-        let mut residuals = BTreeMap::<String, BTreeSet<DerivedId>>::new();
-        for tracked in ctx.measurements() {
-            if !measurements.insert(tracked.id()) {
-                return Err(invalid("duplicate discovery measurement"));
-            }
-            let measurement = ctx.read(tracked);
-            if measurement.sensor.0 != "sensor.residual"
-                || measurement
-                    .context
-                    .values
-                    .get("residual_kind")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("unmatched_units")
-            {
-                continue;
-            }
-            let Reading::Value { value } = &measurement.reading else {
-                continue;
-            };
-            let MeasurementValue::Structured(value) = value else {
-                return Err(invalid("unmatched residual measurement must be structured"));
-            };
-            let residual: Residual = serde_json::from_value(value.clone()).map_err(invalid)?;
-            let unique = residual.ids.iter().collect::<BTreeSet<_>>();
-            if residual.count != residual.ids.len() || unique.len() != residual.ids.len() {
+        let residuals = residual_evidence(ctx, "unmatched_units")?;
+        for id in residuals.keys() {
+            if !units.contains_key(id) {
                 return Err(invalid(
-                    "residual count and unique unit identities must agree",
+                    "residual unit is not present in selected observations",
                 ));
-            }
-            for id in residual.ids {
-                if !units.contains_key(&id) {
-                    return Err(invalid(
-                        "residual unit is not present in selected observations",
-                    ));
-                }
-                residuals
-                    .entry(id)
-                    .or_default()
-                    .insert(tracked.id().clone());
             }
         }
         let mut groups = BTreeMap::<String, Vec<serde_json::Value>>::new();
@@ -138,7 +151,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
         let mut candidates = Vec::new();
         for (label, examples) in groups {
             let observations = &support[&label];
-            if observations.len() < params.minimum_observations {
+            if observations.len() < minimum {
                 continue;
             }
             candidates.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::AtomicMeaning,

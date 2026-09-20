@@ -198,16 +198,25 @@ Engine-profile YAML and JSON accept optional `candidate_generators` and
 `null_models` lists, using the same `id`, `version`, and object-valued `params`
 fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
-lists to empty. `generate.persistent-residual` is the first built-in generator;
+lists to empty. `generate.persistent-residual` and `generate.missing-relation`
+are built-in generators;
 no null-model algorithm is registered yet.
 
-The engine library runs this generator through `Engine::generate_candidates`
+The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
 domain version. Configure `params: {minimum_observations: 2}` (minimum 2).
-It groups unmatched units by exact, case-sensitive observed label and counts
+`generate.persistent-residual` groups unmatched units by exact, case-sensitive
+observed label and counts
 distinct observations. Repeated units or profiles cannot inflate that count.
 Proposals retain observed examples and provenance, without assigning a semantic
 label or changing the domain. Sparse evidence produces no proposal.
+
+`generate.missing-relation` uses the same minimum-observation parameter and
+tracked inputs, but reads unexplained-relation residuals. It groups exact directed
+(source label, relation kind, target label) patterns, retaining relation identities
+and uncertainty in the examples. Reversed edges and different relation kinds
+remain separate. It emits relation proposals; recurring graph motifs are pending.
+
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.
 

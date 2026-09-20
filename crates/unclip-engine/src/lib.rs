@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod relation_discovery;
+pub use relation_discovery::MissingRelationGenerator;
+
 mod discovery;
 pub use discovery::{CandidateInputs, PersistentResidualGenerator};
 
@@ -27,6 +30,7 @@ pub fn builtin_registry() -> Result<Registry> {
     unclip_infer::register_all(&mut registry)?;
     unclip_sensors::register_all(&mut registry)?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     Ok(registry)
 }
 

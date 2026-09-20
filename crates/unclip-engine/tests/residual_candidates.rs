@@ -135,7 +135,8 @@ fn fixture() -> Fixture {
         provenance,
     }
 }
-fn run(
+fn run_generator(
+    generator: &str,
     observations: &[Tracked<Observation>],
     measurements: &[Tracked<Measurement>],
     params: serde_json::Value,
@@ -143,7 +144,7 @@ fn run(
     let engine = Engine::with_builtins().unwrap();
     let plan = engine
         .plan(&EngineProfile {
-            candidate_generators: vec![PluginSelection::any("generate.persistent-residual")],
+            candidate_generators: vec![PluginSelection::any(generator)],
             ..Default::default()
         })
         .unwrap();
@@ -157,7 +158,7 @@ fn run(
         MeasurementRun {
             id: "discover",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("generate.persistent-residual"), params)]),
+            params: &BTreeMap::from([(PluginId::new(generator), params)]),
         },
     )
 }
@@ -296,9 +297,7 @@ fn rejects_invalid_parameters_and_inconsistent_or_unselected_evidence() {
     )
     .is_err());
 }
-#[tokio::test]
-async fn generated_proposal_and_its_evidence_persist_without_changing_domain() {
-    let fixture = fixture();
+async fn assert_stored(fixture: Fixture, generator: &str) {
     let db = unclip_store::connect_and_migrate("sqlite::memory:")
         .await
         .unwrap();
@@ -326,7 +325,8 @@ async fn generated_proposal_and_its_evidence_persist_without_changing_domain() {
         .iter()
         .map(|m| Tracked::from_derived(m, m.value().clone()))
         .collect::<Vec<_>>();
-    let candidates = run(
+    let candidates = run_generator(
+        generator,
         &fixture.observations,
         &measured,
         serde_json::json!({"minimum_observations":2}),
@@ -369,7 +369,8 @@ async fn generated_proposal_and_its_evidence_persist_without_changing_domain() {
         fixture.domain
     );
     assert_eq!(
-        run(
+        run_generator(
+            generator,
             &fixture.observations,
             &measured,
             serde_json::json!({"minimum_observations":2})
@@ -408,4 +409,216 @@ fn rejects_ambiguous_slash_qualified_identities() {
         .unwrap()
         .descriptor();
     let _: serde_json::Value = serde_json::from_str(descriptor.params_schema).unwrap();
+}
+
+fn run(
+    observations: &[Tracked<Observation>],
+    measurements: &[Tracked<Measurement>],
+    params: serde_json::Value,
+) -> unclip_plugin::Result<Vec<Calculated<unclip_domain::CandidateProposal>>> {
+    run_generator(
+        "generate.persistent-residual",
+        observations,
+        measurements,
+        params,
+    )
+}
+
+fn relation_fixture() -> Fixture {
+    use unclip_observe::{ObservedRelation, ObservedRelationId};
+    let mut fixture = fixture();
+    let reader = DependencyCollector::default();
+    let mut alignments = Vec::new();
+    for (index, tracked) in fixture.observations.iter_mut().enumerate() {
+        let mut observation = reader.read(tracked).clone();
+        observation.units = ["source", "target"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, label)| ObservedUnit {
+                id: ObservedUnitId::new(format!("unit-{i}")),
+                label: label.into(),
+                salience: None,
+                uncertainty: None,
+                context: BTreeMap::new(),
+            })
+            .collect();
+        let (source, target) = if index == 2 { (1, 0) } else { (0, 1) };
+        observation.relations = vec![ObservedRelation {
+            id: ObservedRelationId::new("r"),
+            source: ObservedUnitId::new(format!("unit-{source}")),
+            target: ObservedUnitId::new(format!("unit-{target}")),
+            kind: "supports".into(),
+            uncertainty: Some(0.25),
+        }];
+        if index == 0 {
+            let mut duplicate = observation.relations[0].clone();
+            duplicate.id = ObservedRelationId::new("r-copy");
+            observation.relations.push(duplicate);
+        }
+        if index == 2 {
+            let mut other = observation.relations[0].clone();
+            other.id = ObservedRelationId::new("other-kind");
+            other.kind = "opposes".into();
+            observation.relations.push(other);
+        }
+        alignments.push(Tracked::from_recorded(
+            DerivedId::new(format!("alignment-{index}")),
+            Alignment {
+                observation: observation.id.clone(),
+                candidates: vec![],
+            },
+        ));
+        *tracked = Tracked::from_recorded(tracked.id().clone(), observation);
+    }
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            sensors: vec![PluginSelection::any("sensor.residual")],
+            ..Default::default()
+        })
+        .unwrap();
+    let frame = MeasurementFrame {
+        id: FrameId::new("frame"),
+        version: FrameVersion::new("1"),
+        axes: vec![],
+    };
+    fixture.measurements = engine
+        .measure(
+            &plan,
+            MeasurementInputs {
+                domain: &fixture.domain,
+                frame: &frame,
+                observations: &fixture.observations,
+                alignments: &alignments,
+                rankings: &[],
+            },
+            MeasurementRun {
+                id: "residual",
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    fixture
+}
+
+#[tokio::test]
+async fn generated_proposals_and_evidence_persist_without_changing_domain() {
+    assert_stored(fixture(), "generate.persistent-residual").await;
+    assert_stored(relation_fixture(), "generate.missing-relation").await;
+}
+
+#[test]
+fn missing_relation_candidates_preserve_direction_kind_and_distinct_observation_support() {
+    let mut fixture = relation_fixture();
+    let mut measured = measurements(&fixture);
+    measured.push(Tracked::from_recorded(
+        DerivedId::new("another-profile"),
+        fixture.measurements[1].value().clone(),
+    ));
+    let params = serde_json::json!({"minimum_observations":2});
+    let candidates = run_generator(
+        "generate.missing-relation",
+        &fixture.observations,
+        &measured,
+        params.clone(),
+    )
+    .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let candidate = &candidates[0];
+    assert_eq!(candidate.value().kind, CandidateKind::Relation);
+    assert_eq!(
+        candidate.value().value["pattern"],
+        serde_json::json!({"matching":"exact_directed_observed_relation","source_label":"source","relation_kind":"supports","target_label":"target"})
+    );
+    assert_eq!(candidate.value().value["observation_count"], 2);
+    assert_eq!(
+        candidate.value().value["examples"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(candidate.value().value["examples"][0]["uncertainty"], 0.25);
+    assert!(!candidate.value().value.contains_key("label"));
+    fixture.observations.reverse();
+    measured.reverse();
+    assert_eq!(
+        run_generator(
+            "generate.missing-relation",
+            &fixture.observations,
+            &measured,
+            params
+        )
+        .unwrap(),
+        candidates
+    );
+    assert!(run_generator(
+        "generate.missing-relation",
+        &fixture.observations,
+        &measured,
+        serde_json::json!({"minimum_observations":3})
+    )
+    .unwrap()
+    .is_empty());
+}
+
+#[test]
+fn missing_relation_generation_rejects_invalid_graphs_and_unselected_residuals() {
+    let fixture = relation_fixture();
+    let measured = measurements(&fixture);
+    let params = serde_json::json!({"minimum_observations":2});
+    let reader = DependencyCollector::default();
+    for change in 0..4 {
+        let mut observations = fixture.observations.clone();
+        let mut value = reader.read(&observations[0]).clone();
+        match change {
+            0 => value.relations[0].source = ObservedUnitId::new("absent"),
+            1 => value.units.push(value.units[0].clone()),
+            2 => value.relations.push(value.relations[0].clone()),
+            _ => value.relations[0].uncertainty = Some(f64::NAN),
+        }
+        observations[0] = Tracked::from_recorded(observations[0].id().clone(), value);
+        assert!(run_generator(
+            "generate.missing-relation",
+            &observations,
+            &measured,
+            params.clone()
+        )
+        .is_err());
+    }
+    let mut measurement = fixture.measurements[1].value().clone();
+    measurement.reading = Reading::Value {
+        value: MeasurementValue::Structured(
+            serde_json::json!({"count":1,"ids":["absent/relation"]}),
+        ),
+    };
+    assert!(run_generator(
+        "generate.missing-relation",
+        &fixture.observations,
+        &[Tracked::from_recorded(DerivedId::new("bad"), measurement)],
+        params.clone()
+    )
+    .is_err());
+    for reading in [
+        Reading::NotMeasured,
+        Reading::InsufficientEvidence { have: 1, need: 2 },
+        Reading::Value {
+            value: MeasurementValue::Structured(serde_json::json!({"count":0,"ids":[]})),
+        },
+    ] {
+        let mut measurement = fixture.measurements[1].value().clone();
+        measurement.reading = reading;
+        assert!(run_generator(
+            "generate.missing-relation",
+            &fixture.observations,
+            &[Tracked::from_recorded(
+                DerivedId::new("sparse"),
+                measurement
+            )],
+            params.clone()
+        )
+        .unwrap()
+        .is_empty());
+    }
 }
