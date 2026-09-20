@@ -1,12 +1,13 @@
 //! Tracked inputs for calculation-only candidate generation.
 use unclip_epistemic::{CalculationToken, DependencyCollector, EmitMetadata, Tracked};
-use unclip_measure::Measurement;
+use unclip_measure::{EmpiricalStructure, Measurement};
 use unclip_observe::Observation;
 
 pub struct CandidateCtx<'a> {
     domain_version_id: &'a str,
     measurements: &'a [Tracked<Measurement>],
     observations: &'a [Tracked<Observation>],
+    structures: &'a [Tracked<EmpiricalStructure>],
     params: &'a serde_json::Value,
     dependencies: DependencyCollector,
 }
@@ -24,7 +25,15 @@ impl<'a> CandidateCtx<'a> {
             observations,
             params,
             dependencies,
+            structures: &[],
         }
+    }
+    pub fn with_structures(mut self, structures: &'a [Tracked<EmpiricalStructure>]) -> Self {
+        self.structures = structures;
+        self
+    }
+    pub fn structures(&self) -> &[Tracked<EmpiricalStructure>] {
+        self.structures
     }
     pub fn domain_version_id(&self) -> &str {
         self.domain_version_id

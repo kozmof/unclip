@@ -23,6 +23,7 @@ fn generate(
     engine.generate_candidates(
         &plan,
         CandidateInputs {
+            structures: &[],
             domain_version_id: "d1",
             measurements: inputs,
             observations: &[],

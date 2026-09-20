@@ -151,6 +151,7 @@ fn run_generator(
     engine.generate_candidates(
         &plan,
         CandidateInputs {
+            structures: &[],
             domain_version_id: r#"["test","1"]"#,
             observations,
             measurements,

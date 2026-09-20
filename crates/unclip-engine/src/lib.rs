@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod structure_discovery;
+pub use structure_discovery::{CommunityCandidateGenerator, LatentAxisGenerator};
+
 mod temporal_discovery;
 pub use temporal_discovery::TemporalCouplingGenerator;
 
@@ -43,6 +46,8 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(PairwiseCouplingGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(TemporalCouplingGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(CommunityCandidateGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(LatentAxisGenerator::default()))?;
     Ok(registry)
 }
 

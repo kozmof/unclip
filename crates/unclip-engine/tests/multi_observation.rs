@@ -629,6 +629,7 @@ async fn assert_persisted_batch(
                     .generate_candidates(
                         &discovery_plan,
                         unclip_engine::CandidateInputs {
+                            structures: &[],
                             domain_version_id: &domain_key,
                             observations: &[],
                             measurements: &matrix_inputs,
@@ -695,6 +696,65 @@ async fn assert_persisted_batch(
                         )
                         .await
                         .unwrap();
+                    let generator = if structure.value().kind == "communities" {
+                        "generate.community"
+                    } else {
+                        "generate.latent-axis"
+                    };
+                    let metric = &structure.value().value["metric"];
+                    let params = if generator == "generate.community" {
+                        serde_json::json!({"metric":metric,"minimum_samples":2,"minimum_members":2})
+                    } else {
+                        serde_json::json!({"metric":metric,"minimum_samples":2,"minimum_absolute_eigenvalue":1e-10})
+                    };
+                    let plan = engine
+                        .plan(&EngineProfile {
+                            candidate_generators: vec![PluginSelection::any(generator)],
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let inputs = [Tracked::from_derived(&structure, structure.value().clone())];
+                    let params = BTreeMap::from([(PluginId::new(generator), params)]);
+                    let id = format!("structure-candidates/{}", structure.id().0);
+                    let calculate = || {
+                        engine
+                            .generate_candidates(
+                                &plan,
+                                unclip_engine::CandidateInputs {
+                                    domain_version_id: &domain_key,
+                                    structures: &inputs,
+                                    observations: &[],
+                                    measurements: &[],
+                                },
+                                MeasurementRun {
+                                    id: &id,
+                                    timestamp: Timestamp::new("now"),
+                                    params: &params,
+                                },
+                            )
+                            .unwrap()
+                    };
+                    let proposals = calculate();
+                    assert_eq!(proposals, calculate());
+                    for proposal in proposals {
+                        candidates
+                            .insert_candidate(Some("batch".into()), proposal.clone())
+                            .await
+                            .unwrap();
+                        assert_eq!(
+                            provenance.direct_inputs(proposal.id()).await.unwrap(),
+                            vec![structure.id().clone()]
+                        );
+                        assert_eq!(
+                            provenance
+                                .get_provenance(proposal.id())
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .provenance,
+                            *proposal.provenance()
+                        );
+                    }
                     let stored = measurements
                         .get_empirical_structure(&structure.id().0)
                         .await
@@ -748,6 +808,7 @@ async fn assert_persisted_batch(
                 .generate_candidates(
                     &discovery_plan,
                     unclip_engine::CandidateInputs {
+                        structures: &[],
                         domain_version_id: &domain_key,
                         observations: &[],
                         measurements: &selected,

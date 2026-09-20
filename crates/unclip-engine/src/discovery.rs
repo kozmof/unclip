@@ -167,6 +167,7 @@ pub struct CandidateInputs<'a> {
     pub domain_version_id: &'a str,
     pub measurements: &'a [Tracked<Measurement>],
     pub observations: &'a [Tracked<Observation>],
+    pub structures: &'a [Tracked<unclip_measure::EmpiricalStructure>],
 }
 impl super::Engine {
     /// Generate anonymous proposals only; this never inserts domain units.
@@ -189,7 +190,8 @@ impl super::Engine {
                 inputs.observations,
                 params,
                 DependencyCollector::default(),
-            );
+            )
+            .with_structures(inputs.structures);
             let token = ctx.calculation_token(EmitMetadata {
                 id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 producer: descriptor.id.clone(),

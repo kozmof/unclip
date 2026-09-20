@@ -200,7 +200,8 @@ fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
 lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.missing-relation`, `generate.recurring-motif`, and
-`generate.pairwise-coupling`, and `generate.temporal-coupling`;
+`generate.pairwise-coupling`, `generate.temporal-coupling`,
+`generate.community`, and `generate.latent-axis`;
 no null-model algorithm is registered yet.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
@@ -245,6 +246,18 @@ order, and complete-pair sample count. Missing order or inconsistent measured
 evidence is rejected; sparse readings produce no proposal. Each source remains
 separate and carries no causal claim. DTW and change-point results are not used
 by this generator.
+
+`generate.community` reads tracked community structures with parameters such as
+`{metric: spearman, minimum_samples: 2, minimum_members: 2}`. It proposes
+composites retaining member sets, the full partition, and unassessed pairs. The
+source community calculation must meet the requested sample floor.
+
+`generate.latent-axis` reads tracked spectral structures with parameters such as
+`{metric: spearman, minimum_samples: 2, minimum_absolute_eigenvalue: 0.1}`.
+Each qualifying axis retains signed eigenvalues and loadings; negative eigenvalues
+are not interpreted as explained variance. Both generators keep sources separate
+and produce anonymous proposals, without changing the domain or assigning labels.
+Axes in degenerate eigenspaces need not have a unique interpretation.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.
