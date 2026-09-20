@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod discovery;
+pub use discovery::{CandidateInputs, PersistentResidualGenerator};
+
 mod empirical;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
 
@@ -23,6 +26,7 @@ pub fn builtin_registry() -> Result<Registry> {
     let mut registry = Registry::default();
     unclip_infer::register_all(&mut registry)?;
     unclip_sensors::register_all(&mut registry)?;
+    registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     Ok(registry)
 }
 

@@ -20,29 +20,7 @@ use crate::{
     StoredProvenance,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CandidateKind {
-    AtomicMeaning,
-    CompositeMeaning,
-    Relation,
-    GraphMotif,
-    SemanticRole,
-    Transformation,
-    DynamicCoupling,
-    LatentAxis,
-    CrossDomainStructure,
-    WeightRevision,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CandidateProposal {
-    /// Stored domain-version row ID, not an unversioned domain ID.
-    pub domain_version_id: String,
-    pub kind: CandidateKind,
-    pub value: Map<String, Value>,
-}
+pub use unclip_domain::{CandidateKind, CandidateProposal};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateRecord {

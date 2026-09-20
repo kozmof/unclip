@@ -232,6 +232,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("sensor.lehmer"));
     assert!(plugins.contains("sensor.kendall"));
     assert!(plugins.contains("sensor.rbo"));
+    assert!(plugins.contains("generate.persistent-residual"));
     for line in plugins.lines() {
         let operation = line.split("\t").nth(1).expect("plugin operation column");
         assert!(
@@ -1393,6 +1394,28 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
             {"id":"sensor.trajectories"}, {"id":"sensor.spearman"}, {"id":"sensor.mutual-information"}
         ]
     }).to_string());
+    let discovery_profile = temp.write(
+        "discovery-engine.json",
+        &serde_json::json!({
+            "domain":"batch@1", "frame":"batch.general@1", "candidate_generators":[
+                {"id":"generate.persistent-residual", "params":{"minimum_observations":2}}
+            ]
+        })
+        .to_string(),
+    );
+    let unsupported = unclip(
+        &path,
+        &[
+            "level",
+            "measure",
+            "obs-1",
+            "obs-2",
+            "--profile",
+            discovery_profile.to_str().unwrap(),
+        ],
+    );
+    assert!(!unsupported.status.success());
+    assert!(stderr(&unsupported).contains("do not execute candidate generators"));
     let no_selection = unclip(
         &path,
         &["level", "measure", "--profile", profile.to_str().unwrap()],

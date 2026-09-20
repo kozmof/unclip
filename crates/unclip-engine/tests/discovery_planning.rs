@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 use unclip_engine::Engine;
 use unclip_epistemic::{hash_params, PluginId, Timestamp};
-use unclip_measure::{EmpiricalStructure, Reading};
+use unclip_measure::Reading;
 use unclip_plugin::{
     CandidateGenerator, EngineProfile, NullModel, PluginDescriptor, PluginError, PluginSelection,
     Registry,
@@ -12,7 +12,12 @@ impl CandidateGenerator for Stub {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.0
     }
-    fn generate(&self, _: &EmpiricalStructure) -> unclip_plugin::Result<Vec<serde_json::Value>> {
+    fn generate(
+        &self,
+        _: &unclip_plugin::CandidateCtx<'_>,
+        _: unclip_epistemic::CalculationToken,
+    ) -> unclip_plugin::Result<Vec<unclip_epistemic::Calculated<unclip_domain::CandidateProposal>>>
+    {
         panic!("planning must not execute a generator")
     }
 }

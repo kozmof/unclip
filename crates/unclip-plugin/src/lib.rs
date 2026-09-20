@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod candidate;
+pub use candidate::CandidateCtx;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
@@ -365,7 +368,11 @@ pub trait Experimenter: Send + Sync {
 
 pub trait CandidateGenerator: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
-    fn generate(&self, structure: &EmpiricalStructure) -> Result<Vec<serde_json::Value>>;
+    fn generate(
+        &self,
+        ctx: &CandidateCtx<'_>,
+        token: CalculationToken,
+    ) -> Result<Vec<Calculated<unclip_domain::CandidateProposal>>>;
 }
 
 pub trait NullModel: Send + Sync {

@@ -198,8 +198,18 @@ Engine-profile YAML and JSON accept optional `candidate_generators` and
 `null_models` lists, using the same `id`, `version`, and object-valued `params`
 fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
-lists to empty. No built-in generator or null-model algorithm is registered yet;
-this configuration support does not run discovery or experiments.
+lists to empty. `generate.persistent-residual` is the first built-in generator;
+no null-model algorithm is registered yet.
+
+The engine library runs this generator through `Engine::generate_candidates`
+with tracked residual measurements and source observations from one baseline
+domain version. Configure `params: {minimum_observations: 2}` (minimum 2).
+It groups unmatched units by exact, case-sensitive observed label and counts
+distinct observations. Repeated units or profiles cannot inflate that count.
+Proposals retain observed examples and provenance, without assigning a semantic
+label or changing the domain. Sparse evidence produces no proposal.
+Observation and measurement CLI commands reject discovery selections; a dedicated
+discovery command and experiment execution are still pending.
 
 The storage library also exposes `CandidateRepository`, `ExperimentRepository`,
 and `DomainRevisionRepository` through `SeaOrmExperimentRepository`. Candidate

@@ -42,7 +42,7 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
         found = true;
         let descriptor = plugin.descriptor();
         crate::output::outln!(
-            "{}\tCANDIDATE_GENERATOR\t{}\t-\tcandidate",
+            "{}\tCALCULATED\t{}\t-\tcandidate",
             descriptor.id,
             descriptor.version
         );
@@ -192,6 +192,10 @@ pub(crate) async fn observe(
     .await?
     .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
     let parsed = document.resolve()?;
+    anyhow::ensure!(
+        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty(),
+        "observation and measurement commands do not execute candidate generators or null models"
+    );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
     let source = source
@@ -713,6 +717,10 @@ pub(crate) async fn measure(
         .collect::<Vec<_>>();
 
     let parsed = document.resolve()?;
+    anyhow::ensure!(
+        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty(),
+        "observation and measurement commands do not execute candidate generators or null models"
+    );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
     anyhow::ensure!(

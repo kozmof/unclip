@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod candidate;
+pub use candidate::{CandidateKind, CandidateProposal};
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
