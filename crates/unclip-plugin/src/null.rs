@@ -1,5 +1,5 @@
 //! Tracked evidence for calculation-only null explanations.
-use unclip_domain::CandidateProposal;
+use unclip_domain::{CandidateProposal, DomainSnapshot};
 use unclip_epistemic::{CalculationToken, DependencyCollector, EmitMetadata, Tracked};
 use unclip_observe::{Observation, PartialRanking};
 
@@ -7,6 +7,7 @@ pub struct NullCtx<'a> {
     candidate: &'a Tracked<CandidateProposal>,
     observations: &'a [Tracked<Observation>],
     rankings: &'a [Tracked<PartialRanking>],
+    domain: Option<&'a Tracked<DomainSnapshot>>,
     params: &'a serde_json::Value,
     dependencies: DependencyCollector,
 }
@@ -20,10 +21,18 @@ impl<'a> NullCtx<'a> {
         Self {
             candidate,
             rankings: &[],
+            domain: None,
             observations,
             params,
             dependencies,
         }
+    }
+    pub fn with_domain(mut self, domain: Option<&'a Tracked<DomainSnapshot>>) -> Self {
+        self.domain = domain;
+        self
+    }
+    pub fn domain(&self) -> Option<&DomainSnapshot> {
+        self.domain.map(|domain| self.read(domain))
     }
     pub fn with_rankings(mut self, rankings: &'a [Tracked<PartialRanking>]) -> Self {
         self.rankings = rankings;

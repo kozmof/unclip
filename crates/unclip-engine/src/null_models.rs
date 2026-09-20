@@ -137,6 +137,13 @@ impl NullModel for RandomCooccurrenceNull {
         })) }))
     }
 }
+/// Explicit evidence available to configured null models.
+#[derive(Default)]
+pub struct NullInputs<'a> {
+    pub observations: &'a [Tracked<Observation>],
+    pub rankings: &'a [Tracked<unclip_observe::PartialRanking>],
+    pub domain: Option<&'a Tracked<unclip_domain::DomainSnapshot>>,
+}
 impl super::Engine {
     /// Evaluate explicitly selected nulls on the caller's evidence split.
     pub fn evaluate_null_models(
@@ -156,6 +163,24 @@ impl super::Engine {
         rankings: &[Tracked<unclip_observe::PartialRanking>],
         run: super::MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Reading>>> {
+        self.evaluate_null_models_with_inputs(
+            plan,
+            candidate,
+            NullInputs {
+                observations,
+                rankings,
+                domain: None,
+            },
+            run,
+        )
+    }
+    pub fn evaluate_null_models_with_inputs(
+        &self,
+        plan: &RunPlan,
+        candidate: &Tracked<CandidateProposal>,
+        inputs: NullInputs<'_>,
+        run: super::MeasurementRun<'_>,
+    ) -> Result<Vec<Calculated<Reading>>> {
         let mut models = plan.null_models.iter().collect::<Vec<_>>();
         models.sort_by_key(|model| &model.descriptor().id);
         let mut results = Vec::new();
@@ -165,11 +190,12 @@ impl super::Engine {
             let params = run.params.get(&descriptor.id).unwrap_or(&empty);
             let ctx = NullCtx::new(
                 candidate,
-                observations,
+                inputs.observations,
                 params,
                 DependencyCollector::default(),
             )
-            .with_rankings(rankings);
+            .with_rankings(inputs.rankings)
+            .with_domain(inputs.domain);
             let token = ctx.calculation_token(EmitMetadata {
                 id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 producer: descriptor.id.clone(),

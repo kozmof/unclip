@@ -202,7 +202,8 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.missing-relation`, `generate.recurring-motif`, and
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
-null models are `null.random-cooccurrence` and `null.ranking-constraints`.
+null models are `null.random-cooccurrence`, `null.ranking-constraints`,
+`null.existing-unit`, and `null.existing-relation`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -285,6 +286,18 @@ skipped pairs, per-observation status, and an upper-tail probability. Unknown or
 missing ranks are never completed. This bounded null explains endpoint order, not
 general rank correlations, relation kind, or temporal dependence; selection and
 source biases are not adjusted.
+
+`null.existing-unit` and `null.existing-relation` take empty parameters and a
+tracked baseline domain through `NullInputs` and
+`Engine::evaluate_null_models_with_inputs`. The first checks atomic observed-label
+proposals against atomic domain units with exactly matching labels. The second
+checks exact directed observed-relation proposals against existing relations,
+matching endpoint labels, direction, and relation kind. Both retain every matching
+identity without claiming semantic equivalence or accepting or rejecting a candidate.
+The baseline must match the candidate domain version; malformed domain identities
+or dangling relation endpoints are errors. A missing baseline is insufficient
+evidence, while a valid baseline with no matches yields an explicit empty result.
+These checks never mutate the domain. Weight-change nulls remain pending.
 
 Observation and measurement CLI commands reject discovery selections; a dedicated
 discovery command and experiment execution are still pending.
