@@ -348,8 +348,23 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Ranking and other comparator families,
+ensure comparable coordinate frames. Distribution and other comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
+
+`compare.kendall` and `compare.rbo` are separate ranking comparators using the
+same tracked measurement-pair harness and sensor/version/context checks. Their
+structured `RankingComparison` deltas retain both ranking states. Kendall takes
+empty parameters and returns normalized discordant-pair distance, discordant
+count, and total pair count. It requires complete untied rankings of the same
+units and at least two units. This initial comparator is unweighted.
+
+RBO requires `{p: 0.9}` with persistence strictly between zero and one. It compares
+equal-depth, nonempty untied prefixes using geometrically weighted overlap plus
+the final-depth extrapolated tail. Unit sets may differ; unknown tails remain
+explicit and are never filled. RBO reports similarity, whereas Kendall reports
+distance. Ties, unresolved identities, unequal RBO depths, and incompatible
+Kendall unit sets produce explicit unsupported results. Empty evidence remains
+unavailable; malformed repeated or overlapping rank identities are errors.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

@@ -171,3 +171,212 @@ fn explicit_selection_enforces_versions_and_records_comparator_configuration() {
         })
         .is_err());
 }
+
+fn ranking(units: &[&str], unknown: &[&str]) -> Reading {
+    Reading::Value {
+        value: MeasurementValue::Ranking(unclip_measure::RankedState {
+            tiers: units
+                .iter()
+                .map(|id| vec![unclip_domain::UnitId::new(*id)])
+                .collect(),
+            unknown: unknown
+                .iter()
+                .map(|id| unclip_domain::UnitId::new(*id))
+                .collect(),
+            unresolved: vec![],
+        }),
+    }
+}
+fn compare_rank(
+    id: &str,
+    a: Reading,
+    b: Reading,
+    params: serde_json::Value,
+) -> unclip_plugin::Result<Vec<Calculated<Delta>>> {
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            comparators: vec![PluginSelection::any(id)],
+            ..Default::default()
+        })
+        .unwrap();
+    engine.compare_measurements(
+        &plan,
+        &Tracked::from_recorded(DerivedId::new("before"), measurement(a)),
+        &Tracked::from_recorded(DerivedId::new("after"), measurement(b)),
+        MeasurementRun {
+            id: "ranks",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(PluginId::new(id), params)]),
+        },
+    )
+}
+fn ranking_payload(results: &[Calculated<Delta>]) -> unclip_engine::RankingComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn kendall_counts_inversions_while_rbo_measures_prefix_agreement() {
+    use unclip_engine::RankingComparison;
+    for (order, expected) in [
+        (vec!["a", "b", "c"], 0),
+        (vec!["b", "a", "c"], 1),
+        (vec!["c", "b", "a"], 3),
+    ] {
+        let a = ranking(&["a", "b", "c"], &[]);
+        let b = ranking(&order, &[]);
+        let results = compare_rank("compare.kendall", a.clone(), b.clone(), json!({})).unwrap();
+        let RankingComparison::Kendall {
+            distance,
+            discordant_pairs,
+            pairs,
+            ..
+        } = ranking_payload(&results)
+        else {
+            panic!()
+        };
+        assert_eq!(discordant_pairs, expected);
+        assert_eq!(pairs, 3);
+        assert_eq!(distance, expected as f64 / 3.0);
+        assert_eq!(
+            results[0].provenance().inputs,
+            vec![DerivedId::new("after"), DerivedId::new("before")]
+        );
+        assert_eq!(
+            compare_rank("compare.kendall", a, b, json!({})).unwrap(),
+            results
+        );
+    }
+    for (right, expected) in [
+        (vec!["a", "b"], 1.0),
+        (vec!["b", "a"], 0.5),
+        (vec!["c", "d"], 0.0),
+    ] {
+        let results = compare_rank(
+            "compare.rbo",
+            ranking(&["a", "b"], &["x"]),
+            ranking(&right, &["y"]),
+            json!({"p":0.5}),
+        )
+        .unwrap();
+        let RankingComparison::Rbo {
+            similarity,
+            p,
+            depth,
+            before,
+            after,
+        } = ranking_payload(&results)
+        else {
+            panic!()
+        };
+        assert_eq!(similarity, expected);
+        assert_eq!(p, 0.5);
+        assert_eq!(depth, 2);
+        assert_eq!(before.unknown, vec![unclip_domain::UnitId::new("x")]);
+        assert_eq!(after.unknown, vec![unclip_domain::UnitId::new("y")]);
+        assert_eq!(
+            compare_rank(
+                "compare.rbo",
+                ranking(&["a", "b"], &["x"]),
+                ranking(&right, &["y"]),
+                json!({"p":0.5})
+            )
+            .unwrap(),
+            results
+        );
+    }
+}
+#[test]
+fn ranking_comparators_preserve_sparse_and_unsupported_shapes() {
+    use unclip_engine::RankingComparison;
+    let tied = Reading::Value {
+        value: MeasurementValue::Ranking(unclip_measure::RankedState {
+            tiers: vec![vec![
+                unclip_domain::UnitId::new("a"),
+                unclip_domain::UnitId::new("b"),
+            ]],
+            unknown: vec![],
+            unresolved: vec![],
+        }),
+    };
+    for (id, params) in [
+        ("compare.kendall", json!({})),
+        ("compare.rbo", json!({"p":0.9})),
+    ] {
+        let results = compare_rank(
+            id,
+            Reading::NotMeasured,
+            ranking(&["a", "b"], &[]),
+            params.clone(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ranking_payload(&results),
+            RankingComparison::Unavailable {
+                before: Reading::NotMeasured,
+                ..
+            }
+        ));
+        let results =
+            compare_rank(id, tied.clone(), ranking(&["a", "b"], &[]), params.clone()).unwrap();
+        assert!(matches!(
+            ranking_payload(&results),
+            RankingComparison::NotApplicable { .. }
+        ));
+        assert!(compare_rank(
+            id,
+            ranking(&["a", "a"], &[]),
+            ranking(&["a", "b"], &[]),
+            params.clone()
+        )
+        .is_err());
+        assert!(compare_rank(
+            id,
+            ranking(&["a"], &["a"]),
+            ranking(&["a", "b"], &[]),
+            params
+        )
+        .is_err());
+    }
+    for (id, a, b, params) in [
+        (
+            "compare.kendall",
+            ranking(&["a"], &["b"]),
+            ranking(&["a", "b"], &[]),
+            json!({}),
+        ),
+        (
+            "compare.kendall",
+            ranking(&["a", "b"], &[]),
+            ranking(&["a", "c"], &[]),
+            json!({}),
+        ),
+        (
+            "compare.rbo",
+            ranking(&["a"], &[]),
+            ranking(&["a", "b"], &[]),
+            json!({"p":0.9}),
+        ),
+    ] {
+        assert!(matches!(
+            ranking_payload(&compare_rank(id, a, b, params).unwrap()),
+            RankingComparison::NotApplicable { .. }
+        ));
+    }
+    for params in [
+        json!({}),
+        json!({"p":0}),
+        json!({"p":1}),
+        json!({"p":0.9,"weighted":true}),
+    ] {
+        assert!(compare_rank(
+            "compare.rbo",
+            ranking(&["a"], &[]),
+            ranking(&["a"], &[]),
+            params
+        )
+        .is_err());
+    }
+}

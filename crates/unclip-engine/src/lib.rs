@@ -18,6 +18,8 @@ mod relation_discovery;
 pub use relation_discovery::MissingRelationGenerator;
 
 mod comparison;
+mod ranking_comparison;
+pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
 mod context_null;
 mod discovery;
 pub use comparison::{ScalarDifference, ScalarDifferenceComparator};
@@ -54,6 +56,8 @@ pub fn builtin_registry() -> Result<Registry> {
     unclip_infer::register_all(&mut registry)?;
     unclip_sensors::register_all(&mut registry)?;
     registry.register_comparator(std::sync::Arc::new(ScalarDifferenceComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(KendallComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(RboComparator::default()))?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
@@ -533,7 +537,14 @@ mod tests {
                 "sensor.trajectories",
             ]
         );
-        assert_eq!(comparators, vec!["compare.scalar-difference"]);
+        assert_eq!(
+            comparators,
+            vec![
+                "compare.kendall",
+                "compare.rbo",
+                "compare.scalar-difference"
+            ]
+        );
     }
 
     #[test]
