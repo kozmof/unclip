@@ -572,3 +572,178 @@ fn invalid_distribution_data_and_implicit_normalization_are_rejected() {
         .is_err());
     }
 }
+
+fn pairwise(metric: &str, units: &[&str], cell: serde_json::Value) -> Reading {
+    let diagonal = json!({"status":"value","value":1.0,"sample_count":4});
+    Reading::Value {value:MeasurementValue::PairwiseMatrix(serde_json::from_value(json!({"metric":metric,"units":units,"cells":[[diagonal.clone(),cell.clone()],[cell,diagonal]]})).unwrap())}
+}
+fn matrix_payload(results: &[Calculated<Delta>]) -> unclip_engine::MatrixComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn matrix_deltas_preserve_signed_cells_and_per_cell_evidence() {
+    use unclip_engine::{MatrixCellDifference, MatrixComparison};
+    let a = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"value","value":0.5,"sample_count":4}),
+    );
+    let b = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"value","value":-0.5,"sample_count":3}),
+    );
+    let result = compare_rank(
+        "compare.pairwise-matrix",
+        a.clone(),
+        b.clone(),
+        json!({"minimum_samples":3}),
+    )
+    .unwrap();
+    let MatrixComparison::Value { cells, units, .. } = matrix_payload(&result) else {
+        panic!()
+    };
+    assert_eq!(
+        units,
+        vec![
+            unclip_domain::UnitId::new("a"),
+            unclip_domain::UnitId::new("b")
+        ]
+    );
+    assert!(matches!(
+        cells[0][0],
+        MatrixCellDifference::Value {
+            difference: 0.0,
+            ..
+        }
+    ));
+    assert!(matches!(
+        cells[0][1],
+        MatrixCellDifference::Value {
+            difference: -1.0,
+            after: unclip_measure::MatrixCell::Value {
+                sample_count: 3,
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(cells[0][1], cells[1][0]);
+    assert_eq!(
+        result[0].provenance().inputs,
+        vec![DerivedId::new("after"), DerivedId::new("before")]
+    );
+    assert_eq!(
+        compare_rank(
+            "compare.pairwise-matrix",
+            a.clone(),
+            b.clone(),
+            json!({"minimum_samples":3})
+        )
+        .unwrap(),
+        result
+    );
+    let stricter = compare_rank(
+        "compare.pairwise-matrix",
+        a,
+        b,
+        json!({"minimum_samples":4}),
+    )
+    .unwrap();
+    let MatrixComparison::Value { cells, .. } = matrix_payload(&stricter) else {
+        panic!()
+    };
+    assert!(matches!(
+        cells[0][1],
+        MatrixCellDifference::Unavailable {
+            after: unclip_measure::MatrixCell::Value {
+                sample_count: 3,
+                ..
+            },
+            ..
+        }
+    ));
+}
+#[test]
+fn matrix_missing_cells_remain_distinct_and_incompatible_axes_are_rejected() {
+    use unclip_engine::{MatrixCellDifference, MatrixComparison};
+    let a = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"undefined","sample_count":4}),
+    );
+    let b = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"insufficient_evidence","have":1,"need":2}),
+    );
+    let result = compare_rank(
+        "compare.pairwise-matrix",
+        a.clone(),
+        b,
+        json!({"minimum_samples":2}),
+    )
+    .unwrap();
+    let MatrixComparison::Value { cells, .. } = matrix_payload(&result) else {
+        panic!()
+    };
+    assert!(matches!(
+        cells[0][1],
+        MatrixCellDifference::Unavailable {
+            before: unclip_measure::MatrixCell::Undefined { sample_count: 4 },
+            after: unclip_measure::MatrixCell::InsufficientEvidence { have: 1, need: 2 }
+        }
+    ));
+    for (metric, units) in [("kendall", vec!["a", "b"]), ("spearman", vec!["a", "c"])] {
+        let b = pairwise(
+            metric,
+            &units,
+            json!({"status":"undefined","sample_count":4}),
+        );
+        assert!(compare_rank(
+            "compare.pairwise-matrix",
+            a.clone(),
+            b,
+            json!({"minimum_samples":2})
+        )
+        .is_err());
+    }
+    let raw = Reading::Value {
+        value: MeasurementValue::Matrix(vec![vec![1.0]]),
+    };
+    let result = compare_rank(
+        "compare.pairwise-matrix",
+        a.clone(),
+        raw,
+        json!({"minimum_samples":2}),
+    )
+    .unwrap();
+    assert!(matches!(
+        matrix_payload(&result),
+        MatrixComparison::NotApplicable { .. }
+    ));
+    let result = compare_rank(
+        "compare.pairwise-matrix",
+        a.clone(),
+        Reading::NotMeasured,
+        json!({"minimum_samples":2}),
+    )
+    .unwrap();
+    assert!(matches!(
+        matrix_payload(&result),
+        MatrixComparison::Unavailable {
+            after: Reading::NotMeasured,
+            ..
+        }
+    ));
+    for params in [
+        json!({}),
+        json!({"minimum_samples":1}),
+        json!({"minimum_samples":2,"aggregate":true}),
+    ] {
+        assert!(compare_rank("compare.pairwise-matrix", a.clone(), a.clone(), params).is_err());
+    }
+}

@@ -231,6 +231,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("compare.kendall"));
     assert!(plugins.contains("compare.rbo"));
     assert!(plugins.contains("compare.jensen-shannon"));
+    assert!(plugins.contains("compare.pairwise-matrix"));
     assert!(plugins.contains("sensor.residual"));
     assert!(plugins.contains("sensor.permutation"));
     assert!(plugins.contains("sensor.lehmer"));

@@ -348,7 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Matrix and other comparator families,
+ensure comparable coordinate frames. Spectral and other comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
@@ -379,6 +379,16 @@ support). No transport geometry or smoothing is inferred.
 Empty or zero-total distributions are unavailable. Negative or nonfinite weights,
 duplicate or empty categories, and overflowing totals are errors. Sparse readings
 remain explicit. Sensor, version, and context compatibility checks still apply.
+
+`compare.pairwise-matrix` compares labeled pairwise matrices with
+`{minimum_samples: 2}` or a stricter sample floor. It requires identical metrics
+and unit axes, plus matching sensor, version, and context. Its `MatrixComparison`
+delta retains the full matrix shape, including diagonals, with signed
+`after - before` differences only where both cells meet the sample floor. Every
+cell retains both original values and sample counts or sparse states. Undefined
+and insufficient evidence are never replaced with zero. Empty matrices remain
+unavailable; unlabeled matrices are unsupported. No aggregate matrix score is
+computed. Spectral comparison remains a separate pending comparator.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.
