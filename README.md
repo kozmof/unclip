@@ -348,8 +348,8 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Graph comparator families,
-profile-wide pairing, and experiment orchestration remain pending.
+ensure comparable coordinate frames. Profile-wide pairing and experiment
+orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
 same tracked measurement-pair harness and sensor/version/context checks. Their
@@ -422,6 +422,23 @@ The typed `EventComparison` delta retains the sequence, matching policy, both
 events in each match, signed shifts, and added/removed events. Reordered event
 arrays produce the same result. Measured empty arrays yield empty alignments;
 missing readings remain unavailable. Other event schemas are unsupported.
+
+`compare.graph-identity` takes empty parameters and compares explicit
+`NamedDirectedGraph` payloads, for example:
+
+```json
+{"nodes":["a","b"],"edges":[{"source":"a","target":"b","kind":"near"}]}
+```
+
+Node strings are exact identities, and directed edges are identified by their
+source, target, and kind. The typed `GraphComparison` delta retains canonical
+graphs, added/removed nodes and edges, and separate node and edge symmetric-
+difference counts. There is no weighted aggregate or inferred isomorphism.
+Self-loops and different edge kinds between the same nodes are supported;
+duplicate triples, duplicate nodes, dangling endpoints, and undeclared fields
+are rejected. Empty measured graphs compare normally, while missing readings
+remain unavailable. Properties and parallel edges with the same triple are
+outside this initial graph schema.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

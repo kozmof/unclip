@@ -20,6 +20,10 @@ pub use relation_discovery::MissingRelationGenerator;
 mod comparison;
 mod distribution_comparison;
 mod event_comparison;
+mod graph_comparison;
+pub use graph_comparison::{
+    DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
+};
 mod matrix_comparison;
 mod partition_comparison;
 pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
@@ -74,6 +78,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_comparator(std::sync::Arc::new(PairwiseMatrixComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(SpectrumComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(PartitionRandComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(GraphIdentityComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(
         ChangePointAlignmentComparator::default(),
     ))?;
@@ -560,6 +565,7 @@ mod tests {
             comparators,
             vec![
                 "compare.change-point-alignment",
+                "compare.graph-identity",
                 "compare.jensen-shannon",
                 "compare.kendall",
                 "compare.pairwise-matrix",

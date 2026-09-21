@@ -1192,3 +1192,123 @@ fn event_empty_results_are_distinct_from_unmeasured_and_invalid_events_fail() {
         assert!(align_events(empty.clone(), empty.clone(), params).is_err());
     }
 }
+
+fn graph_reading(nodes: &[&str], edges: &[(&str, &str, &str)]) -> Reading {
+    Reading::Value {
+        value: MeasurementValue::Graph(
+            json!({"nodes":nodes,"edges":edges.iter().map(|(s,t,k)| json!({"source":s,"target":t,"kind":k})).collect::<Vec<_>>()}),
+        ),
+    }
+}
+fn graph_payload(results: &[Calculated<Delta>]) -> unclip_engine::GraphComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn graph_distances_preserve_identity_direction_kind_and_separate_dimensions() {
+    use unclip_engine::GraphComparison;
+    let a = graph_reading(&["a", "b"], &[("a", "b", "near")]);
+    let b = graph_reading(&["a", "b", "c"], &[("b", "a", "near"), ("a", "b", "other")]);
+    let result = compare_rank("compare.graph-identity", a.clone(), b.clone(), json!({})).unwrap();
+    let GraphComparison::Value {
+        node_distance,
+        edge_distance,
+        nodes_added,
+        nodes_removed,
+        edges_added,
+        edges_removed,
+        ..
+    } = graph_payload(&result)
+    else {
+        panic!()
+    };
+    assert_eq!(node_distance, 1);
+    assert_eq!(edge_distance, 3);
+    assert_eq!(nodes_added, vec!["c"]);
+    assert!(nodes_removed.is_empty());
+    assert_eq!(edges_added.len(), 2);
+    assert_eq!(edges_removed.len(), 1);
+    assert_eq!(
+        result[0].provenance().inputs,
+        vec![DerivedId::new("after"), DerivedId::new("before")]
+    );
+    let reordered = compare_rank(
+        "compare.graph-identity",
+        graph_reading(&["b", "a"], &[("a", "b", "near")]),
+        graph_reading(&["c", "b", "a"], &[("a", "b", "other"), ("b", "a", "near")]),
+        json!({}),
+    )
+    .unwrap();
+    assert_eq!(result, reordered);
+    let same = compare_rank("compare.graph-identity", a.clone(), a, json!({})).unwrap();
+    assert!(matches!(
+        graph_payload(&same),
+        GraphComparison::Value {
+            node_distance: 0,
+            edge_distance: 0,
+            ..
+        }
+    ));
+    let reverse = compare_rank(
+        "compare.graph-identity",
+        b,
+        graph_reading(&["a", "b"], &[("a", "b", "near")]),
+        json!({}),
+    )
+    .unwrap();
+    assert!(
+        matches!(graph_payload(&reverse),GraphComparison::Value {node_distance:1,edge_distance:3,nodes_removed,..} if nodes_removed==vec!["c"])
+    );
+}
+#[test]
+fn graph_validation_rejects_ambiguity_and_preserves_empty_vs_missing() {
+    use unclip_engine::GraphComparison;
+    let empty = graph_reading(&[], &[]);
+    let result = compare_rank(
+        "compare.graph-identity",
+        empty.clone(),
+        empty.clone(),
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        graph_payload(&result),
+        GraphComparison::Value {
+            node_distance: 0,
+            edge_distance: 0,
+            ..
+        }
+    ));
+    let result = compare_rank(
+        "compare.graph-identity",
+        empty.clone(),
+        Reading::NotMeasured,
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        graph_payload(&result),
+        GraphComparison::Unavailable { .. }
+    ));
+    for bad in [
+        graph_reading(&["a", "a"], &[]),
+        graph_reading(&[""], &[]),
+        graph_reading(&["a"], &[("a", "b", "near")]),
+        graph_reading(&["a"], &[("a", "a", "")]),
+        graph_reading(&["a"], &[("a", "a", "near"), ("a", "a", "near")]),
+        Reading::Value {
+            value: MeasurementValue::Graph(json!({"nodes":["a"],"edges":[],"directed":false})),
+        },
+    ] {
+        assert!(compare_rank("compare.graph-identity", empty.clone(), bad, json!({})).is_err());
+    }
+    assert!(compare_rank(
+        "compare.graph-identity",
+        empty.clone(),
+        empty,
+        json!({"infer_isomorphism":true})
+    )
+    .is_err());
+}
