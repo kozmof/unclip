@@ -20,6 +20,10 @@ pub use relation_discovery::MissingRelationGenerator;
 mod candidate_application;
 mod comparison;
 mod constraints;
+mod pareto;
+pub use pareto::{
+    ObjectiveDirection, ParetoAssessment, ParetoDimension, ParetoEvidence, ParetoRelation,
+};
 mod transfer_constraint;
 pub use transfer_constraint::TransferAssessment;
 mod coupling_application;
