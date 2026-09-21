@@ -348,7 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Event and graph comparator families,
+ensure comparable coordinate frames. Graph comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
@@ -409,6 +409,19 @@ for chance. Group and member order do not affect the result. Duplicate members,
 overlapped groups, empty group entries, and differing member sets are errors.
 Empty or singleton partitions are unavailable because they contain no comparable
 pairs. No missing membership or shared-subset restriction is inferred.
+
+`compare.change-point-alignment` aligns `sensor.change-points` event readings
+with `{max_shift_steps: 1}` or another nonnegative step limit. Both measurements
+must share sensor version and complete sequence/detector context. Events are
+validated against observation identities, boundary indices, window sample counts,
+and the detection threshold. Matching proceeds chronologically, pairing the
+earliest feasible events one to one within the step limit. This is not a minimum
+displacement assignment, and sequence steps are not elapsed time.
+
+The typed `EventComparison` delta retains the sequence, matching policy, both
+events in each match, signed shifts, and added/removed events. Reordered event
+arrays produce the same result. Measured empty arrays yield empty alignments;
+missing readings remain unavailable. Other event schemas are unsupported.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

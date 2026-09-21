@@ -19,8 +19,10 @@ pub use relation_discovery::MissingRelationGenerator;
 
 mod comparison;
 mod distribution_comparison;
+mod event_comparison;
 mod matrix_comparison;
 mod partition_comparison;
+pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
 mod spectral_comparison;
 pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
 pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
@@ -72,6 +74,9 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_comparator(std::sync::Arc::new(PairwiseMatrixComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(SpectrumComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(PartitionRandComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(
+        ChangePointAlignmentComparator::default(),
+    ))?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
@@ -554,6 +559,7 @@ mod tests {
         assert_eq!(
             comparators,
             vec![
+                "compare.change-point-alignment",
                 "compare.jensen-shannon",
                 "compare.kendall",
                 "compare.pairwise-matrix",

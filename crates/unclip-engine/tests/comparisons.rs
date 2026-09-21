@@ -1042,3 +1042,153 @@ fn partition_comparison_rejects_overlap_and_does_not_infer_missing_members() {
     )
     .is_err());
 }
+
+fn change_event(index: usize) -> serde_json::Value {
+    json!({"observation":format!("o{index}"),"index":index,"before_mean":1.0,"after_mean":3.0,"sample_count":2})
+}
+fn event_measurement(reading: Reading) -> Measurement {
+    let mut m = measurement(reading);
+    m.sensor = PluginId::new("sensor.change-points");
+    m.context.values=serde_json::from_value(json!({"sequence":(0..8).map(|i| json!({"observation":format!("o{i}"),"position":i*10})).collect::<Vec<_>>(),"unit":"a","window":1,"minimum_shift":1.0})).unwrap();
+    m
+}
+fn align_events(
+    before: Measurement,
+    after: Measurement,
+    params: serde_json::Value,
+) -> unclip_plugin::Result<Vec<Calculated<Delta>>> {
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            comparators: vec![PluginSelection::any("compare.change-point-alignment")],
+            ..Default::default()
+        })
+        .unwrap();
+    engine.compare_measurements(
+        &plan,
+        &Tracked::from_recorded(DerivedId::new("before"), before),
+        &Tracked::from_recorded(DerivedId::new("after"), after),
+        MeasurementRun {
+            id: "events",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(PluginId::new("compare.change-point-alignment"), params)]),
+        },
+    )
+}
+fn event_reading(indices: &[usize]) -> Reading {
+    Reading::Value {
+        value: MeasurementValue::Events(indices.iter().map(|i| change_event(*i)).collect()),
+    }
+}
+fn event_payload(results: &[Calculated<Delta>]) -> unclip_engine::EventComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn event_alignment_is_one_to_one_and_uses_steps_not_coordinate_gaps() {
+    use unclip_engine::EventComparison;
+    let a = event_measurement(event_reading(&[2, 3]));
+    let b = event_measurement(event_reading(&[3, 4]));
+    let result = align_events(a.clone(), b.clone(), json!({"max_shift_steps":1})).unwrap();
+    let EventComparison::Value {
+        matched,
+        removed,
+        added,
+        ..
+    } = event_payload(&result)
+    else {
+        panic!()
+    };
+    assert_eq!(matched.len(), 2);
+    assert!(removed.is_empty() && added.is_empty());
+    assert_eq!(matched[0].before.index, 2);
+    assert_eq!(matched[0].after.index, 3);
+    assert_eq!(matched[0].shift_steps, 1);
+    assert_eq!(
+        result[0].provenance().inputs,
+        vec![DerivedId::new("after"), DerivedId::new("before")]
+    );
+    assert_eq!(
+        align_events(
+            event_measurement(event_reading(&[3, 2])),
+            event_measurement(event_reading(&[4, 3])),
+            json!({"max_shift_steps":1})
+        )
+        .unwrap(),
+        result
+    );
+    let exact = align_events(a.clone(), b.clone(), json!({"max_shift_steps":0})).unwrap();
+    let EventComparison::Value {
+        matched,
+        removed,
+        added,
+        ..
+    } = event_payload(&exact)
+    else {
+        panic!()
+    };
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].shift_steps, 0);
+    assert_eq!(removed[0].index, 2);
+    assert_eq!(added[0].index, 4);
+    let reverse = align_events(b, a, json!({"max_shift_steps":1})).unwrap();
+    let EventComparison::Value { matched, .. } = event_payload(&reverse) else {
+        panic!()
+    };
+    assert_eq!(matched[0].shift_steps, -1);
+}
+#[test]
+fn event_empty_results_are_distinct_from_unmeasured_and_invalid_events_fail() {
+    use unclip_engine::EventComparison;
+    let empty = event_measurement(event_reading(&[]));
+    let result = align_events(empty.clone(), empty.clone(), json!({"max_shift_steps":0})).unwrap();
+    assert!(
+        matches!(event_payload(&result),EventComparison::Value {matched,removed,added,..} if matched.is_empty() && removed.is_empty() && added.is_empty())
+    );
+    let sparse = align_events(
+        empty.clone(),
+        event_measurement(Reading::NotMeasured),
+        json!({"max_shift_steps":0}),
+    )
+    .unwrap();
+    assert!(matches!(
+        event_payload(&sparse),
+        EventComparison::Unavailable { .. }
+    ));
+    for (key, value) in [
+        ("observation", json!("wrong")),
+        ("index", json!(8)),
+        ("sample_count", json!(1)),
+        ("after_mean", json!(1.1)),
+        ("before_mean", json!(null)),
+    ] {
+        let mut event = change_event(2);
+        event[key] = value;
+        assert!(align_events(
+            empty.clone(),
+            event_measurement(Reading::Value {
+                value: MeasurementValue::Events(vec![event])
+            }),
+            json!({"max_shift_steps":1})
+        )
+        .is_err());
+    }
+    assert!(align_events(
+        empty.clone(),
+        event_measurement(event_reading(&[2, 2])),
+        json!({"max_shift_steps":0})
+    )
+    .is_err());
+    let mut missing = empty.clone();
+    missing.context.values.remove("sequence");
+    assert!(align_events(missing.clone(), missing, json!({"max_shift_steps":0})).is_err());
+    for params in [
+        json!({}),
+        json!({"max_shift_steps":-1}),
+        json!({"max_shift_steps":0,"nearest":true}),
+    ] {
+        assert!(align_events(empty.clone(), empty.clone(), params).is_err());
+    }
+}

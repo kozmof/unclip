@@ -234,6 +234,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("compare.pairwise-matrix"));
     assert!(plugins.contains("compare.spectrum"));
     assert!(plugins.contains("compare.partition-rand"));
+    assert!(plugins.contains("compare.change-point-alignment"));
     assert!(plugins.contains("sensor.residual"));
     assert!(plugins.contains("sensor.permutation"));
     assert!(plugins.contains("sensor.lehmer"));
