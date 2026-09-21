@@ -348,8 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Profile-wide pairing and experiment
-orchestration remain pending.
+ensure comparable coordinate frames. Experiment orchestration remains pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
 same tracked measurement-pair harness and sensor/version/context checks. Their
@@ -439,6 +438,21 @@ duplicate triples, duplicate nodes, dangling endpoints, and undeclared fields
 are rejected. Empty measured graphs compare normally, while missing readings
 remain unavailable. Properties and parallel edges with the same triple are
 outside this initial graph schema.
+
+`Engine::compare_profiles` accepts two tracked measurement collections and an
+explicit list of `ComparisonPair` identities. Every selected comparator runs on
+every pair, preserving its supported, unsupported, or unavailable result. Pairing
+is one-to-one and never inferred from sensor names or list positions. Unmatched
+measurements remain listed in the calculated `DeltaProfile`.
+
+The returned `ProfileComparisonResult` contains both individual calculated deltas
+and the aggregate profile. Each delta depends on its paired evidence; the profile
+depends on all selected measurements and emitted deltas, with exact pairings,
+comparator versions, parameters, and hashes recorded. Canonical ordering makes
+input and pairing order irrelevant to replay. Duplicate identities, conflicting
+values under one identity, missing references, output-ID collisions, and reused
+pair endpoints are rejected. No profile score is computed. This is a library
+calculation API; persisted experiment orchestration and its CLI remain pending.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

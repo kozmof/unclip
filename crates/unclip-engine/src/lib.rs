@@ -21,9 +21,11 @@ mod comparison;
 mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
+mod profile_comparison;
 pub use graph_comparison::{
     DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
 };
+pub use profile_comparison::{ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta};
 mod matrix_comparison;
 mod partition_comparison;
 pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
