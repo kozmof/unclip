@@ -348,7 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Spectral and other comparator families,
+ensure comparable coordinate frames. Partition and other comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
@@ -388,7 +388,18 @@ delta retains the full matrix shape, including diagonals, with signed
 cell retains both original values and sample counts or sparse states. Undefined
 and insufficient evidence are never replaced with zero. Empty matrices remain
 unavailable; unlabeled matrices are unsupported. No aggregate matrix score is
-computed. Spectral comparison remains a separate pending comparator.
+computed.
+
+`compare.spectrum` derives both spectra from the tracked labeled matrices using
+explicit parameters such as `{minimum_samples: 2, tolerance: 1e-12, max_sweeps: 100}`.
+It requires matching metrics and axes, with every cell meeting the sample floor.
+The typed `SpectralComparison` delta retains both complete eigendecompositions
+and signed `after - before` eigenvalue changes in descending eigenvalue order.
+Negative eigenvalues remain negative; no explained-variance ratio is inferred.
+Missing cells produce an unavailable result, and failure to converge is an error.
+This compares spectra, not matched factors or loading distances: different
+matrices can have identical spectra, and repeated eigenspaces need not have
+unique bases. No aggregate spectral score is computed.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

@@ -747,3 +747,164 @@ fn matrix_missing_cells_remain_distinct_and_incompatible_axes_are_rejected() {
         assert!(compare_rank("compare.pairwise-matrix", a.clone(), a.clone(), params).is_err());
     }
 }
+
+fn spectral_payload(results: &[Calculated<Delta>]) -> unclip_engine::SpectralComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+fn spectral_params() -> serde_json::Value {
+    json!({"minimum_samples":2,"tolerance":1e-12,"max_sweeps":100})
+}
+#[test]
+fn spectrum_retains_signed_eigenvalues_and_compares_order_not_factor_identity() {
+    use unclip_engine::SpectralComparison;
+    let matrix = |v| {
+        pairwise(
+            "relative_rank_variance",
+            &["a", "b"],
+            json!({"status":"value","value":v,"sample_count":4}),
+        )
+    };
+    let result = compare_rank(
+        "compare.spectrum",
+        matrix(2.0),
+        matrix(3.0),
+        spectral_params(),
+    )
+    .unwrap();
+    let SpectralComparison::Value {
+        before,
+        after,
+        eigenvalue_differences,
+        ..
+    } = spectral_payload(&result)
+    else {
+        panic!()
+    };
+    assert!((before.eigenpairs[0].eigenvalue - 3.0).abs() < 1e-12);
+    assert!((before.eigenpairs[1].eigenvalue + 1.0).abs() < 1e-12);
+    assert!((after.eigenpairs[1].eigenvalue + 2.0).abs() < 1e-12);
+    assert!((eigenvalue_differences[0] - 1.0).abs() < 1e-12);
+    assert!((eigenvalue_differences[1] + 1.0).abs() < 1e-12);
+    assert_eq!(
+        result[0].provenance().inputs,
+        vec![DerivedId::new("after"), DerivedId::new("before")]
+    );
+    assert_eq!(
+        compare_rank(
+            "compare.spectrum",
+            matrix(2.0),
+            matrix(3.0),
+            spectral_params()
+        )
+        .unwrap(),
+        result
+    );
+    // Different loading directions can have the same spectrum.
+    let positive = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"value","value":0.5,"sample_count":4}),
+    );
+    let negative = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"value","value":-0.5,"sample_count":4}),
+    );
+    let result = compare_rank("compare.spectrum", positive, negative, spectral_params()).unwrap();
+    let SpectralComparison::Value {
+        before,
+        after,
+        eigenvalue_differences,
+        ..
+    } = spectral_payload(&result)
+    else {
+        panic!()
+    };
+    assert!(eigenvalue_differences.iter().all(|v| v.abs() < 1e-12));
+    assert_ne!(before.eigenpairs[0].loadings, after.eigenpairs[0].loadings);
+}
+#[test]
+fn spectral_sparse_and_incompatible_evidence_is_not_completed() {
+    use unclip_engine::SpectralComparison;
+    let full = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"value","value":0.5,"sample_count":4}),
+    );
+    let sparse = pairwise(
+        "spearman",
+        &["a", "b"],
+        json!({"status":"undefined","sample_count":4}),
+    );
+    for after in [sparse, Reading::NotMeasured] {
+        let result =
+            compare_rank("compare.spectrum", full.clone(), after, spectral_params()).unwrap();
+        assert!(matches!(
+            spectral_payload(&result),
+            SpectralComparison::Unavailable { .. }
+        ));
+    }
+    let result = compare_rank(
+        "compare.spectrum",
+        full.clone(),
+        full.clone(),
+        json!({"minimum_samples":5,"tolerance":1e-12,"max_sweeps":100}),
+    )
+    .unwrap();
+    assert!(matches!(
+        spectral_payload(&result),
+        SpectralComparison::Unavailable { .. }
+    ));
+    for (key, value) in [
+        ("minimum_samples", json!(1)),
+        ("tolerance", json!(0)),
+        ("max_sweeps", json!(0)),
+    ] {
+        let mut params = spectral_params();
+        params[key] = value;
+        assert!(compare_rank("compare.spectrum", full.clone(), full.clone(), params).is_err());
+    }
+    let other = pairwise(
+        "kendall",
+        &["a", "b"],
+        json!({"status":"value","value":0.5,"sample_count":4}),
+    );
+    assert!(compare_rank("compare.spectrum", full, other, spectral_params()).is_err());
+}
+
+#[test]
+fn spectrum_never_returns_an_unconverged_partial_result() {
+    let values = [
+        [0.0, 1.0, 3.0, 2.0],
+        [1.0, 0.0, 2.0, 4.0],
+        [3.0, 2.0, 0.0, 1.0],
+        [2.0, 4.0, 1.0, 0.0],
+    ];
+    let cells = values
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|value| json!({"status":"value","value":value,"sample_count":4}))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let matrix = Reading::Value {
+        value: MeasurementValue::PairwiseMatrix(
+            serde_json::from_value(
+                json!({"metric":"relative_rank_variance","units":["a","b","c","d"],"cells":cells}),
+            )
+            .unwrap(),
+        ),
+    };
+    let error = compare_rank(
+        "compare.spectrum",
+        matrix.clone(),
+        matrix,
+        json!({"minimum_samples":2,"tolerance":1e-15,"max_sweeps":1}),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("did not converge"));
+}

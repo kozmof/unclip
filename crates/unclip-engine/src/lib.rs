@@ -20,7 +20,9 @@ pub use relation_discovery::MissingRelationGenerator;
 mod comparison;
 mod distribution_comparison;
 mod matrix_comparison;
+mod spectral_comparison;
 pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
+pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
 mod ranking_comparison;
 pub use distribution_comparison::{
     DistributionComparison, DistributionNormalization, JensenShannonComparator,
@@ -66,6 +68,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_comparator(std::sync::Arc::new(RboComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(JensenShannonComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(PairwiseMatrixComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(SpectrumComparator::default()))?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
@@ -552,7 +555,8 @@ mod tests {
                 "compare.kendall",
                 "compare.pairwise-matrix",
                 "compare.rbo",
-                "compare.scalar-difference"
+                "compare.scalar-difference",
+                "compare.spectrum"
             ]
         );
     }
