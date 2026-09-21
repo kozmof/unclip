@@ -26,7 +26,10 @@ mod graph_comparison;
 mod held_out;
 mod motif_application;
 mod observation_selection;
-pub use held_out::{CounterfactualMeasurementInputs, CounterfactualMeasurements, HeldOutInputs};
+pub use held_out::{
+    CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
+    HeldOutInputs,
+};
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,

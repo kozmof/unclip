@@ -1634,6 +1634,89 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let replay = execute(&baseline).unwrap();
     assert_eq!(result.before, replay.before);
     assert_eq!(result.after, replay.after);
+    let compare = |pairs: &[unclip_engine::ComparisonPair], comparators: bool| {
+        let mut profile = profile();
+        if comparators {
+            profile.comparators = vec![
+                PluginSelection::any("compare.pairwise-matrix"),
+                PluginSelection::any("compare.scalar-difference"),
+            ];
+        }
+        let plan = engine.plan(&profile).unwrap();
+        let params = BTreeMap::from([(
+            PluginId::new("compare.pairwise-matrix"),
+            serde_json::json!({"minimum_samples":2}),
+        )]);
+        engine.compare_counterfactual(
+            &plan,
+            CounterfactualMeasurementInputs {
+                baseline: HeldOutInputs {
+                    baseline: &baseline,
+                    frame: &frame,
+                    split: &split,
+                    alignments: &inputs.alignments,
+                    rankings: &inputs.rankings,
+                },
+                counterfactual: &candidate,
+                alignments: &inputs.alignments,
+                rankings: &inputs.rankings,
+            },
+            pairs,
+            MeasurementRun {
+                id: "paired",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+    };
+    let before = result
+        .before
+        .iter()
+        .find(|v| v.value().sensor.0 == "sensor.spearman")
+        .unwrap();
+    let after = result
+        .after
+        .iter()
+        .find(|v| v.value().sensor.0 == "sensor.spearman")
+        .unwrap();
+    let pair = unclip_engine::ComparisonPair {
+        before: before.id().clone(),
+        after: after.id().clone(),
+    };
+    let compared = compare(std::slice::from_ref(&pair), true).unwrap();
+    assert_eq!(compared.measurements.before, result.before);
+    assert_eq!(compared.measurements.after, result.after);
+    assert_eq!(compared.comparison.deltas.len(), 2);
+    let profile = compared.comparison.profile.value();
+    assert_eq!(profile.pairs, vec![pair.clone()]);
+    assert_eq!(profile.unmatched_before.len(), result.before.len() - 1);
+    assert_eq!(profile.unmatched_after.len(), result.after.len() - 1);
+    for delta in &compared.comparison.deltas {
+        let mut expected = vec![pair.before.clone(), pair.after.clone()];
+        expected.sort();
+        assert_eq!(delta.provenance().inputs, expected);
+        assert!(compared
+            .comparison
+            .profile
+            .provenance()
+            .inputs
+            .contains(delta.id()));
+    }
+    let replay = compare(std::slice::from_ref(&pair), true).unwrap();
+    assert_eq!(replay.comparison.profile, compared.comparison.profile);
+    assert_eq!(replay.comparison.deltas, compared.comparison.deltas);
+    assert!(compare(&[], true).is_err());
+    assert!(compare(std::slice::from_ref(&pair), false).is_err());
+    assert!(compare(&[pair.clone(), pair], true).is_err());
+    assert!(compare(
+        &[unclip_engine::ComparisonPair {
+            before: DerivedId::new("missing"),
+            after: after.id().clone()
+        }],
+        true
+    )
+    .is_err());
+
     let wrong_identity =
         Tracked::from_recorded(DerivedId::new("other-baseline"), fixture.domain.clone());
     assert!(execute(&wrong_identity).is_err());

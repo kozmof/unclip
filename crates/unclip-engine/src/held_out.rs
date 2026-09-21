@@ -249,3 +249,56 @@ impl super::Engine {
         Ok(CounterfactualMeasurements { before, after })
     }
 }
+
+pub struct CounterfactualComparison {
+    pub measurements: CounterfactualMeasurements,
+    pub comparison: super::ProfileComparisonResult,
+}
+
+impl super::Engine {
+    /// Measure both domains and compare only caller-selected output identity pairs.
+    /// Unpaired measurements and unavailable comparator results remain explicit.
+    /// This is calculated evidence, not an experimental acceptance decision.
+    pub fn compare_counterfactual(
+        &self,
+        plan: &RunPlan,
+        inputs: CounterfactualMeasurementInputs<'_>,
+        pairs: &[super::ComparisonPair],
+        run: super::MeasurementRun<'_>,
+    ) -> Result<CounterfactualComparison> {
+        if plan.comparators.is_empty() || pairs.is_empty() {
+            return Err(invalid(
+                "counterfactual comparison requires selected comparators and explicit measurement pairs",
+            ));
+        }
+        let comparison_id = format!("{}/comparison", run.id);
+        let timestamp = run.timestamp.clone();
+        let params = run.params;
+        let measurements = self.measure_counterfactual(plan, inputs, run)?;
+        let before = measurements
+            .before
+            .iter()
+            .map(|value| Tracked::from_derived(value, value.value().clone()))
+            .collect::<Vec<_>>();
+        let after = measurements
+            .after
+            .iter()
+            .map(|value| Tracked::from_derived(value, value.value().clone()))
+            .collect::<Vec<_>>();
+        let comparison = self.compare_profiles(
+            plan,
+            &before,
+            &after,
+            pairs,
+            super::MeasurementRun {
+                id: &comparison_id,
+                timestamp,
+                params,
+            },
+        )?;
+        Ok(CounterfactualComparison {
+            measurements,
+            comparison,
+        })
+    }
+}
