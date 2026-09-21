@@ -58,6 +58,26 @@ struct WeightPattern {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CommunityPattern {
+    matching: String,
+    members: Vec<UnitId>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommunityEvidence {
+    structure: DerivedId,
+    community_index: usize,
+    result: unclip_measure::CommunityDetection,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommunitySelection {
+    metric: unclip_measure::PairwiseMetric,
+    minimum_samples: usize,
+    minimum_members: usize,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AtomicPattern {
     matching: String,
     observed_label: String,
@@ -148,6 +168,27 @@ impl super::Engine {
                 });
                 added_units.push(unit_id);
             }
+            CandidateKind::CompositeMeaning => {
+                let pattern: CommunityPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                if pattern.matching != "empirical_community" || pattern.members.len() < 2 || pattern.members.windows(2).any(|pair| pair[0] >= pair[1]) { return Err(invalid("community application requires at least two ordered unique members")); }
+                if pattern.members.iter().any(|id| !domain.units.contains_key(id)) { return Err(invalid("community member does not exist in baseline")); }
+                let evidence: CommunityEvidence = serde_json::from_value(proposal.value.get("evidence").ok_or_else(|| invalid("community candidate requires evidence"))?.clone()).map_err(invalid)?;
+                let selection: CommunitySelection = serde_json::from_value(proposal.value.get("selection").ok_or_else(|| invalid("community candidate requires selection parameters"))?.clone()).map_err(invalid)?;
+                super::structure_discovery::validate_community(&evidence.result)?;
+                if evidence.structure.0.is_empty() || evidence.result.communities.get(evidence.community_index) != Some(&pattern.members) || selection.minimum_samples < 2 || selection.minimum_members < 2 || evidence.result.metric != selection.metric || evidence.result.minimum_samples.get() < selection.minimum_samples || pattern.members.len() < selection.minimum_members { return Err(invalid("community candidate pattern and selection conflict with recorded evidence")); }
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                if domain.units.contains_key(&unit_id) { return Err(invalid("candidate unit identity already exists in the baseline")); }
+                temporary.units.insert(unit_id.clone(), Unit {
+                    id: unit_id.clone(), kind: UnitKind::CompositeMeaning, label: None,
+                    properties: BTreeMap::from([
+                        ("candidate_id".into(), PropertyValue::Text(candidate.id().0.clone())),
+                        ("candidate_pattern".into(), PropertyValue::Structured(pattern_value.clone())),
+                        ("candidate_evidence".into(), PropertyValue::Structured(serde_json::Value::Object(proposal.value.clone()))),
+                        ("members".into(), PropertyValue::Structured(serde_json::to_value(&pattern.members).map_err(invalid)?)),
+                    ]),
+                });
+                added_units.push(unit_id);
+            }
             CandidateKind::Relation => {
                 let pattern: RelationPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
                 if pattern.matching != "exact_directed_observed_relation" || pattern.source_label.trim().is_empty() || pattern.target_label.trim().is_empty() || pattern.relation_kind.trim().is_empty() { return Err(invalid("relation application requires an exact directed observed-label pattern")); }
@@ -185,7 +226,7 @@ impl super::Engine {
                 properties.insert(pattern.property.clone(), proposed.clone());
                 property_changes.push(PropertyChange { target: pattern.target, property: pattern.property, before: previous, after: proposed });
             }
-            _ => return Err(invalid("candidate application supports atomic, explicitly bound relation, and numeric-property weight proposals only")),
+            _ => return Err(invalid("candidate application supports atomic, empirical-community, explicitly bound relation, and numeric-property weight proposals only")),
         }
         let params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});
         let token = CalculationToken::from_harness(
@@ -193,7 +234,7 @@ impl super::Engine {
                 id: output_id,
                 producer: PluginId::new("experiment.apply-candidate"),
                 algorithm: "temporary_candidate_application".into(),
-                version: semver::Version::new(0, 3, 0),
+                version: semver::Version::new(0, 4, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,

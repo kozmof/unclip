@@ -75,7 +75,7 @@ fn selected<'a>(
     }
     Ok(structures)
 }
-fn validate_community(value: &CommunityDetection) -> Result<()> {
+pub(super) fn validate_community(value: &CommunityDetection) -> Result<()> {
     let valid_threshold = match value.metric {
         PairwiseMetric::Spearman | PairwiseMetric::Kendall => {
             (-1.0..=1.0).contains(&value.threshold)

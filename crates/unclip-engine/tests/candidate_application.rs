@@ -341,3 +341,105 @@ fn relation_application_requires_valid_bindings_and_rejects_existing_edges() {
         UnitId::new("other-source")
     );
 }
+
+fn community_proposal() -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::CompositeMeaning;
+    c.value=json!({
+        "pattern":{"matching":"empirical_community","members":["existing","target"]},
+        "evidence":{"structure":"community-result","community_index":0,"result":{"metric":"spearman","threshold":0.8,"minimum_samples":2,"communities":[["existing","target"]],"assessed_pairs":1,"qualifying_pairs":1,"unassessed":[]}},
+        "selection":{"metric":"spearman","minimum_samples":2,"minimum_members":2}
+    }).as_object().unwrap().clone();
+    c
+}
+#[test]
+fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
+    use unclip_engine::{CandidateInputs, MeasurementRun};
+    use unclip_epistemic::PluginId;
+    use unclip_plugin::{EngineProfile, PluginSelection};
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.community")],
+            ..Default::default()
+        })
+        .unwrap();
+    let template = community_proposal();
+    let structures = [Tracked::from_recorded(
+        DerivedId::new("community-result"),
+        unclip_measure::EmpiricalStructure {
+            kind: "communities".into(),
+            value: template.value["evidence"]["result"].clone(),
+        },
+    )];
+    let candidates = engine
+        .generate_candidates(
+            &plan,
+            CandidateInputs {
+                domain_version_id: &template.domain_version_id,
+                measurements: &[],
+                observations: &[],
+                structures: &structures,
+            },
+            MeasurementRun {
+                id: "generation",
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::from([(
+                    PluginId::new("generate.community"),
+                    json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}),
+                )]),
+            },
+        )
+        .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
+    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let result = engine
+        .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+        .unwrap();
+    assert_eq!(
+        DependencyCollector::default().read(&baseline),
+        &relation_domain()
+    );
+    assert_eq!(result.value().domain.units.len(), 3);
+    let unit = &result.value().domain.units[&result.value().added_units[0]];
+    assert_eq!(unit.kind, UnitKind::CompositeMeaning);
+    assert_eq!(unit.label, None);
+    assert_eq!(
+        unit.properties["members"],
+        PropertyValue::Structured(json!(["existing", "target"]))
+    );
+    assert_eq!(
+        unit.properties["candidate_evidence"],
+        PropertyValue::Structured(serde_json::Value::Object(
+            candidates[0].value().value.clone()
+        ))
+    );
+    assert!(result.value().added_relations.is_empty());
+    assert!(result.value().property_changes.is_empty());
+    assert_eq!(
+        result,
+        engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap()
+    );
+}
+#[test]
+fn community_application_requires_baseline_members_and_consistent_evidence() {
+    assert!(apply(domain(), community_proposal()).is_err());
+    for (field, key, value) in [
+        ("pattern", "members", json!(["existing", "existing"])),
+        ("evidence", "community_index", json!(1)),
+        ("evidence", "structure", json!("")),
+        ("selection", "metric", json!("kendall")),
+        ("selection", "minimum_samples", json!(3)),
+        ("selection", "minimum_members", json!(3)),
+    ] {
+        let mut c = community_proposal();
+        c.value[field][key] = value;
+        assert!(apply(relation_domain(), c).is_err());
+    }
+    let mut c = community_proposal();
+    c.value["evidence"]["result"]["qualifying_pairs"] = json!(0);
+    assert!(apply(relation_domain(), c).is_err());
+}
