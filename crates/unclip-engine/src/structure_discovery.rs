@@ -166,7 +166,7 @@ impl CandidateGenerator for CommunityCandidateGenerator {
         Ok(candidates)
     }
 }
-fn validate_spectral(value: &SpectralDecomposition) -> Result<()> {
+pub(super) fn validate_spectral(value: &SpectralDecomposition) -> Result<()> {
     let n = value.units.len();
     if n == 0
         || value.eigenpairs.len() != n

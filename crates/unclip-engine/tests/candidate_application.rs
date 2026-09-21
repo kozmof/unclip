@@ -443,3 +443,110 @@ fn community_application_requires_baseline_members_and_consistent_evidence() {
     c.value["evidence"]["result"]["qualifying_pairs"] = json!(0);
     assert!(apply(relation_domain(), c).is_err());
 }
+
+fn latent_proposal() -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::LatentAxis;
+    let q = std::f64::consts::FRAC_1_SQRT_2;
+    c.value=json!({"pattern":{"matching":"empirical_spectral_axis","units":["existing","target"],"eigenvalue":-1.0,"loadings":[q,-q]},"evidence":{"structure":"spectrum","eigenpair_index":1,"result":{"metric":"relative_rank_variance","units":["existing","target"],"eigenpairs":[{"eigenvalue":1.0,"loadings":[q,q]},{"eigenvalue":-1.0,"loadings":[q,-q]}],"minimum_cell_samples":4,"tolerance":1e-12,"sweeps":1}},"selection":{"metric":"relative_rank_variance","minimum_samples":2,"minimum_absolute_eigenvalue":0.5}}).as_object().unwrap().clone();
+    c
+}
+#[test]
+fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
+    use unclip_engine::{CandidateInputs, MeasurementRun};
+    use unclip_epistemic::PluginId;
+    use unclip_plugin::{EngineProfile, PluginSelection};
+    let template = latent_proposal();
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.latent-axis")],
+            ..Default::default()
+        })
+        .unwrap();
+    let structures = [Tracked::from_recorded(
+        DerivedId::new("spectrum"),
+        unclip_measure::EmpiricalStructure {
+            kind: "spectral".into(),
+            value: template.value["evidence"]["result"].clone(),
+        },
+    )];
+    let candidates = engine
+        .generate_candidates(
+            &plan,
+            CandidateInputs {
+                domain_version_id: &template.domain_version_id,
+                measurements: &[],
+                observations: &[],
+                structures: &structures,
+            },
+            MeasurementRun {
+                id: "generation",
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::from([(
+                    PluginId::new("generate.latent-axis"),
+                    template.value["selection"].clone(),
+                )]),
+            },
+        )
+        .unwrap();
+    assert_eq!(candidates.len(), 2);
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
+    for generated in candidates {
+        let candidate = Tracked::from_derived(&generated, generated.value().clone());
+        let result = engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap();
+        let unit = &result.value().domain.units[&result.value().added_units[0]];
+        assert_eq!(unit.kind, UnitKind::LatentAxis);
+        assert_eq!(unit.label, None);
+        assert_eq!(
+            unit.properties["eigenvalue"],
+            PropertyValue::Number(
+                generated.value().value["pattern"]["eigenvalue"]
+                    .as_f64()
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            unit.properties["loadings"],
+            PropertyValue::Structured(generated.value().value["pattern"]["loadings"].clone())
+        );
+        assert_eq!(
+            unit.properties["candidate_evidence"],
+            PropertyValue::Structured(serde_json::Value::Object(generated.value().value.clone()))
+        );
+        assert_eq!(
+            DependencyCollector::default().read(&baseline),
+            &relation_domain()
+        );
+        assert_eq!(
+            result,
+            engine
+                .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+                .unwrap()
+        );
+    }
+}
+#[test]
+fn latent_application_requires_existing_units_and_consistent_spectral_evidence() {
+    assert!(apply(domain(), latent_proposal()).is_err());
+    for (field, key, value) in [
+        ("pattern", "eigenvalue", json!(1.0)),
+        ("pattern", "loadings", json!([1.0, 0.0])),
+        ("pattern", "units", json!(["target", "existing"])),
+        ("evidence", "eigenpair_index", json!(2)),
+        ("evidence", "structure", json!("")),
+        ("selection", "metric", json!("spearman")),
+        ("selection", "minimum_samples", json!(5)),
+        ("selection", "minimum_absolute_eigenvalue", json!(2.0)),
+        ("selection", "minimum_absolute_eigenvalue", json!(0)),
+    ] {
+        let mut c = latent_proposal();
+        c.value[field][key] = value;
+        assert!(apply(relation_domain(), c).is_err());
+    }
+    let mut malformed = latent_proposal();
+    malformed.value["evidence"]["result"]["eigenpairs"][1]["loadings"] = json!([0.0, 0.0]);
+    assert!(apply(relation_domain(), malformed).is_err());
+}
