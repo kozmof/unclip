@@ -8,9 +8,17 @@ use unclip_epistemic::{
 use unclip_measure::Measurement;
 use unclip_plugin::{PluginError, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExperimentConstraint {
+    ConditionalDependency {
+        measurement: DerivedId,
+        left: unclip_domain::UnitId,
+        right: unclip_domain::UnitId,
+        conditioning: unclip_domain::UnitId,
+        minimum_samples: usize,
+        minimum_information: f64,
+    },
     MinimumSamples {
         measurement: DerivedId,
         minimum: usize,
@@ -22,19 +30,20 @@ pub enum ExperimentConstraint {
         maximum_property_changes: usize,
     },
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstraintStatus {
     Satisfied,
     Violated,
     Unavailable,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConstraintAssessment {
     pub constraint: ExperimentConstraint,
     pub status: ConstraintStatus,
     pub observed: BTreeMap<String, usize>,
+    pub reading: Option<unclip_measure::Reading>,
 }
 
 impl super::Engine {
@@ -75,9 +84,74 @@ impl super::Engine {
         }
         let mut sample_requirements = BTreeSet::new();
         let mut complexity_seen = false;
+        let mut conditional_seen = BTreeSet::new();
         let mut assessments = Vec::new();
         for constraint in constraints {
+            let mut reading = None;
             let (status, observed) = match constraint {
+                ExperimentConstraint::ConditionalDependency {
+                    measurement,
+                    left,
+                    right,
+                    conditioning,
+                    minimum_samples,
+                    minimum_information,
+                } => {
+                    if !conditional_seen.insert(measurement)
+                        || *minimum_samples < 2
+                        || !minimum_information.is_finite()
+                        || *minimum_information < 0.0
+                        || left.0.trim().is_empty()
+                        || right.0.trim().is_empty()
+                        || conditioning.0.trim().is_empty()
+                        || left == right
+                        || conditioning == left
+                        || conditioning == right
+                    {
+                        return Err(invalid("conditional requirements need distinct units, a finite nonnegative threshold and at least two samples"));
+                    }
+                    let input = selected.get(measurement).ok_or_else(|| {
+                        invalid("conditional requirement references an unselected measurement")
+                    })?;
+                    if input.sensor.0 != "sensor.conditional-mutual-information" {
+                        return Err(invalid("conditional dependency requires conditional mutual information evidence"));
+                    }
+                    reading = Some(input.reading.clone());
+                    let observed = input
+                        .sample_count
+                        .map(|count| BTreeMap::from([("sample_count".into(), count)]))
+                        .unwrap_or_default();
+                    let status = match &input.reading {
+                        unclip_measure::Reading::Value {
+                            value: unclip_measure::MeasurementValue::Scalar(value),
+                        } => {
+                            if !value.is_finite()
+                                || *value < 0.0
+                                || input.context.values.get("pair")
+                                    != Some(&serde_json::json!([left, right]))
+                                || input.context.values.get("conditioning_variables")
+                                    != Some(&serde_json::json!([conditioning]))
+                            {
+                                return Err(invalid("conditional evidence value or selected variable context does not match the requirement"));
+                            }
+                            match input.sample_count {
+                                None => ConstraintStatus::Unavailable,
+                                Some(count)
+                                    if count < *minimum_samples
+                                        || *value < *minimum_information =>
+                                {
+                                    ConstraintStatus::Violated
+                                }
+                                Some(_) => ConstraintStatus::Satisfied,
+                            }
+                        }
+                        unclip_measure::Reading::Value { .. } => {
+                            return Err(invalid("conditional evidence must be scalar"))
+                        }
+                        _ => ConstraintStatus::Unavailable,
+                    };
+                    (status, observed)
+                }
                 ExperimentConstraint::MinimumSamples {
                     measurement,
                     minimum,
@@ -134,6 +208,7 @@ impl super::Engine {
                 constraint: constraint.clone(),
                 status,
                 observed,
+                reading,
             });
         }
         let params = serde_json::json!({"constraints":constraints});
@@ -141,8 +216,8 @@ impl super::Engine {
             EmitMetadata {
                 id: output,
                 producer: PluginId::new("experiment.constraints"),
-                algorithm: "explicit_sample_and_edit_budgets".into(),
-                version: semver::Version::new(0, 1, 0),
+                algorithm: "explicit_evidence_constraints".into(),
+                version: semver::Version::new(0, 2, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,

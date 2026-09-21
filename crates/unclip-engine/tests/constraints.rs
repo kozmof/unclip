@@ -147,3 +147,81 @@ fn ambiguous_or_missing_requirements_fail() {
             .is_err());
     }
 }
+
+#[test]
+fn conditional_requirements_validate_context_counts_and_retained_readings() {
+    use unclip_measure::MeasurementValue;
+    let engine = Engine::with_builtins().unwrap();
+    let requirement = ExperimentConstraint::ConditionalDependency {
+        measurement: DerivedId::new("conditional"),
+        left: UnitId::new("a"),
+        right: UnitId::new("b"),
+        conditioning: UnitId::new("z"),
+        minimum_samples: 4,
+        minimum_information: 0.2,
+    };
+    let input = |value: f64, samples: Option<usize>, condition: &str| Measurement {
+        sensor: PluginId::new("sensor.conditional-mutual-information"),
+        sensor_version: semver::Version::new(0, 1, 0),
+        reading: Reading::Value {
+            value: MeasurementValue::Scalar(value),
+        },
+        confidence: None,
+        sample_count: samples,
+        context: MeasurementContext {
+            values: BTreeMap::from([
+                ("pair".into(), serde_json::json!(["a", "b"])),
+                (
+                    "conditioning_variables".into(),
+                    serde_json::json!([condition]),
+                ),
+            ]),
+        },
+    };
+    let assess = |value: Measurement, constraint: &ExperimentConstraint| {
+        engine.assess_experiment_constraints(
+            std::slice::from_ref(constraint),
+            &[Tracked::from_recorded(DerivedId::new("conditional"), value)],
+            &application(),
+            "run",
+            Timestamp::new("now"),
+        )
+    };
+    for (value, samples, status) in [
+        (0.2, Some(4), ConstraintStatus::Satisfied),
+        (0.1, Some(4), ConstraintStatus::Violated),
+        (0.4, Some(3), ConstraintStatus::Violated),
+        (0.4, None, ConstraintStatus::Unavailable),
+    ] {
+        let measurement = input(value, samples, "z");
+        let result = assess(measurement.clone(), &requirement).unwrap();
+        assert_eq!(result.value()[0].status, status);
+        assert_eq!(result.value()[0].reading, Some(measurement.reading));
+        assert_eq!(
+            result.provenance().inputs,
+            vec![DerivedId::new("conditional")]
+        );
+    }
+    assert!(assess(input(0.3, Some(4), "other"), &requirement).is_err());
+    assert!(assess(input(f64::NAN, Some(4), "z"), &requirement).is_err());
+    assert!(assess(input(-0.1, Some(4), "z"), &requirement).is_err());
+    let mut unavailable = input(0.3, Some(4), "z");
+    unavailable.reading = Reading::InsufficientEvidence { have: 1, need: 2 };
+    unavailable.context = MeasurementContext::default();
+    assert_eq!(
+        assess(unavailable, &requirement).unwrap().value()[0].status,
+        ConstraintStatus::Unavailable
+    );
+    let mut wrong_sensor = input(0.3, Some(4), "z");
+    wrong_sensor.sensor = PluginId::new("sensor.mutual-information");
+    assert!(assess(wrong_sensor, &requirement).is_err());
+    let mut invalid = requirement.clone();
+    if let ExperimentConstraint::ConditionalDependency {
+        minimum_information,
+        ..
+    } = &mut invalid
+    {
+        *minimum_information = f64::INFINITY;
+    }
+    assert!(assess(input(0.3, Some(4), "z"), &invalid).is_err());
+}
