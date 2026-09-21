@@ -135,3 +135,117 @@ impl super::Engine {
         Ok(results)
     }
 }
+
+/// Both sides use one frame, split, sensor plan and parameter map. Inference
+/// products are supplied separately because candidate application can change them.
+pub struct CounterfactualMeasurementInputs<'a> {
+    pub baseline: HeldOutInputs<'a>,
+    pub counterfactual: &'a Calculated<super::CounterfactualSnapshot>,
+    pub alignments: &'a [Tracked<Alignment>],
+    pub rankings: &'a [Tracked<PartialRanking>],
+}
+
+pub struct CounterfactualMeasurements {
+    pub before: Vec<Calculated<Measurement>>,
+    pub after: Vec<Calculated<Measurement>>,
+}
+
+impl super::Engine {
+    /// Run D and D+c on exactly the same recorded observations and frame.
+    /// New candidate units are not implicitly added to the frame or aligned.
+    pub fn measure_counterfactual(
+        &self,
+        plan: &RunPlan,
+        inputs: CounterfactualMeasurementInputs<'_>,
+        run: super::MeasurementRun<'_>,
+    ) -> Result<CounterfactualMeasurements> {
+        let dependencies = DependencyCollector::default();
+        let baseline = dependencies.read(inputs.baseline.baseline);
+        let snapshot = inputs.counterfactual.value();
+        let baseline_key = serde_json::to_string(&(&baseline.id.0, &baseline.version.0))
+            .map_err(|error| invalid(&error.to_string()))?;
+        if snapshot.baseline_domain_version_id != baseline_key
+            || snapshot.domain.id != baseline.id
+            || snapshot.domain.version == baseline.version
+            || !inputs
+                .counterfactual
+                .provenance()
+                .inputs
+                .contains(inputs.baseline.baseline.id())
+        {
+            return Err(invalid(
+                "counterfactual must derive from the selected baseline and have a distinct version",
+            ));
+        }
+        let counterfactual = Tracked::from_derived(inputs.counterfactual, snapshot.domain.clone());
+        if counterfactual.id() == inputs.baseline.baseline.id() {
+            return Err(invalid(
+                "counterfactual and baseline identities must differ",
+            ));
+        }
+        let before_id = format!("{}/before", run.id);
+        let after_id = format!("{}/after", run.id);
+        if run.id.trim().is_empty() {
+            return Err(invalid(
+                "counterfactual measurement requires a run identity",
+            ));
+        }
+        let after_inputs = HeldOutInputs {
+            baseline: &counterfactual,
+            frame: inputs.baseline.frame,
+            split: inputs.baseline.split,
+            alignments: inputs.alignments,
+            rankings: inputs.rankings,
+        };
+        // Check cross-side identity collisions as well as each side's local checks.
+        let mut input_ids = BTreeSet::from([
+            inputs.baseline.baseline.id().clone(),
+            counterfactual.id().clone(),
+            inputs.baseline.frame.id().clone(),
+            inputs.baseline.split.id().clone(),
+        ]);
+        input_ids.extend(
+            inputs
+                .baseline
+                .alignments
+                .iter()
+                .chain(inputs.alignments)
+                .map(|v| v.id().clone()),
+        );
+        input_ids.extend(
+            inputs
+                .baseline
+                .rankings
+                .iter()
+                .chain(inputs.rankings)
+                .map(|v| v.id().clone()),
+        );
+        let before = self.measure_held_out_baseline(
+            plan,
+            inputs.baseline,
+            super::MeasurementRun {
+                id: &before_id,
+                timestamp: run.timestamp.clone(),
+                params: run.params,
+            },
+        )?;
+        let after = self.measure_held_out_baseline(
+            plan,
+            after_inputs,
+            super::MeasurementRun {
+                id: &after_id,
+                timestamp: run.timestamp,
+                params: run.params,
+            },
+        )?;
+        let mut output_ids = BTreeSet::new();
+        for result in before.iter().chain(&after) {
+            if input_ids.contains(result.id()) || !output_ids.insert(result.id().clone()) {
+                return Err(invalid(
+                    "counterfactual measurement output identity collides with an input or output",
+                ));
+            }
+        }
+        Ok(CounterfactualMeasurements { before, after })
+    }
+}

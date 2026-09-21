@@ -1551,3 +1551,101 @@ fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() 
         )
         .is_err());
 }
+
+#[test]
+fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance() {
+    use unclip_domain::{CandidateKind, CandidateProposal};
+    use unclip_engine::{CounterfactualMeasurementInputs, HeldOutInputs};
+    let fixture = fixture();
+    let inputs = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&profile()).unwrap();
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
+    let frame = Tracked::from_recorded(DerivedId::new("frame"), fixture.frame.clone());
+    let selected = engine
+        .select_observations(
+            &inputs.observations,
+            &[],
+            &fixture
+                .observations
+                .iter()
+                .map(|o| o.id.clone())
+                .collect::<Vec<_>>(),
+            "experiment",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    let split = Tracked::from_derived(&selected, selected.value().clone());
+    let proposal = Tracked::from_recorded(DerivedId::new("candidate"), CandidateProposal {
+        domain_version_id: serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap(),
+        kind: CandidateKind::AtomicMeaning,
+        value: serde_json::json!({"pattern":{"matching":"exact_observed_label","observed_label":"new"}}).as_object().unwrap().clone(),
+    });
+    let candidate = engine
+        .apply_candidate(&baseline, &proposal, "application", Timestamp::new("now"))
+        .unwrap();
+    let params = BTreeMap::new();
+    let execute = |domain: &Tracked<DomainSnapshot>| {
+        engine.measure_counterfactual(
+            &plan,
+            CounterfactualMeasurementInputs {
+                baseline: HeldOutInputs {
+                    baseline: domain,
+                    frame: &frame,
+                    split: &split,
+                    alignments: &inputs.alignments,
+                    rankings: &inputs.rankings,
+                },
+                counterfactual: &candidate,
+                alignments: &inputs.alignments,
+                rankings: &inputs.rankings,
+            },
+            MeasurementRun {
+                id: "paired",
+                timestamp: Timestamp::new("now"),
+                params: &params,
+            },
+        )
+    };
+    let result = execute(&baseline).unwrap();
+    assert!(!result.before.is_empty());
+    assert_eq!(result.before.len(), result.after.len());
+    for (before, after) in result.before.iter().zip(&result.after) {
+        // An unaligned candidate outside this fixed frame must not invent improvement.
+        assert_eq!(before.value(), after.value());
+        assert_ne!(before.id(), after.id());
+        assert!(before.provenance().inputs.contains(baseline.id()));
+        assert!(after.provenance().inputs.contains(candidate.id()));
+        assert!(!before.provenance().inputs.contains(candidate.id()));
+        assert_eq!(
+            before.provenance().domain_version,
+            Some(fixture.domain.version.clone())
+        );
+        assert_eq!(
+            after.provenance().domain_version,
+            Some(candidate.value().domain.version.clone())
+        );
+        for id in [frame.id(), split.id()] {
+            assert!(before.provenance().inputs.contains(id));
+            assert!(after.provenance().inputs.contains(id));
+        }
+        assert_eq!(before.provenance().params, after.provenance().params);
+    }
+    let replay = execute(&baseline).unwrap();
+    assert_eq!(result.before, replay.before);
+    assert_eq!(result.after, replay.after);
+    let wrong_identity =
+        Tracked::from_recorded(DerivedId::new("other-baseline"), fixture.domain.clone());
+    assert!(execute(&wrong_identity).is_err());
+    let mut wrong_version = fixture.domain.clone();
+    wrong_version.version = DomainVersion::new("2");
+    assert!(execute(&Tracked::from_recorded(
+        DerivedId::new("baseline"),
+        wrong_version
+    ))
+    .is_err());
+    assert_eq!(
+        DependencyCollector::default().read(&baseline),
+        &fixture.domain
+    );
+}
