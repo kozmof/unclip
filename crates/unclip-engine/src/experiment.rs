@@ -19,6 +19,8 @@ pub struct CounterfactualEvidence {
     pub comparison: DerivedId,
     pub delta_profile: super::DeltaProfile,
     pub null_results: Vec<NullEvidence>,
+    pub constraint_assessment: Option<DerivedId>,
+    pub constraints: Vec<super::ConstraintAssessment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,17 +35,19 @@ pub struct CounterfactualExperiment {
     pub evidence: Experimental<CounterfactualEvidence>,
     pub execution: super::CounterfactualComparison,
     pub null_results: Vec<Calculated<unclip_measure::Reading>>,
+    pub constraints: Option<Calculated<Vec<super::ConstraintAssessment>>>,
 }
 
 impl super::Engine {
     /// Emit evidence of an executed comparison, not candidate acceptance or promotion.
-    /// Nulls use held-out observations and baseline rankings; constraints remain separate.
+    /// Nulls use held-out observations and baseline rankings; constraints retain independent statuses.
     pub fn run_counterfactual_experiment(
         &self,
         plan: &RunPlan,
         inputs: super::CounterfactualMeasurementInputs<'_>,
         candidate: &Tracked<unclip_domain::CandidateProposal>,
         pairs: &[super::ComparisonPair],
+        constraints: &[super::ExperimentConstraint],
         run: super::MeasurementRun<'_>,
     ) -> Result<CounterfactualExperiment> {
         let dependencies = DependencyCollector::default();
@@ -86,6 +90,8 @@ impl super::Engine {
             counterfactual: applied.id().clone(),
             candidate: snapshot.candidate.clone(),
             null_results: vec![],
+            constraint_assessment: None,
+            constraints: vec![],
             before: vec![],
             after: vec![],
             comparison: DerivedId::new(format!("{}/comparison/profile", run.id)),
@@ -118,6 +124,7 @@ impl super::Engine {
             domain: Some(inputs.baseline.baseline),
         };
         let null_id = format!("{}/nulls", run.id);
+        let constraint_run_id = run.id.to_string();
         let null_run = super::MeasurementRun {
             id: &null_id,
             timestamp: timestamp.clone(),
@@ -157,19 +164,46 @@ impl super::Engine {
                     .clone(),
             });
         }
+        let assessments = if constraints.is_empty() {
+            None
+        } else {
+            let measurements = execution
+                .measurements
+                .before
+                .iter()
+                .chain(&execution.measurements.after)
+                .map(|value| Tracked::from_derived(value, value.value().clone()))
+                .collect::<Vec<_>>();
+            let result = self.assess_experiment_constraints(
+                constraints,
+                &measurements,
+                &applied,
+                &constraint_run_id,
+                timestamp.clone(),
+            )?;
+            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+                return Err(PluginError::Message(
+                    "constraint output identity collides with experimental evidence".into(),
+                ));
+            }
+            evidence.constraint_assessment = Some(result.id().clone());
+            evidence.constraints = dependencies
+                .read(&Tracked::from_derived(&result, result.value().clone()))
+                .clone();
+            Some(result)
+        };
         if dependencies.snapshot().contains(&id) || evidence.candidate == id {
             return Err(PluginError::Message(
                 "experimental output identity collides with an input or intermediate result".into(),
             ));
         }
-        let params =
-            serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs});
+        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints});
         let token = ExperimentToken::from_harness(
             EmitMetadata {
                 id,
                 producer: PluginId::new("experiment.counterfactual"),
                 algorithm: "held_out_counterfactual_comparison".into(),
-                version: semver::Version::new(0, 2, 0),
+                version: semver::Version::new(0, 3, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
@@ -184,6 +218,7 @@ impl super::Engine {
             evidence: token.emit(evidence),
             execution,
             null_results,
+            constraints: assessments,
         })
     }
 }

@@ -1667,6 +1667,17 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             },
             &proposal,
             pairs,
+            &[
+                unclip_engine::ExperimentConstraint::MinimumSamples {
+                    measurement: DerivedId::new("paired/before/sensor.spearman"),
+                    minimum: 100,
+                },
+                unclip_engine::ExperimentConstraint::ComplexityBudget {
+                    maximum_added_units: 1,
+                    maximum_added_relations: 0,
+                    maximum_property_changes: 0,
+                },
+            ],
             MeasurementRun {
                 id: "paired",
                 timestamp: Timestamp::new("now"),
@@ -1699,6 +1710,21 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         &DerivedId::new("paired/experiment")
     );
     let evidence = experiment.evidence.value();
+    let assessed = experiment.constraints.as_ref().unwrap();
+    assert_eq!(evidence.constraint_assessment.as_ref(), Some(assessed.id()));
+    assert_eq!(&evidence.constraints, assessed.value());
+    assert_eq!(
+        evidence.constraints[0].status,
+        unclip_engine::ConstraintStatus::Violated
+    );
+    assert_eq!(
+        evidence.constraints[1].status,
+        unclip_engine::ConstraintStatus::Satisfied
+    );
+    assert_eq!(
+        assessed.provenance().operation,
+        unclip_epistemic::Operation::Calculated
+    );
     assert_eq!(evidence.candidate, *proposal.id());
     assert_eq!(evidence.delta_profile, *compared.comparison.profile.value());
     assert_eq!(
@@ -1749,6 +1775,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         compared.comparison.profile.id().clone(),
     ]);
     expected.insert(proposal.id().clone());
+    expected.insert(assessed.id().clone());
     expected.extend(experiment.null_results.iter().map(|v| v.id().clone()));
     expected.extend(inputs.observations.iter().map(|v| v.id().clone()));
     expected.extend(inputs.alignments.iter().map(|v| v.id().clone()));
