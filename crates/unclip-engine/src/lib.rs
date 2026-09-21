@@ -19,10 +19,12 @@ pub use relation_discovery::MissingRelationGenerator;
 
 mod candidate_application;
 mod comparison;
+mod constraints;
 mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;
 mod experiment;
+pub use constraints::{ConstraintAssessment, ConstraintStatus, ExperimentConstraint};
 mod graph_comparison;
 mod held_out;
 pub use experiment::{CounterfactualEvidence, CounterfactualExperiment, NullEvidence};
