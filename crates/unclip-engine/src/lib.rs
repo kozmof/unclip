@@ -20,6 +20,8 @@ pub use relation_discovery::MissingRelationGenerator;
 mod candidate_application;
 mod comparison;
 mod constraints;
+mod transfer_constraint;
+pub use transfer_constraint::TransferAssessment;
 mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;

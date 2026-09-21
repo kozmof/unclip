@@ -225,3 +225,69 @@ fn conditional_requirements_validate_context_counts_and_retained_readings() {
     }
     assert!(assess(input(0.3, Some(4), "z"), &invalid).is_err());
 }
+
+#[test]
+fn scalar_transfer_requires_disjoint_comparable_evidence_and_preserves_failures() {
+    use unclip_measure::MeasurementValue;
+    let engine = Engine::with_builtins().unwrap();
+    let requirement = ExperimentConstraint::ScalarTransfer {
+        source: DerivedId::new("s"),
+        target: DerivedId::new("t"),
+        minimum_samples: 2,
+        maximum_absolute_difference: 0.25,
+    };
+    let input = |id: &str, observations: &[&str], value: f64, samples: Option<usize>| {
+        Tracked::from_recorded(
+            DerivedId::new(id),
+            Measurement {
+                sensor: PluginId::new("fixture"),
+                sensor_version: semver::Version::new(1, 0, 0),
+                reading: Reading::Value {
+                    value: MeasurementValue::Scalar(value),
+                },
+                confidence: None,
+                sample_count: samples,
+                context: MeasurementContext {
+                    values: BTreeMap::from([
+                        ("observations".into(), serde_json::json!(observations)),
+                        ("pair".into(), serde_json::json!(["a", "b"])),
+                    ]),
+                },
+            },
+        )
+    };
+    let assess = |target| {
+        engine.assess_experiment_constraints(
+            std::slice::from_ref(&requirement),
+            &[input("s", &["a", "b"], 0.5, Some(2)), target],
+            &application(),
+            "run",
+            Timestamp::new("now"),
+        )
+    };
+    for (value, count, expected) in [
+        (0.75, Some(2), ConstraintStatus::Satisfied),
+        (0.8, Some(2), ConstraintStatus::Violated),
+        (0.5, Some(1), ConstraintStatus::Violated),
+        (0.5, None, ConstraintStatus::Unavailable),
+    ] {
+        let result = assess(input("t", &["c", "d"], value, count)).unwrap();
+        assert_eq!(result.value()[0].status, expected);
+        assert_eq!(
+            result.value()[0]
+                .transfer
+                .as_ref()
+                .unwrap()
+                .absolute_difference,
+            Some((value - 0.5).abs())
+        );
+        assert_eq!(
+            result.provenance().inputs,
+            vec![DerivedId::new("s"), DerivedId::new("t")]
+        );
+    }
+    assert!(assess(input("t", &["b", "c"], 0.5, Some(2))).is_err());
+    assert!(assess(input("t", &["c", "c"], 0.5, Some(2))).is_err());
+    assert!(assess(input("t", &["c", "d"], 0.5, Some(3))).is_err());
+    assert!(assess(input("t", &["c", "d"], f64::NAN, Some(2))).is_err());
+}

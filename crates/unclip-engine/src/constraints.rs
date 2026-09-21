@@ -11,6 +11,12 @@ use unclip_plugin::{PluginError, Result};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExperimentConstraint {
+    ScalarTransfer {
+        source: DerivedId,
+        target: DerivedId,
+        minimum_samples: usize,
+        maximum_absolute_difference: f64,
+    },
     ConditionalDependency {
         measurement: DerivedId,
         left: unclip_domain::UnitId,
@@ -44,6 +50,7 @@ pub struct ConstraintAssessment {
     pub status: ConstraintStatus,
     pub observed: BTreeMap<String, usize>,
     pub reading: Option<unclip_measure::Reading>,
+    pub transfer: Option<super::TransferAssessment>,
 }
 
 impl super::Engine {
@@ -85,10 +92,45 @@ impl super::Engine {
         let mut sample_requirements = BTreeSet::new();
         let mut complexity_seen = false;
         let mut conditional_seen = BTreeSet::new();
+        let mut transfer_seen = BTreeSet::new();
         let mut assessments = Vec::new();
         for constraint in constraints {
             let mut reading = None;
+            let mut transfer = None;
             let (status, observed) = match constraint {
+                ExperimentConstraint::ScalarTransfer {
+                    source,
+                    target,
+                    minimum_samples,
+                    maximum_absolute_difference,
+                } => {
+                    if source == target || !transfer_seen.insert((source, target)) {
+                        return Err(invalid(
+                            "transfer requires distinct identities and unique directed pairs",
+                        ));
+                    }
+                    let source = selected
+                        .get(source)
+                        .ok_or_else(|| invalid("transfer source is not selected"))?;
+                    let target = selected
+                        .get(target)
+                        .ok_or_else(|| invalid("transfer target is not selected"))?;
+                    let (status, result) = super::transfer_constraint::assess(
+                        source,
+                        target,
+                        *minimum_samples,
+                        *maximum_absolute_difference,
+                    )?;
+                    let mut observed = BTreeMap::new();
+                    if let Some(count) = source.sample_count {
+                        observed.insert("source_samples".into(), count);
+                    }
+                    if let Some(count) = target.sample_count {
+                        observed.insert("target_samples".into(), count);
+                    }
+                    transfer = Some(result);
+                    (status, observed)
+                }
                 ExperimentConstraint::ConditionalDependency {
                     measurement,
                     left,
@@ -209,6 +251,7 @@ impl super::Engine {
                 status,
                 observed,
                 reading,
+                transfer,
             });
         }
         let params = serde_json::json!({"constraints":constraints});
@@ -217,7 +260,7 @@ impl super::Engine {
                 id: output,
                 producer: PluginId::new("experiment.constraints"),
                 algorithm: "explicit_evidence_constraints".into(),
-                version: semver::Version::new(0, 2, 0),
+                version: semver::Version::new(0, 3, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
