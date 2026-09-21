@@ -380,3 +380,195 @@ fn ranking_comparators_preserve_sparse_and_unsupported_shapes() {
         .is_err());
     }
 }
+
+fn distribution(values: &[(&str, f64)]) -> Reading {
+    Reading::Value {
+        value: MeasurementValue::Distribution(
+            values
+                .iter()
+                .map(|(name, value)| ((*name).into(), *value))
+                .collect(),
+        ),
+    }
+}
+fn distribution_payload(results: &[Calculated<Delta>]) -> unclip_engine::DistributionComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn jensen_shannon_retains_categories_and_explicit_normalization() {
+    use unclip_engine::DistributionComparison;
+    for (a, b, expected) in [
+        (vec![("a", 1.0)], vec![("a", 1.0)], 0.0),
+        (vec![("a", 1.0)], vec![("b", 1.0)], 1.0),
+        (
+            vec![("b", 0.5), ("a", 0.5)],
+            vec![("a", 0.5), ("b", 0.5)],
+            0.0,
+        ),
+    ] {
+        let result = compare_rank(
+            "compare.jensen-shannon",
+            distribution(&a),
+            distribution(&b),
+            json!({"normalization":"probability"}),
+        )
+        .unwrap();
+        let DistributionComparison::Value {
+            divergence_bits, ..
+        } = distribution_payload(&result)
+        else {
+            panic!()
+        };
+        assert_eq!(divergence_bits, expected);
+        assert_eq!(
+            result[0].provenance().inputs,
+            vec![DerivedId::new("after"), DerivedId::new("before")]
+        );
+        assert_eq!(
+            compare_rank(
+                "compare.jensen-shannon",
+                distribution(&a),
+                distribution(&b),
+                json!({"normalization":"probability"})
+            )
+            .unwrap(),
+            result
+        );
+    }
+    let result = compare_rank(
+        "compare.jensen-shannon",
+        distribution(&[("b", 3.0), ("a", 1.0), ("zero", 0.0)]),
+        distribution(&[("a", 2.0), ("b", 6.0)]),
+        json!({"normalization":"mass"}),
+    )
+    .unwrap();
+    let DistributionComparison::Value {
+        divergence_bits,
+        categories,
+        before_total,
+        after_total,
+        before_probabilities,
+        after_probabilities,
+        ..
+    } = distribution_payload(&result)
+    else {
+        panic!()
+    };
+    assert_eq!(divergence_bits, 0.0);
+    assert_eq!(categories, vec!["a", "b", "zero"]);
+    assert_eq!(before_total, 4.0);
+    assert_eq!(after_total, 8.0);
+    assert_eq!(before_probabilities, vec![0.25, 0.75, 0.0]);
+    assert_eq!(after_probabilities, before_probabilities);
+    let reordered = compare_rank(
+        "compare.jensen-shannon",
+        distribution(&[("zero", 0.0), ("a", 1.0), ("b", 3.0)]),
+        distribution(&[("b", 6.0), ("a", 2.0)]),
+        json!({"normalization":"mass"}),
+    )
+    .unwrap();
+    assert_eq!(result, reordered);
+}
+#[test]
+fn distribution_divergence_is_symmetric_and_distinguishes_sparse_from_zero() {
+    use unclip_engine::DistributionComparison;
+    let a = distribution(&[("a", 0.25), ("b", 0.75)]);
+    let b = distribution(&[("a", 0.75), ("b", 0.25)]);
+    let score = |a: Reading, b: Reading| {
+        let results = compare_rank(
+            "compare.jensen-shannon",
+            a,
+            b,
+            json!({"normalization":"probability"}),
+        )
+        .unwrap();
+        let DistributionComparison::Value {
+            divergence_bits, ..
+        } = distribution_payload(&results)
+        else {
+            panic!()
+        };
+        divergence_bits
+    };
+    let forward = score(a.clone(), b.clone());
+    assert!((forward - 0.18872187554086717).abs() < 1e-14);
+    assert_eq!(forward, score(b, a));
+    for a in [
+        distribution(&[]),
+        distribution(&[("a", 0.0)]),
+        Reading::NotMeasured,
+        Reading::InsufficientEvidence { have: 0, need: 2 },
+    ] {
+        let result = compare_rank(
+            "compare.jensen-shannon",
+            a,
+            distribution(&[("a", 1.0)]),
+            json!({"normalization":"mass"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            distribution_payload(&result),
+            DistributionComparison::Unavailable { .. }
+        ));
+    }
+    let result = compare_rank(
+        "compare.jensen-shannon",
+        scalar(1.0),
+        distribution(&[("a", 1.0)]),
+        json!({"normalization":"mass"}),
+    )
+    .unwrap();
+    assert!(matches!(
+        distribution_payload(&result),
+        DistributionComparison::NotApplicable { .. }
+    ));
+    assert_eq!(
+        score(
+            distribution(&[("tiny", f64::from_bits(1)), ("a", 1.0)]),
+            distribution(&[("a", 1.0)])
+        ),
+        0.0
+    );
+}
+#[test]
+fn invalid_distribution_data_and_implicit_normalization_are_rejected() {
+    for bad in [
+        vec![("a", -1.0)],
+        vec![("a", f64::NAN)],
+        vec![("a", f64::INFINITY)],
+        vec![("a", f64::MAX), ("b", f64::MAX)],
+        vec![("a", 1.0), ("a", 0.0)],
+        vec![("", 1.0)],
+    ] {
+        assert!(compare_rank(
+            "compare.jensen-shannon",
+            distribution(&bad),
+            distribution(&[("a", 1.0)]),
+            json!({"normalization":"mass"})
+        )
+        .is_err());
+    }
+    assert!(compare_rank(
+        "compare.jensen-shannon",
+        distribution(&[("a", 2.0)]),
+        distribution(&[("a", 1.0)]),
+        json!({"normalization":"probability"})
+    )
+    .is_err());
+    for params in [
+        json!({}),
+        json!({"normalization":"automatic"}),
+        json!({"normalization":"mass","smoothing":1}),
+    ] {
+        assert!(compare_rank(
+            "compare.jensen-shannon",
+            distribution(&[("a", 1.0)]),
+            distribution(&[("a", 1.0)]),
+            params
+        )
+        .is_err());
+    }
+}

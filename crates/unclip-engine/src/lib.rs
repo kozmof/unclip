@@ -18,7 +18,11 @@ mod relation_discovery;
 pub use relation_discovery::MissingRelationGenerator;
 
 mod comparison;
+mod distribution_comparison;
 mod ranking_comparison;
+pub use distribution_comparison::{
+    DistributionComparison, DistributionNormalization, JensenShannonComparator,
+};
 pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
 mod context_null;
 mod discovery;
@@ -58,6 +62,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_comparator(std::sync::Arc::new(ScalarDifferenceComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(KendallComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(RboComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(JensenShannonComparator::default()))?;
     registry.register_generator(std::sync::Arc::new(PersistentResidualGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(MissingRelationGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(RecurringMotifGenerator::default()))?;
@@ -540,6 +545,7 @@ mod tests {
         assert_eq!(
             comparators,
             vec![
+                "compare.jensen-shannon",
                 "compare.kendall",
                 "compare.rbo",
                 "compare.scalar-difference"

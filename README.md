@@ -348,7 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Distribution and other comparator families,
+ensure comparable coordinate frames. Matrix and other comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
@@ -365,6 +365,20 @@ explicit and are never filled. RBO reports similarity, whereas Kendall reports
 distance. Ties, unresolved identities, unequal RBO depths, and incompatible
 Kendall unit sets produce explicit unsupported results. Empty evidence remains
 unavailable; malformed repeated or overlapping rank identities are errors.
+
+`compare.jensen-shannon` compares named distributions with explicit
+`{normalization: probability}` or `{normalization: mass}` parameters. Probability
+inputs must sum to one within 1e-12; mass inputs are normalized by their totals.
+Accepted probability totals are also normalized to remove rounding error. Category
+names define the shared support; absent categories contribute zero mass, and
+explicit zero categories remain visible. The typed `DistributionComparison` delta
+retains sorted categories, normalized probabilities, original totals, and symmetric
+Jensen–Shannon divergence in bits (0 for identical distributions, 1 for disjoint
+support). No transport geometry or smoothing is inferred.
+
+Empty or zero-total distributions are unavailable. Negative or nonfinite weights,
+duplicate or empty categories, and overflowing totals are errors. Sparse readings
+remain explicit. Sensor, version, and context compatibility checks still apply.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.
