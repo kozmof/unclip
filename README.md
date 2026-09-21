@@ -348,7 +348,7 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Partition and other comparator families,
+ensure comparable coordinate frames. Event and graph comparator families,
 profile-wide pairing, and experiment orchestration remain pending.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
@@ -400,6 +400,15 @@ Missing cells produce an unavailable result, and failure to converge is an error
 This compares spectra, not matched factors or loading distances: different
 matrices can have identical spectra, and repeated eigenspaces need not have
 unique bases. No aggregate spectral score is computed.
+
+`compare.partition-rand` takes empty parameters and compares partitions of the
+same member set. Its typed `PartitionComparison` delta retains canonicalized
+groups and counts of pairs together in both, separate in both, split, or merged.
+Rand similarity is the fraction together or separate in both; it is not adjusted
+for chance. Group and member order do not affect the result. Duplicate members,
+overlapped groups, empty group entries, and differing member sets are errors.
+Empty or singleton partitions are unavailable because they contain no comparable
+pairs. No missing membership or shared-subset restriction is inferred.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

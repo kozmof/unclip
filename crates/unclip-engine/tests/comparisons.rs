@@ -908,3 +908,137 @@ fn spectrum_never_returns_an_unconverged_partial_result() {
     .unwrap_err();
     assert!(error.to_string().contains("did not converge"));
 }
+
+fn partition(groups: &[&[&str]]) -> Reading {
+    Reading::Value {
+        value: MeasurementValue::Partition(
+            groups
+                .iter()
+                .map(|group| group.iter().map(|s| (*s).into()).collect())
+                .collect(),
+        ),
+    }
+}
+fn partition_payload(results: &[Calculated<Delta>]) -> unclip_engine::PartitionComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!()
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+#[test]
+fn partition_similarity_retains_directional_counts_and_ignores_group_order() {
+    use unclip_engine::PartitionComparison;
+    let a = partition(&[&["a", "b"], &["c", "d"]]);
+    let b = partition(&[&["a", "c"], &["b", "d"]]);
+    let results = compare_rank("compare.partition-rand", a.clone(), b.clone(), json!({})).unwrap();
+    let PartitionComparison::Value {
+        rand_similarity,
+        pairs,
+        together_in_both,
+        separate_in_both,
+        split_pairs,
+        merged_pairs,
+        ..
+    } = partition_payload(&results)
+    else {
+        panic!()
+    };
+    assert_eq!(pairs, 6);
+    assert_eq!(rand_similarity, 1.0 / 3.0);
+    assert_eq!(together_in_both, 0);
+    assert_eq!(separate_in_both, 2);
+    assert_eq!(split_pairs, 2);
+    assert_eq!(merged_pairs, 2);
+    assert_eq!(
+        results[0].provenance().inputs,
+        vec![DerivedId::new("after"), DerivedId::new("before")]
+    );
+    let reordered = compare_rank(
+        "compare.partition-rand",
+        partition(&[&["d", "c"], &["b", "a"]]),
+        partition(&[&["d", "b"], &["c", "a"]]),
+        json!({}),
+    )
+    .unwrap();
+    assert_eq!(results, reordered);
+    let same = compare_rank("compare.partition-rand", a.clone(), a, json!({})).unwrap();
+    assert!(matches!(
+        partition_payload(&same),
+        PartitionComparison::Value {
+            rand_similarity: 1.0,
+            ..
+        }
+    ));
+    let split = compare_rank(
+        "compare.partition-rand",
+        partition(&[&["a", "b", "c"]]),
+        partition(&[&["a"], &["b"], &["c"]]),
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        partition_payload(&split),
+        PartitionComparison::Value {
+            rand_similarity: 0.0,
+            split_pairs: 3,
+            merged_pairs: 0,
+            ..
+        }
+    ));
+    let merged = compare_rank(
+        "compare.partition-rand",
+        partition(&[&["a"], &["b"], &["c"]]),
+        partition(&[&["a", "b", "c"]]),
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        partition_payload(&merged),
+        PartitionComparison::Value {
+            rand_similarity: 0.0,
+            split_pairs: 0,
+            merged_pairs: 3,
+            ..
+        }
+    ));
+}
+#[test]
+fn partition_comparison_rejects_overlap_and_does_not_infer_missing_members() {
+    use unclip_engine::PartitionComparison;
+    let good = partition(&[&["a", "b"]]);
+    for bad in [
+        partition(&[&[]]),
+        partition(&[&["a", "a"]]),
+        partition(&[&["a"], &["a", "b"]]),
+        partition(&[&[" "]]),
+        partition(&[&["a", "c"]]),
+    ] {
+        assert!(compare_rank("compare.partition-rand", good.clone(), bad, json!({})).is_err());
+    }
+    for sparse in [partition(&[]), partition(&[&["a"]]), Reading::NotMeasured] {
+        let result =
+            compare_rank("compare.partition-rand", sparse.clone(), sparse, json!({})).unwrap();
+        assert!(matches!(
+            partition_payload(&result),
+            PartitionComparison::Unavailable { .. }
+        ));
+    }
+    let result = compare_rank(
+        "compare.partition-rand",
+        good.clone(),
+        scalar(1.0),
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        partition_payload(&result),
+        PartitionComparison::NotApplicable { .. }
+    ));
+    assert!(compare_rank(
+        "compare.partition-rand",
+        good.clone(),
+        good,
+        json!({"intersection_only":true})
+    )
+    .is_err());
+}
