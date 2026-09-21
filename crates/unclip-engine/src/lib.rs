@@ -22,8 +22,10 @@ mod comparison;
 mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;
+mod experiment;
 mod graph_comparison;
 mod held_out;
+pub use experiment::{CounterfactualEvidence, CounterfactualExperiment};
 mod motif_application;
 mod observation_selection;
 pub use held_out::{

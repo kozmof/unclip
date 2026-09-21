@@ -1647,7 +1647,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             PluginId::new("compare.pairwise-matrix"),
             serde_json::json!({"minimum_samples":2}),
         )]);
-        engine.compare_counterfactual(
+        engine.run_counterfactual_experiment(
             &plan,
             CounterfactualMeasurementInputs {
                 baseline: HeldOutInputs {
@@ -1683,7 +1683,65 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         before: before.id().clone(),
         after: after.id().clone(),
     };
-    let compared = compare(std::slice::from_ref(&pair), true).unwrap();
+    let experiment = compare(std::slice::from_ref(&pair), true).unwrap();
+    let compared = &experiment.execution;
+    assert_eq!(
+        experiment.evidence.provenance().operation,
+        unclip_epistemic::Operation::Experimental
+    );
+    assert_eq!(
+        experiment.evidence.id(),
+        &DerivedId::new("paired/experiment")
+    );
+    let evidence = experiment.evidence.value();
+    assert_eq!(evidence.candidate, *proposal.id());
+    assert_eq!(evidence.delta_profile, *compared.comparison.profile.value());
+    assert_eq!(
+        evidence.before,
+        result
+            .before
+            .iter()
+            .map(|v| v.id().clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        evidence.after,
+        result
+            .after
+            .iter()
+            .map(|v| v.id().clone())
+            .collect::<Vec<_>>()
+    );
+    let mut expected = std::collections::BTreeSet::from([
+        baseline.id().clone(),
+        frame.id().clone(),
+        split.id().clone(),
+        candidate.id().clone(),
+        compared.comparison.profile.id().clone(),
+    ]);
+    expected.extend(inputs.observations.iter().map(|v| v.id().clone()));
+    expected.extend(inputs.alignments.iter().map(|v| v.id().clone()));
+    expected.extend(inputs.rankings.iter().map(|v| v.id().clone()));
+    expected.extend(
+        compared
+            .measurements
+            .before
+            .iter()
+            .chain(&compared.measurements.after)
+            .map(|v| v.id().clone()),
+    );
+    expected.extend(compared.comparison.deltas.iter().map(|v| v.id().clone()));
+    assert_eq!(
+        experiment.evidence.provenance().inputs,
+        expected.into_iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        experiment.evidence.provenance().params_hash,
+        hash_params(&experiment.evidence.provenance().params)
+    );
+    let restored: unclip_engine::CounterfactualEvidence =
+        serde_json::from_value(serde_json::to_value(evidence).unwrap()).unwrap();
+    assert_eq!(&restored, evidence);
     assert_eq!(compared.measurements.before, result.before);
     assert_eq!(compared.measurements.after, result.after);
     assert_eq!(compared.comparison.deltas.len(), 2);
@@ -1702,7 +1760,9 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             .inputs
             .contains(delta.id()));
     }
-    let replay = compare(std::slice::from_ref(&pair), true).unwrap();
+    let repeated = compare(std::slice::from_ref(&pair), true).unwrap();
+    assert_eq!(experiment.evidence, repeated.evidence);
+    let replay = repeated.execution;
     assert_eq!(replay.comparison.profile, compared.comparison.profile);
     assert_eq!(replay.comparison.deltas, compared.comparison.deltas);
     assert!(compare(&[], true).is_err());
