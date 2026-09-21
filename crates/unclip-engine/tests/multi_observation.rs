@@ -1427,3 +1427,127 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
 async fn temporal_profiles_persist_explicit_sequence_and_replay_bit_for_bit() {
     assert_persisted_batch(temporal_fixture(), temporal_profile(), temporal_params()).await;
 }
+
+#[test]
+fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() {
+    use unclip_engine::HeldOutInputs;
+    let fixture = fixture();
+    let all = Inputs::new(&fixture);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine.plan(&profile()).unwrap();
+    let training = vec![fixture.observations[0].id.clone()];
+    let held_out = fixture.observations[1..]
+        .iter()
+        .map(|o| o.id.clone())
+        .collect::<Vec<_>>();
+    let split = engine
+        .select_observations(
+            &all.observations,
+            &training,
+            &held_out,
+            "experiment",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    let split = Tracked::from_derived(&split, split.value().clone());
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
+    let frame = Tracked::from_recorded(DerivedId::new("frame"), fixture.frame.clone());
+    let mut subset = fixture.clone();
+    subset.observations.retain(|o| held_out.contains(&o.id));
+    subset
+        .alignments
+        .retain(|a| held_out.contains(&a.observation));
+    subset
+        .rankings
+        .retain(|r| held_out.contains(&r.observation));
+    let inputs = Inputs::new(&subset);
+    let params = BTreeMap::new();
+    let run = || MeasurementRun {
+        id: "baseline-run",
+        timestamp: Timestamp::new("now"),
+        params: &params,
+    };
+    let result = engine
+        .measure_held_out_baseline(
+            &plan,
+            HeldOutInputs {
+                baseline: &baseline,
+                frame: &frame,
+                split: &split,
+                alignments: &inputs.alignments,
+                rankings: &inputs.rankings,
+            },
+            run(),
+        )
+        .unwrap();
+    let direct = engine
+        .measure(&plan, inputs.engine_inputs(&subset), run())
+        .unwrap();
+    assert_eq!(result.len(), direct.len());
+    for (actual, expected) in result.iter().zip(&direct) {
+        assert_eq!(actual.value(), expected.value());
+        for id in [baseline.id(), frame.id(), split.id()] {
+            assert!(actual.provenance().inputs.contains(id));
+        }
+        assert!(!actual
+            .provenance()
+            .inputs
+            .contains(all.observations[0].id()));
+        assert_eq!(
+            actual.provenance().domain_version,
+            Some(fixture.domain.version.clone())
+        );
+        assert_eq!(
+            actual.provenance().frame_version,
+            Some(fixture.frame.version.clone())
+        );
+    }
+    for (alignments, rankings) in [
+        (&all.alignments, &inputs.rankings),
+        (&inputs.alignments, &all.rankings),
+    ] {
+        assert!(engine
+            .measure_held_out_baseline(
+                &plan,
+                HeldOutInputs {
+                    baseline: &baseline,
+                    frame: &frame,
+                    split: &split,
+                    alignments,
+                    rankings
+                },
+                run()
+            )
+            .is_err());
+    }
+    let empty = engine.plan(&EngineProfile::default()).unwrap();
+    assert!(engine
+        .measure_held_out_baseline(
+            &empty,
+            HeldOutInputs {
+                baseline: &baseline,
+                frame: &frame,
+                split: &split,
+                alignments: &[],
+                rankings: &[]
+            },
+            run()
+        )
+        .is_err());
+    let mut invalid_frame = fixture.frame.clone();
+    invalid_frame.axes.push(invalid_frame.axes[0].clone());
+    let invalid_frame = Tracked::from_recorded(DerivedId::new("frame"), invalid_frame);
+    assert!(engine
+        .measure_held_out_baseline(
+            &plan,
+            HeldOutInputs {
+                baseline: &baseline,
+                frame: &invalid_frame,
+                split: &split,
+                alignments: &[],
+                rankings: &[]
+            },
+            run()
+        )
+        .is_err());
+}

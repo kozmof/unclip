@@ -23,8 +23,10 @@ mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
+mod held_out;
 mod motif_application;
 mod observation_selection;
+pub use held_out::HeldOutInputs;
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
@@ -464,6 +466,16 @@ impl Engine {
         inputs: MeasurementInputs<'_>,
         run: MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Measurement>>> {
+        self.measure_with_dependencies(plan, inputs, run, |_| {})
+    }
+
+    fn measure_with_dependencies(
+        &self,
+        plan: &RunPlan,
+        inputs: MeasurementInputs<'_>,
+        run: MeasurementRun<'_>,
+        seed: impl Fn(&DependencyCollector),
+    ) -> Result<Vec<Calculated<Measurement>>> {
         let mut sensors = plan.sensors.iter().collect::<Vec<_>>();
         sensors.sort_by(|left, right| {
             let left = left.descriptor();
@@ -479,6 +491,7 @@ impl Engine {
             let descriptor = sensor.descriptor();
             let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
             let dependencies = DependencyCollector::default();
+            seed(&dependencies);
             let ctx = MeasureCtx::new(
                 inputs.domain,
                 inputs.frame,
