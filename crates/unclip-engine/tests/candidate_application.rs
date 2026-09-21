@@ -550,3 +550,123 @@ fn latent_application_requires_existing_units_and_consistent_spectral_evidence()
     malformed.value["evidence"]["result"]["eigenpairs"][1]["loadings"] = json!([0.0, 0.0]);
     assert!(apply(relation_domain(), malformed).is_err());
 }
+
+fn coupling_proposal() -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::DynamicCoupling;
+    c.value=json!({"pattern":{"matching":"thresholded_pairwise_association","metric":"spearman","units":["existing","target"]},"evidence":{"measurement":"matrix","sensor":"sensor.spearman","sensor_version":"0.1.0","context":{"values":{}},"cell":{"status":"value","value":0.9,"sample_count":4}},"selection":{"threshold":0.8,"minimum_samples":2},"causal_claim":false}).as_object().unwrap().clone();
+    c
+}
+#[test]
+fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
+    use unclip_engine::{CandidateInputs, MeasurementRun};
+    use unclip_epistemic::PluginId;
+    use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
+    use unclip_plugin::{EngineProfile, PluginSelection};
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.pairwise-coupling")],
+            ..Default::default()
+        })
+        .unwrap();
+    for (metric, value, threshold) in [
+        ("spearman", 0.9, 0.8),
+        ("kendall", -0.5, -0.6),
+        ("relative_rank_variance", 0.1, 0.2),
+        ("mutual_information", 0.9, 0.8),
+    ] {
+        let cell = json!({"status":"value","value":value,"sample_count":4});
+        let matrix=serde_json::from_value(json!({"metric":metric,"units":["existing","target"],"cells":[[cell.clone(),cell.clone()],[cell.clone(),cell]]})).unwrap();
+        let inputs = [Tracked::from_recorded(
+            DerivedId::new("matrix"),
+            Measurement {
+                sensor: PluginId::new(format!("sensor.{metric}")),
+                sensor_version: "0.1.0".parse().unwrap(),
+                reading: Reading::Value {
+                    value: MeasurementValue::PairwiseMatrix(matrix),
+                },
+                confidence: None,
+                sample_count: Some(4),
+                context: MeasurementContext::default(),
+            },
+        )];
+        let template = coupling_proposal();
+        let candidates = engine
+            .generate_candidates(
+                &plan,
+                CandidateInputs {
+                    domain_version_id: &template.domain_version_id,
+                    measurements: &inputs,
+                    observations: &[],
+                    structures: &[],
+                },
+                MeasurementRun {
+                    id: metric,
+                    timestamp: Timestamp::new("now"),
+                    params: &BTreeMap::from([(
+                        PluginId::new("generate.pairwise-coupling"),
+                        json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
+                    )]),
+                },
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
+        let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+        let result = engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap();
+        let unit = &result.value().domain.units[&result.value().added_units[0]];
+        assert_eq!(unit.kind, UnitKind::DynamicCoupling);
+        assert_eq!(unit.label, None);
+        assert_eq!(
+            unit.properties["causal_claim"],
+            PropertyValue::Boolean(false)
+        );
+        assert_eq!(
+            unit.properties["candidate_evidence"],
+            PropertyValue::Structured(serde_json::Value::Object(
+                candidates[0].value().value.clone()
+            ))
+        );
+        assert_eq!(
+            DependencyCollector::default().read(&baseline),
+            &relation_domain()
+        );
+        assert_eq!(
+            result,
+            engine
+                .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+                .unwrap()
+        );
+    }
+}
+#[test]
+fn coupling_application_rejects_missing_units_sparse_cells_and_false_selection_claims() {
+    assert!(apply(domain(), coupling_proposal()).is_err());
+    for (field, key, value) in [
+        ("pattern", "units", json!(["existing", "existing"])),
+        ("pattern", "matching", json!("lagged_association")),
+        ("selection", "threshold", json!(0.95)),
+        ("selection", "minimum_samples", json!(5)),
+        ("evidence", "measurement", json!("")),
+        (
+            "evidence",
+            "cell",
+            json!({"status":"undefined","sample_count":4}),
+        ),
+        (
+            "evidence",
+            "cell",
+            json!({"status":"value","value":2.0,"sample_count":4}),
+        ),
+    ] {
+        let mut c = coupling_proposal();
+        c.value[field][key] = value;
+        assert!(apply(relation_domain(), c).is_err());
+    }
+    let mut c = coupling_proposal();
+    c.value["causal_claim"] = json!(true);
+    assert!(apply(relation_domain(), c).is_err());
+}

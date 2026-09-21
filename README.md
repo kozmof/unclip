@@ -469,7 +469,7 @@ with target, property, original value, and proposed value. Integer and floating
 values keep their types. Missing targets or properties, nonnumeric or nonfinite
 values, unsafe integer conversions, and overflowing changes are rejected. No
 property is created implicitly. Application provenance uses algorithm version
-0.5.0 and records the complete change list.
+0.6.0 and records the complete change list.
 
 `Engine::apply_candidate_with_relation_bindings` additionally applies exact
 directed observed-relation proposals. `RelationBindings` supplies existing source
@@ -493,6 +493,14 @@ unit IDs, signed eigenvalue, and loadings must exactly match the recorded
 eigenpair. The source spectral result and explicit sample/eigenvalue floors are
 validated. The temporary unit retains units, eigenvalue, loadings, and complete
 candidate evidence without assigning a factor label or variance interpretation.
+
+Pairwise `DynamicCoupling` proposals with `thresholded_pairwise_association`
+patterns apply as anonymous coupling units. The two ordered distinct unit IDs
+must exist in the baseline. Measured cell evidence must satisfy the metric range,
+recorded sample floor, and metric-specific threshold direction. Source identities
+and an explicit `causal_claim: false` are required. The unit retains its endpoints
+and complete association evidence. This path does not yet apply temporal coupling
+patterns.
 
 The caller supplies a unique run ID. Other candidate kinds, frame extension,
 alignment or inference integration, and held-out measurement remain pending;

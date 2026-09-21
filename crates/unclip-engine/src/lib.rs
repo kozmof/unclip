@@ -19,6 +19,7 @@ pub use relation_discovery::MissingRelationGenerator;
 
 mod candidate_application;
 mod comparison;
+mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
