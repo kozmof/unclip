@@ -469,7 +469,16 @@ with target, property, original value, and proposed value. Integer and floating
 values keep their types. Missing targets or properties, nonnumeric or nonfinite
 values, unsafe integer conversions, and overflowing changes are rejected. No
 property is created implicitly. Application provenance uses algorithm version
-0.2.0 and records the complete change list.
+0.3.0 and records the complete change list.
+
+`Engine::apply_candidate_with_relation_bindings` additionally applies exact
+directed observed-relation proposals. `RelationBindings` supplies existing source
+and target unit IDs; their labels must match the proposal endpoints exactly.
+The temporary relation retains its kind, direction, and complete candidate
+evidence. `added_relations` and the bindings are recorded in the snapshot and
+provenance. Existing identical directed relations, ID collisions, missing endpoints,
+and label mismatches are errors. No endpoint mapping is inferred, even when
+labels happen to be unique.
 
 The caller supplies a unique run ID. Other candidate kinds, frame extension,
 alignment or inference integration, and held-out measurement remain pending;

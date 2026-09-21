@@ -23,7 +23,9 @@ mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
 mod profile_comparison;
-pub use candidate_application::{CounterfactualSnapshot, PropertyChange, PropertyTarget};
+pub use candidate_application::{
+    CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
+};
 pub use graph_comparison::{
     DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
 };

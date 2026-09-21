@@ -2,8 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use unclip_domain::{
-    CandidateKind, CandidateProposal, DomainSnapshot, PropertyValue, RelationId, Unit, UnitId,
-    UnitKind,
+    CandidateKind, CandidateProposal, DomainSnapshot, PropertyValue, Relation, RelationId, Unit,
+    UnitId, UnitKind,
 };
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, DomainVersion,
@@ -16,6 +16,7 @@ pub struct CounterfactualSnapshot {
     pub baseline_domain_version_id: String,
     pub candidate: DerivedId,
     pub added_units: Vec<UnitId>,
+    pub added_relations: Vec<RelationId>,
     pub property_changes: Vec<PropertyChange>,
     pub domain: DomainSnapshot,
 }
@@ -32,6 +33,20 @@ pub struct PropertyChange {
     pub property: String,
     pub before: PropertyValue,
     pub after: PropertyValue,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationBindings {
+    pub source: UnitId,
+    pub target: UnitId,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RelationPattern {
+    matching: String,
+    source_label: String,
+    target_label: String,
+    relation_kind: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +72,17 @@ impl super::Engine {
         &self,
         baseline: &Tracked<DomainSnapshot>,
         candidate: &Tracked<CandidateProposal>,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<CounterfactualSnapshot>> {
+        self.apply_candidate_with_relation_bindings(baseline, candidate, None, run_id, timestamp)
+    }
+    /// Directed relation proposals require explicitly bound existing endpoint IDs.
+    pub fn apply_candidate_with_relation_bindings(
+        &self,
+        baseline: &Tracked<DomainSnapshot>,
+        candidate: &Tracked<CandidateProposal>,
+        bindings: Option<&RelationBindings>,
         run_id: &str,
         timestamp: Timestamp,
     ) -> Result<Calculated<CounterfactualSnapshot>> {
@@ -98,7 +124,13 @@ impl super::Engine {
         }
         let mut temporary = domain.clone();
         temporary.version = version.clone();
+        if bindings.is_some() && proposal.kind != CandidateKind::Relation {
+            return Err(invalid(
+                "relation bindings are only valid for relation candidates",
+            ));
+        }
         let mut added_units = Vec::new();
+        let mut added_relations = Vec::new();
         let mut property_changes = Vec::new();
         match proposal.kind {
             CandidateKind::AtomicMeaning => {
@@ -115,6 +147,26 @@ impl super::Engine {
                     ]),
                 });
                 added_units.push(unit_id);
+            }
+            CandidateKind::Relation => {
+                let pattern: RelationPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                if pattern.matching != "exact_directed_observed_relation" || pattern.source_label.trim().is_empty() || pattern.target_label.trim().is_empty() || pattern.relation_kind.trim().is_empty() { return Err(invalid("relation application requires an exact directed observed-label pattern")); }
+                let endpoints = bindings.ok_or_else(|| invalid("relation application requires explicit endpoint bindings"))?;
+                let source = domain.units.get(&endpoints.source).ok_or_else(|| invalid("bound source unit does not exist"))?;
+                let target = domain.units.get(&endpoints.target).ok_or_else(|| invalid("bound target unit does not exist"))?;
+                if source.label.as_deref() != Some(&pattern.source_label) || target.label.as_deref() != Some(&pattern.target_label) { return Err(invalid("bound endpoint labels differ from candidate evidence")); }
+                if domain.relations.values().any(|relation| relation.source == endpoints.source && relation.target == endpoints.target && relation.kind == pattern.relation_kind) { return Err(invalid("directed relation already exists in baseline")); }
+                let id = RelationId::new(format!("candidate:{}", candidate.id().0));
+                if domain.relations.contains_key(&id) { return Err(invalid("candidate relation identity already exists in baseline")); }
+                temporary.relations.insert(id.clone(), Relation {
+                    id: id.clone(), source: endpoints.source.clone(), target: endpoints.target.clone(), kind: pattern.relation_kind,
+                    properties: BTreeMap::from([
+                        ("candidate_id".into(), PropertyValue::Text(candidate.id().0.clone())),
+                        ("candidate_pattern".into(), PropertyValue::Structured(pattern_value.clone())),
+                        ("candidate_evidence".into(), PropertyValue::Structured(serde_json::Value::Object(proposal.value.clone()))),
+                    ]),
+                });
+                added_relations.push(id);
             }
             CandidateKind::WeightRevision => {
                 let pattern: WeightPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
@@ -133,15 +185,15 @@ impl super::Engine {
                 properties.insert(pattern.property.clone(), proposed.clone());
                 property_changes.push(PropertyChange { target: pattern.target, property: pattern.property, before: previous, after: proposed });
             }
-            _ => return Err(invalid("candidate application supports atomic observed-label and numeric-property weight proposals only")),
+            _ => return Err(invalid("candidate application supports atomic, explicitly bound relation, and numeric-property weight proposals only")),
         }
-        let params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"property_changes":property_changes,"application_kind":proposal.kind});
+        let params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});
         let token = CalculationToken::from_harness(
             EmitMetadata {
                 id: output_id,
                 producer: PluginId::new("experiment.apply-candidate"),
                 algorithm: "temporary_candidate_application".into(),
-                version: semver::Version::new(0, 2, 0),
+                version: semver::Version::new(0, 3, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
@@ -156,6 +208,7 @@ impl super::Engine {
             baseline_domain_version_id: baseline_key,
             candidate: candidate.id().clone(),
             added_units,
+            added_relations,
             property_changes,
             domain: temporary,
         }))

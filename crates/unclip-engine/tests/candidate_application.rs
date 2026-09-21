@@ -215,3 +215,129 @@ fn weight_application_rejects_missing_or_invalid_numeric_evidence() {
         .insert("weight".into(), PropertyValue::Number(f64::NAN));
     assert!(apply(invalid, weight_proposal("unit", "existing", json!(1))).is_err());
 }
+
+fn relation_domain() -> DomainSnapshot {
+    let mut d = domain();
+    let id = UnitId::new("target");
+    d.units.insert(
+        id.clone(),
+        Unit {
+            id,
+            kind: UnitKind::AtomicMeaning,
+            label: Some("destination".into()),
+            properties: BTreeMap::new(),
+        },
+    );
+    d
+}
+fn relation_proposal() -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::Relation;
+    c.value["pattern"] = json!({"matching":"exact_directed_observed_relation","source_label":"known","target_label":"destination","relation_kind":"near"});
+    c
+}
+fn apply_relation(
+    d: DomainSnapshot,
+    c: CandidateProposal,
+    source: &str,
+    target: &str,
+) -> unclip_plugin::Result<unclip_epistemic::Calculated<unclip_engine::CounterfactualSnapshot>> {
+    Engine::with_builtins()
+        .unwrap()
+        .apply_candidate_with_relation_bindings(
+            &Tracked::from_recorded(DerivedId::new("baseline"), d),
+            &Tracked::from_recorded(DerivedId::new("proposal"), c),
+            Some(&unclip_engine::RelationBindings {
+                source: UnitId::new(source),
+                target: UnitId::new(target),
+            }),
+            "trial",
+            Timestamp::new("now"),
+        )
+}
+#[test]
+fn relation_application_records_explicit_endpoints_and_preserves_baseline() {
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
+    let candidate = Tracked::from_recorded(DerivedId::new("proposal"), relation_proposal());
+    let binding = unclip_engine::RelationBindings {
+        source: UnitId::new("existing"),
+        target: UnitId::new("target"),
+    };
+    let result = Engine::with_builtins()
+        .unwrap()
+        .apply_candidate_with_relation_bindings(
+            &baseline,
+            &candidate,
+            Some(&binding),
+            "trial",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    assert_eq!(
+        DependencyCollector::default().read(&baseline),
+        &relation_domain()
+    );
+    assert!(result.value().added_units.is_empty() && result.value().property_changes.is_empty());
+    let id = unclip_domain::RelationId::new("candidate:proposal");
+    assert_eq!(result.value().added_relations, vec![id.clone()]);
+    let relation = &result.value().domain.relations[&id];
+    assert_eq!(relation.source, binding.source);
+    assert_eq!(relation.target, binding.target);
+    assert_eq!(relation.kind, "near");
+    assert_eq!(
+        relation.properties["candidate_evidence"],
+        PropertyValue::Structured(serde_json::Value::Object(relation_proposal().value))
+    );
+    assert_eq!(
+        result.provenance().params["relation_bindings"],
+        json!({"source":"existing","target":"target"})
+    );
+    assert_eq!(
+        result,
+        apply_relation(relation_domain(), relation_proposal(), "existing", "target").unwrap()
+    );
+}
+#[test]
+fn relation_application_requires_valid_bindings_and_rejects_existing_edges() {
+    assert!(apply(relation_domain(), relation_proposal()).is_err());
+    for (source, target) in [("missing", "target"), ("target", "existing")] {
+        assert!(apply_relation(relation_domain(), relation_proposal(), source, target).is_err());
+    }
+    assert!(apply_relation(relation_domain(), proposal(), "existing", "target").is_err());
+    let mut duplicate = relation_domain();
+    let id = unclip_domain::RelationId::new("existing-edge");
+    duplicate.relations.insert(
+        id.clone(),
+        unclip_domain::Relation {
+            id,
+            source: UnitId::new("existing"),
+            target: UnitId::new("target"),
+            kind: "near".into(),
+            properties: BTreeMap::new(),
+        },
+    );
+    assert!(apply_relation(duplicate.clone(), relation_proposal(), "existing", "target").is_err());
+    duplicate
+        .relations
+        .get_mut(&unclip_domain::RelationId::new("existing-edge"))
+        .unwrap()
+        .kind = "other".into();
+    assert!(apply_relation(duplicate, relation_proposal(), "existing", "target").is_ok());
+    let mut ambiguous = relation_domain();
+    let id = UnitId::new("other-source");
+    ambiguous.units.insert(
+        id.clone(),
+        Unit {
+            id,
+            kind: UnitKind::AtomicMeaning,
+            label: Some("known".into()),
+            properties: BTreeMap::new(),
+        },
+    );
+    let result = apply_relation(ambiguous, relation_proposal(), "other-source", "target").unwrap();
+    assert_eq!(
+        result.value().domain.relations[&unclip_domain::RelationId::new("candidate:proposal")]
+            .source,
+        UnitId::new("other-source")
+    );
+}
