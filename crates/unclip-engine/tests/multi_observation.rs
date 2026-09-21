@@ -1634,6 +1634,30 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let replay = execute(&baseline).unwrap();
     assert_eq!(result.before, replay.before);
     assert_eq!(result.after, replay.after);
+    let transfer_measurements = [
+        ("transfer-source", vec!["source-a", "source-b"]),
+        ("transfer-target", vec!["target-a", "target-b"]),
+    ]
+    .map(|(id, observations)| {
+        Tracked::from_recorded(
+            DerivedId::new(id),
+            unclip_measure::Measurement {
+                sensor: PluginId::new("sensor.fixture"),
+                sensor_version: semver::Version::new(1, 0, 0),
+                reading: Reading::Value {
+                    value: MeasurementValue::Scalar(0.5),
+                },
+                confidence: None,
+                sample_count: Some(2),
+                context: unclip_measure::MeasurementContext {
+                    values: BTreeMap::from([(
+                        "observations".into(),
+                        serde_json::json!(observations),
+                    )]),
+                },
+            },
+        )
+    });
     let compare = |pairs: &[unclip_engine::ComparisonPair], comparators: bool| {
         let mut profile = profile();
         if comparators {
@@ -1667,17 +1691,26 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             },
             &proposal,
             pairs,
-            &[
-                unclip_engine::ExperimentConstraint::MinimumSamples {
-                    measurement: DerivedId::new("paired/before/sensor.spearman"),
-                    minimum: 100,
-                },
-                unclip_engine::ExperimentConstraint::ComplexityBudget {
-                    maximum_added_units: 1,
-                    maximum_added_relations: 0,
-                    maximum_property_changes: 0,
-                },
-            ],
+            unclip_engine::ExperimentConstraints {
+                transfer_measurements: &transfer_measurements,
+                requirements: &[
+                    unclip_engine::ExperimentConstraint::MinimumSamples {
+                        measurement: DerivedId::new("paired/before/sensor.spearman"),
+                        minimum: 100,
+                    },
+                    unclip_engine::ExperimentConstraint::ComplexityBudget {
+                        maximum_added_units: 1,
+                        maximum_added_relations: 0,
+                        maximum_property_changes: 0,
+                    },
+                    unclip_engine::ExperimentConstraint::ScalarTransfer {
+                        source: DerivedId::new("transfer-source"),
+                        target: DerivedId::new("transfer-target"),
+                        minimum_samples: 2,
+                        maximum_absolute_difference: 0.0,
+                    },
+                ],
+            },
             MeasurementRun {
                 id: "paired",
                 timestamp: Timestamp::new("now"),
@@ -1776,6 +1809,15 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     ]);
     expected.insert(proposal.id().clone());
     expected.insert(assessed.id().clone());
+    expected.extend(transfer_measurements.iter().map(|v| v.id().clone()));
+    assert_eq!(
+        evidence.constraints[2].status,
+        unclip_engine::ConstraintStatus::Satisfied
+    );
+    assert_eq!(evidence.transfer_measurements.len(), 2);
+    for entry in &evidence.transfer_measurements {
+        assert!(assessed.provenance().inputs.contains(&entry.provenance));
+    }
     expected.extend(experiment.null_results.iter().map(|v| v.id().clone()));
     expected.extend(inputs.observations.iter().map(|v| v.id().clone()));
     expected.extend(inputs.alignments.iter().map(|v| v.id().clone()));

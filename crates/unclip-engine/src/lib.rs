@@ -29,7 +29,9 @@ mod experiment;
 pub use constraints::{ConstraintAssessment, ConstraintStatus, ExperimentConstraint};
 mod graph_comparison;
 mod held_out;
-pub use experiment::{CounterfactualEvidence, CounterfactualExperiment, NullEvidence};
+pub use experiment::{
+    CounterfactualEvidence, CounterfactualExperiment, ExperimentConstraints, NullEvidence,
+};
 mod motif_application;
 mod observation_selection;
 pub use held_out::{

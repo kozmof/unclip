@@ -21,6 +21,7 @@ pub struct CounterfactualEvidence {
     pub null_results: Vec<NullEvidence>,
     pub constraint_assessment: Option<DerivedId>,
     pub constraints: Vec<super::ConstraintAssessment>,
+    pub transfer_measurements: Vec<unclip_store::RecordedInference<unclip_measure::Measurement>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,6 +30,12 @@ pub struct NullEvidence {
     pub id: DerivedId,
     pub model: PluginId,
     pub reading: unclip_measure::Reading,
+}
+
+#[derive(Default)]
+pub struct ExperimentConstraints<'a> {
+    pub requirements: &'a [super::ExperimentConstraint],
+    pub transfer_measurements: &'a [Tracked<unclip_measure::Measurement>],
 }
 
 pub struct CounterfactualExperiment {
@@ -47,9 +54,10 @@ impl super::Engine {
         inputs: super::CounterfactualMeasurementInputs<'_>,
         candidate: &Tracked<unclip_domain::CandidateProposal>,
         pairs: &[super::ComparisonPair],
-        constraints: &[super::ExperimentConstraint],
+        constraint_inputs: ExperimentConstraints<'_>,
         run: super::MeasurementRun<'_>,
     ) -> Result<CounterfactualExperiment> {
+        let constraints = constraint_inputs.requirements;
         let dependencies = DependencyCollector::default();
         let baseline = dependencies.read(inputs.baseline.baseline);
         let frame = dependencies.read(inputs.baseline.frame);
@@ -92,6 +100,7 @@ impl super::Engine {
             null_results: vec![],
             constraint_assessment: None,
             constraints: vec![],
+            transfer_measurements: vec![],
             before: vec![],
             after: vec![],
             comparison: DerivedId::new(format!("{}/comparison/profile", run.id)),
@@ -164,16 +173,43 @@ impl super::Engine {
                     .clone(),
             });
         }
+        let mut transfer = constraint_inputs
+            .transfer_measurements
+            .iter()
+            .collect::<Vec<_>>();
+        transfer.sort_by_key(|input| input.id());
+        for input in transfer {
+            let used = constraints.iter().any(|constraint| matches!(constraint, super::ExperimentConstraint::ScalarTransfer { source, target, .. } if source == input.id() || target == input.id()));
+            if !used
+                || input.id().0.trim().is_empty()
+                || dependencies.snapshot().contains(input.id())
+                || input.id() == &id
+            {
+                return Err(PluginError::Message("transfer inputs must be used by explicit transfer requirements and have unique noncolliding identities".into()));
+            }
+            if constraints.iter().any(|constraint| matches!(constraint, super::ExperimentConstraint::MinimumSamples { measurement, .. } | super::ExperimentConstraint::ConditionalDependency { measurement, .. } if measurement == input.id())) {
+                return Err(PluginError::Message("external transfer evidence cannot replace experiment measurements for other constraints".into()));
+            }
+            evidence
+                .transfer_measurements
+                .push(unclip_store::RecordedInference {
+                    provenance: input.id().clone(),
+                    value: dependencies.read(input).clone(),
+                });
+        }
         let assessments = if constraints.is_empty() {
             None
         } else {
-            let measurements = execution
+            let mut measurements = execution
                 .measurements
                 .before
                 .iter()
                 .chain(&execution.measurements.after)
                 .map(|value| Tracked::from_derived(value, value.value().clone()))
                 .collect::<Vec<_>>();
+            measurements.extend(evidence.transfer_measurements.iter().map(|entry| {
+                Tracked::from_recorded(entry.provenance.clone(), entry.value.clone())
+            }));
             let result = self.assess_experiment_constraints(
                 constraints,
                 &measurements,
@@ -197,13 +233,13 @@ impl super::Engine {
                 "experimental output identity collides with an input or intermediate result".into(),
             ));
         }
-        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints});
+        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints,"transfer_measurements":evidence.transfer_measurements});
         let token = ExperimentToken::from_harness(
             EmitMetadata {
                 id,
                 producer: PluginId::new("experiment.counterfactual"),
                 algorithm: "held_out_counterfactual_comparison".into(),
-                version: semver::Version::new(0, 3, 0),
+                version: semver::Version::new(0, 4, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
