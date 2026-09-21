@@ -1,8 +1,8 @@
 //! Experimental aggregation of executed counterfactual measurements and comparisons.
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Experimental,
-    PluginId, Tracked,
+    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken,
+    Experimental, PluginId, Tracked,
 };
 use unclip_plugin::{PluginError, Result, RunPlan};
 
@@ -18,28 +18,34 @@ pub struct CounterfactualEvidence {
     pub after: Vec<DerivedId>,
     pub comparison: DerivedId,
     pub delta_profile: super::DeltaProfile,
+    pub null_results: Vec<NullEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NullEvidence {
+    pub id: DerivedId,
+    pub model: PluginId,
+    pub reading: unclip_measure::Reading,
 }
 
 pub struct CounterfactualExperiment {
     pub evidence: Experimental<CounterfactualEvidence>,
     pub execution: super::CounterfactualComparison,
+    pub null_results: Vec<Calculated<unclip_measure::Reading>>,
 }
 
 impl super::Engine {
     /// Emit evidence of an executed comparison, not candidate acceptance or promotion.
-    /// Null-model evaluation and constraint decisions are separate pending stages.
+    /// Nulls use held-out observations and baseline rankings; constraints remain separate.
     pub fn run_counterfactual_experiment(
         &self,
         plan: &RunPlan,
         inputs: super::CounterfactualMeasurementInputs<'_>,
+        candidate: &Tracked<unclip_domain::CandidateProposal>,
         pairs: &[super::ComparisonPair],
         run: super::MeasurementRun<'_>,
     ) -> Result<CounterfactualExperiment> {
-        if !plan.null_models.is_empty() {
-            return Err(PluginError::Message(
-                "experimental null-model execution is not yet supported".into(),
-            ));
-        }
         let dependencies = DependencyCollector::default();
         let baseline = dependencies.read(inputs.baseline.baseline);
         let frame = dependencies.read(inputs.baseline.frame);
@@ -47,6 +53,19 @@ impl super::Engine {
         let applied =
             Tracked::from_derived(inputs.counterfactual, inputs.counterfactual.value().clone());
         let snapshot = dependencies.read(&applied);
+        let proposal = dependencies.read(candidate);
+        if candidate.id() != &snapshot.candidate
+            || !inputs
+                .counterfactual
+                .provenance()
+                .inputs
+                .contains(candidate.id())
+            || proposal.domain_version_id != snapshot.baseline_domain_version_id
+        {
+            return Err(PluginError::Message(
+                "null candidate must match the applied candidate and baseline".into(),
+            ));
+        }
         // Record exact selected observation values, including training membership.
         for entry in split.training.iter().chain(&split.held_out) {
             dependencies.read(&Tracked::from_recorded(
@@ -66,6 +85,7 @@ impl super::Engine {
             split: inputs.baseline.split.id().clone(),
             counterfactual: applied.id().clone(),
             candidate: snapshot.candidate.clone(),
+            null_results: vec![],
             before: vec![],
             after: vec![],
             comparison: DerivedId::new(format!("{}/comparison/profile", run.id)),
@@ -87,7 +107,25 @@ impl super::Engine {
             timestamp.clone(),
             serde_json::json!({}),
         );
+        let observations = split
+            .held_out
+            .iter()
+            .map(|entry| Tracked::from_recorded(entry.provenance.clone(), entry.value.clone()))
+            .collect::<Vec<_>>();
+        let null_inputs = super::NullInputs {
+            observations: &observations,
+            rankings: inputs.baseline.rankings,
+            domain: Some(inputs.baseline.baseline),
+        };
+        let null_id = format!("{}/nulls", run.id);
+        let null_run = super::MeasurementRun {
+            id: &null_id,
+            timestamp: timestamp.clone(),
+            params: run.params,
+        };
         let execution = self.compare_counterfactual(plan, inputs, pairs, run)?;
+        let null_results =
+            self.evaluate_null_models_with_inputs(plan, candidate, null_inputs, null_run)?;
         for (selected, values) in [
             (&mut evidence.before, &execution.measurements.before),
             (&mut evidence.after, &execution.measurements.after),
@@ -105,6 +143,20 @@ impl super::Engine {
         evidence.delta_profile = dependencies
             .read(&Tracked::from_derived(profile, profile.value().clone()))
             .clone();
+        for result in &null_results {
+            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+                return Err(PluginError::Message(
+                    "null output identity collides with experimental evidence".into(),
+                ));
+            }
+            evidence.null_results.push(NullEvidence {
+                id: result.id().clone(),
+                model: result.provenance().producer.clone(),
+                reading: dependencies
+                    .read(&Tracked::from_derived(result, result.value().clone()))
+                    .clone(),
+            });
+        }
         if dependencies.snapshot().contains(&id) || evidence.candidate == id {
             return Err(PluginError::Message(
                 "experimental output identity collides with an input or intermediate result".into(),
@@ -117,7 +169,7 @@ impl super::Engine {
                 id,
                 producer: PluginId::new("experiment.counterfactual"),
                 algorithm: "held_out_counterfactual_comparison".into(),
-                version: semver::Version::new(0, 1, 0),
+                version: semver::Version::new(0, 2, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
@@ -131,6 +183,7 @@ impl super::Engine {
         Ok(CounterfactualExperiment {
             evidence: token.emit(evidence),
             execution,
+            null_results,
         })
     }
 }

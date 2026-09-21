@@ -1642,6 +1642,10 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
                 PluginSelection::any("compare.scalar-difference"),
             ];
         }
+        profile.null_models = vec![
+            PluginSelection::any("null.existing-unit"),
+            PluginSelection::any("null.existing-relation"),
+        ];
         let plan = engine.plan(&profile).unwrap();
         let params = BTreeMap::from([(
             PluginId::new("compare.pairwise-matrix"),
@@ -1661,6 +1665,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
                 alignments: &inputs.alignments,
                 rankings: &inputs.rankings,
             },
+            &proposal,
             pairs,
             MeasurementRun {
                 id: "paired",
@@ -1712,6 +1717,30 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             .map(|v| v.id().clone())
             .collect::<Vec<_>>()
     );
+    assert_eq!(experiment.null_results.len(), 2);
+    assert_eq!(evidence.null_results.len(), 2);
+    for (recorded, calculated) in evidence.null_results.iter().zip(&experiment.null_results) {
+        assert_eq!(recorded.id, *calculated.id());
+        assert_eq!(recorded.reading, *calculated.value());
+        assert_eq!(recorded.model, calculated.provenance().producer);
+        assert!(calculated.provenance().inputs.contains(proposal.id()));
+        assert_eq!(
+            calculated.provenance().operation,
+            unclip_epistemic::Operation::Calculated
+        );
+    }
+    assert!(matches!(
+        experiment.null_results[0].value(),
+        Reading::NotApplicable { .. }
+    ));
+    assert!(matches!(
+        experiment.null_results[1].value(),
+        Reading::Value { .. }
+    ));
+    assert!(experiment.null_results[1]
+        .provenance()
+        .inputs
+        .contains(baseline.id()));
     let mut expected = std::collections::BTreeSet::from([
         baseline.id().clone(),
         frame.id().clone(),
@@ -1719,6 +1748,8 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         candidate.id().clone(),
         compared.comparison.profile.id().clone(),
     ]);
+    expected.insert(proposal.id().clone());
+    expected.extend(experiment.null_results.iter().map(|v| v.id().clone()));
     expected.extend(inputs.observations.iter().map(|v| v.id().clone()));
     expected.extend(inputs.alignments.iter().map(|v| v.id().clone()));
     expected.extend(inputs.rankings.iter().map(|v| v.id().clone()));
