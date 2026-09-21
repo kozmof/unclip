@@ -17,11 +17,13 @@ pub use motif_discovery::RecurringMotifGenerator;
 mod relation_discovery;
 pub use relation_discovery::MissingRelationGenerator;
 
+mod candidate_application;
 mod comparison;
 mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
 mod profile_comparison;
+pub use candidate_application::CounterfactualSnapshot;
 pub use graph_comparison::{
     DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
 };

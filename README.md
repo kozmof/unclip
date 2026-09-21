@@ -454,6 +454,19 @@ values under one identity, missing references, output-ID collisions, and reused
 pair endpoints are rejected. No profile score is computed. This is a library
 calculation API; persisted experiment orchestration and its CLI remain pending.
 
+`Engine::apply_candidate` begins the counterfactual path for atomic
+`exact_observed_label` proposals. It clones a tracked baseline into a distinct
+`counterfactual:<run_id>` domain version and adds `candidate:<candidate_id>` as
+an anonymous atomic unit. The unit retains the complete candidate pattern and
+evidence in properties. The calculated `CounterfactualSnapshot` records the
+baseline, candidate, added unit, and both input dependencies. No repository write
+or candidate promotion occurs. Baseline mismatches, malformed patterns, and
+identity collisions are errors.
+
+The caller supplies a unique run ID. Other candidate kinds, frame extension,
+alignment or inference integration, and held-out measurement remain pending;
+creating this snapshot alone does not establish that a candidate explains data.
+
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.
 
