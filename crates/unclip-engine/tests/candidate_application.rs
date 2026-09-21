@@ -670,3 +670,119 @@ fn coupling_application_rejects_missing_units_sparse_cells_and_false_selection_c
     c.value["causal_claim"] = json!(true);
     assert!(apply(relation_domain(), c).is_err());
 }
+
+fn temporal_proposal() -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::DynamicCoupling;
+    let sequence = json!([{"observation":"z","position":0},{"observation":"a","position":10},{"observation":"m","position":30},{"observation":"b","position":40}]);
+    c.value=json!({"pattern":{"matching":"lagged_directional_association","source":"existing","target":"target","lag_steps":1,"sequence":sequence},"evidence":{"measurement":"lagged","sensor":"sensor.lagged-dependency","sensor_version":"0.1.0","coefficient":-0.5,"sample_count":3,"context":{"values":{"source":"existing","target":"target","lag_steps":1,"sequence":sequence}}},"selection":{"threshold":-0.6,"minimum_samples":2},"causal_claim":false}).as_object().unwrap().clone();
+    c
+}
+#[test]
+fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence() {
+    use unclip_engine::{CandidateInputs, MeasurementRun};
+    use unclip_epistemic::PluginId;
+    use unclip_measure::{Measurement, MeasurementValue, Reading};
+    use unclip_plugin::{EngineProfile, PluginSelection};
+    let template = temporal_proposal();
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.temporal-coupling")],
+            ..Default::default()
+        })
+        .unwrap();
+    let inputs = [Tracked::from_recorded(
+        DerivedId::new("lagged"),
+        Measurement {
+            sensor: PluginId::new("sensor.lagged-dependency"),
+            sensor_version: "0.1.0".parse().unwrap(),
+            reading: Reading::Value {
+                value: MeasurementValue::Scalar(-0.5),
+            },
+            confidence: None,
+            sample_count: Some(3),
+            context: serde_json::from_value(template.value["evidence"]["context"].clone()).unwrap(),
+        },
+    )];
+    let candidates = engine
+        .generate_candidates(
+            &plan,
+            CandidateInputs {
+                domain_version_id: &template.domain_version_id,
+                measurements: &inputs,
+                observations: &[],
+                structures: &[],
+            },
+            MeasurementRun {
+                id: "temporal",
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::from([(
+                    PluginId::new("generate.temporal-coupling"),
+                    template.value["selection"].clone(),
+                )]),
+            },
+        )
+        .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
+    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let result = engine
+        .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+        .unwrap();
+    let unit = &result.value().domain.units[&result.value().added_units[0]];
+    assert_eq!(unit.kind, UnitKind::DynamicCoupling);
+    assert_eq!(unit.label, None);
+    assert_eq!(
+        unit.properties["units"],
+        PropertyValue::Structured(json!(["existing", "target"]))
+    );
+    assert_eq!(
+        unit.properties["candidate_pattern"],
+        PropertyValue::Structured(template.value["pattern"].clone())
+    );
+    assert_eq!(
+        unit.properties["causal_claim"],
+        PropertyValue::Boolean(false)
+    );
+    assert_eq!(
+        unit.properties["candidate_evidence"],
+        PropertyValue::Structured(serde_json::Value::Object(
+            candidates[0].value().value.clone()
+        ))
+    );
+    assert_eq!(
+        DependencyCollector::default().read(&baseline),
+        &relation_domain()
+    );
+    assert_eq!(
+        result,
+        engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap()
+    );
+}
+#[test]
+fn temporal_application_rejects_inconsistent_order_lag_counts_and_direction() {
+    assert!(apply(domain(), temporal_proposal()).is_err());
+    for (field, key, value) in [
+        ("pattern", "source", json!("target")),
+        ("pattern", "lag_steps", json!(0)),
+        ("pattern", "lag_steps", json!(2)),
+        ("evidence", "sensor", json!("sensor.spearman")),
+        ("evidence", "sample_count", json!(4)),
+        ("evidence", "coefficient", json!(-0.9)),
+        ("selection", "minimum_samples", json!(4)),
+        ("selection", "threshold", json!(2.0)),
+    ] {
+        let mut c = temporal_proposal();
+        c.value[field][key] = value;
+        assert!(apply(relation_domain(), c).is_err());
+    }
+    let mut c = temporal_proposal();
+    c.value["pattern"]["sequence"][1]["position"] = json!(0);
+    assert!(apply(relation_domain(), c).is_err());
+    let mut c = temporal_proposal();
+    c.value["evidence"]["context"]["values"]["sequence"][1]["observation"] = json!("different");
+    assert!(apply(relation_domain(), c).is_err());
+}

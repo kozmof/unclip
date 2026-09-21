@@ -469,7 +469,7 @@ with target, property, original value, and proposed value. Integer and floating
 values keep their types. Missing targets or properties, nonnumeric or nonfinite
 values, unsafe integer conversions, and overflowing changes are rejected. No
 property is created implicitly. Application provenance uses algorithm version
-0.6.0 and records the complete change list.
+0.7.0 and records the complete change list.
 
 `Engine::apply_candidate_with_relation_bindings` additionally applies exact
 directed observed-relation proposals. `RelationBindings` supplies existing source
@@ -499,8 +499,16 @@ patterns apply as anonymous coupling units. The two ordered distinct unit IDs
 must exist in the baseline. Measured cell evidence must satisfy the metric range,
 recorded sample floor, and metric-specific threshold direction. Source identities
 and an explicit `causal_claim: false` are required. The unit retains its endpoints
-and complete association evidence. This path does not yet apply temporal coupling
-patterns.
+and complete association evidence.
+
+Temporal `lagged_directional_association` proposals also apply as anonymous
+coupling units. Source and target must exist in the baseline; lag, endpoints, and
+explicit sequence must agree with the lagged-dependency measurement context.
+The signed coefficient, threshold, and sample floor must be valid, and the
+complete-pair count cannot exceed sequence length minus lag. Direction, sequence
+order, lag, and all source evidence are retained with `causal_claim: false`.
+Lag is measured in observation steps; no elapsed-time or causal interpretation
+is added.
 
 The caller supplies a unique run ID. Other candidate kinds, frame extension,
 alignment or inference integration, and held-out measurement remain pending;
