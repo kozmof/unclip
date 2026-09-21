@@ -858,3 +858,67 @@ fn motif_matching_keeps_relation_kinds_separate_and_rejects_dangling_edges() {
     )
     .is_err());
 }
+
+#[test]
+fn generated_motif_applies_without_inventing_domain_edges_and_rejects_corrupt_support() {
+    let fixture = motif_fixture();
+    let candidates = run_generator(
+        "generate.recurring-motif",
+        &fixture.observations,
+        &measurements(&fixture),
+        serde_json::json!({"minimum_observations":2}),
+    )
+    .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let engine = Engine::with_builtins().unwrap();
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
+    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let result = engine
+        .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+        .unwrap();
+    let unit = &result.value().domain.units[&result.value().added_units[0]];
+    assert_eq!(unit.kind, unclip_domain::UnitKind::GraphMotif);
+    assert_eq!(unit.label, None);
+    assert_eq!(
+        unit.properties["graph_pattern"],
+        unclip_domain::PropertyValue::Structured(candidates[0].value().value["pattern"].clone())
+    );
+    assert_eq!(
+        unit.properties["candidate_evidence"],
+        unclip_domain::PropertyValue::Structured(serde_json::Value::Object(
+            candidates[0].value().value.clone()
+        ))
+    );
+    assert!(result.value().added_relations.is_empty());
+    assert_eq!(result.value().domain.relations, fixture.domain.relations);
+    assert_eq!(
+        DependencyCollector::default().read(&baseline),
+        &fixture.domain
+    );
+    assert_eq!(
+        result,
+        engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap()
+    );
+    for mutation in 0..7 {
+        let mut bad = candidates[0].value().clone();
+        match mutation {
+            0 => bad.value["pattern"]["edges"][1]["source"] = serde_json::json!(0),
+            1 => bad.value["observation_count"] = serde_json::json!(1),
+            2 => bad.value["examples"] = serde_json::json!([]),
+            3 => bad.value["examples"][0]["units"] = serde_json::json!(["a", "a", "b"]),
+            4 => bad.value["examples"][0]["edges"][0]["uncertainty"] = serde_json::json!(2.0),
+            5 => bad.value["examples"][0]["edges"][0]["measurements"] = serde_json::json!([]),
+            _ => bad.value["examples"][0]["observation"] = serde_json::json!("absent"),
+        }
+        assert!(engine
+            .apply_candidate(
+                &baseline,
+                &Tracked::from_recorded(DerivedId::new("bad"), bad),
+                "trial",
+                Timestamp::new("now")
+            )
+            .is_err());
+    }
+}

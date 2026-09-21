@@ -250,6 +250,21 @@ impl super::Engine {
                 });
                 added_units.push(unit_id);
             }
+            CandidateKind::GraphMotif => {
+                super::motif_application::validate(proposal)?;
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                if domain.units.contains_key(&unit_id) { return Err(invalid("candidate unit identity already exists in the baseline")); }
+                temporary.units.insert(unit_id.clone(), Unit {
+                    id: unit_id.clone(), kind: UnitKind::GraphMotif, label: None,
+                    properties: BTreeMap::from([
+                        ("candidate_id".into(), PropertyValue::Text(candidate.id().0.clone())),
+                        ("candidate_pattern".into(), PropertyValue::Structured(pattern_value.clone())),
+                        ("candidate_evidence".into(), PropertyValue::Structured(serde_json::Value::Object(proposal.value.clone()))),
+                        ("graph_pattern".into(), PropertyValue::Structured(pattern_value.clone())),
+                    ]),
+                });
+                added_units.push(unit_id);
+            }
             CandidateKind::Relation => {
                 let pattern: RelationPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
                 if pattern.matching != "exact_directed_observed_relation" || pattern.source_label.trim().is_empty() || pattern.target_label.trim().is_empty() || pattern.relation_kind.trim().is_empty() { return Err(invalid("relation application requires an exact directed observed-label pattern")); }
@@ -287,7 +302,7 @@ impl super::Engine {
                 properties.insert(pattern.property.clone(), proposed.clone());
                 property_changes.push(PropertyChange { target: pattern.target, property: pattern.property, before: previous, after: proposed });
             }
-            _ => return Err(invalid("candidate application supports atomic, empirical-community, latent-axis, pairwise or temporal coupling, explicitly bound relation, and numeric-property weight proposals only")),
+            _ => return Err(invalid("candidate application supports atomic, recurring-motif, empirical-community, latent-axis, pairwise or temporal coupling, explicitly bound relation, and numeric-property weight proposals only")),
         }
         let params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});
         let token = CalculationToken::from_harness(
@@ -295,7 +310,7 @@ impl super::Engine {
                 id: output_id,
                 producer: PluginId::new("experiment.apply-candidate"),
                 algorithm: "temporary_candidate_application".into(),
-                version: semver::Version::new(0, 7, 0),
+                version: semver::Version::new(0, 8, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,

@@ -469,7 +469,7 @@ with target, property, original value, and proposed value. Integer and floating
 values keep their types. Missing targets or properties, nonnumeric or nonfinite
 values, unsafe integer conversions, and overflowing changes are rejected. No
 property is created implicitly. Application provenance uses algorithm version
-0.7.0 and records the complete change list.
+0.8.0 and records the complete change list.
 
 `Engine::apply_candidate_with_relation_bindings` additionally applies exact
 directed observed-relation proposals. `RelationBindings` supplies existing source
@@ -510,7 +510,15 @@ order, lag, and all source evidence are retained with `causal_claim: false`.
 Lag is measured in observation steps; no elapsed-time or causal interpretation
 is added.
 
-The caller supplies a unique run ID. Other candidate kinds, frame extension,
+Recurring `GraphMotif` proposals apply as anonymous motif units. The initial
+family is an ordered three-node, two-edge directed observed path. Its pattern,
+distinct-observation support, example unit/edge identities, uncertainty, and
+measurement references are validated. Complete pattern and evidence properties
+are retained; observed nodes and edges are not inserted into the baseline.
+
+The caller supplies a unique run ID. Application covers the current built-in
+generator families and explicit numeric weight revisions. Semantic-role,
+transformation, and cross-domain proposals remain unsupported. Frame extension,
 alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 

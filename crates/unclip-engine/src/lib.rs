@@ -23,6 +23,7 @@ mod coupling_application;
 mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
+mod motif_application;
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
