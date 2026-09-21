@@ -24,6 +24,7 @@ mod distribution_comparison;
 mod event_comparison;
 mod graph_comparison;
 mod motif_application;
+mod observation_selection;
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
@@ -31,6 +32,7 @@ pub use candidate_application::{
 pub use graph_comparison::{
     DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
 };
+pub use observation_selection::ObservationSplit;
 pub use profile_comparison::{ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta};
 mod matrix_comparison;
 mod partition_comparison;
