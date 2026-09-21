@@ -116,3 +116,102 @@ fn wrong_baselines_unsupported_kinds_invalid_patterns_and_collisions_are_errors(
         .apply_candidate(&baseline, &candidate, "", Timestamp::new("now"))
         .is_err());
 }
+
+fn weighted_domain() -> DomainSnapshot {
+    let mut d = domain();
+    d.units
+        .get_mut(&UnitId::new("existing"))
+        .unwrap()
+        .properties
+        .insert("weight".into(), PropertyValue::Integer(2));
+    let id = unclip_domain::RelationId::new("r");
+    d.relations.insert(
+        id.clone(),
+        unclip_domain::Relation {
+            id,
+            source: UnitId::new("existing"),
+            target: UnitId::new("existing"),
+            kind: "self".into(),
+            properties: BTreeMap::from([("weight".into(), PropertyValue::Number(0.5))]),
+        },
+    );
+    d
+}
+fn weight_proposal(kind: &str, id: &str, value: serde_json::Value) -> CandidateProposal {
+    let mut c = proposal();
+    c.kind = CandidateKind::WeightRevision;
+    c.value["pattern"] = json!({"matching":"numeric_property_revision","target":{"kind":kind,"id":id},"property":"weight","proposed_value":value});
+    c
+}
+#[test]
+fn weight_revisions_preserve_types_record_changes_and_leave_baseline_intact() {
+    for (kind, id, value, expected) in [
+        ("unit", "existing", json!(-1), PropertyValue::Integer(-1)),
+        ("relation", "r", json!(0.0), PropertyValue::Number(0.0)),
+    ] {
+        let baseline = Tracked::from_recorded(DerivedId::new("baseline"), weighted_domain());
+        let proposal = weight_proposal(kind, id, value);
+        let candidate = Tracked::from_recorded(DerivedId::new("proposal"), proposal.clone());
+        let engine = Engine::with_builtins().unwrap();
+        let result = engine
+            .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+            .unwrap();
+        assert_eq!(
+            DependencyCollector::default().read(&baseline),
+            &weighted_domain()
+        );
+        assert!(result.value().added_units.is_empty());
+        assert_eq!(result.value().property_changes.len(), 1);
+        let change = &result.value().property_changes[0];
+        assert_eq!(change.after, expected);
+        let stored = if kind == "unit" {
+            &result.value().domain.units[&UnitId::new(id)].properties["weight"]
+        } else {
+            &result.value().domain.relations[&unclip_domain::RelationId::new(id)].properties
+                ["weight"]
+        };
+        assert_eq!(stored, &expected);
+        assert_eq!(
+            change.before,
+            if kind == "unit" {
+                PropertyValue::Integer(2)
+            } else {
+                PropertyValue::Number(0.5)
+            }
+        );
+        assert_eq!(
+            result.provenance().inputs,
+            vec![DerivedId::new("baseline"), DerivedId::new("proposal")]
+        );
+        assert_eq!(result, apply(weighted_domain(), proposal).unwrap());
+    }
+}
+#[test]
+fn weight_application_rejects_missing_or_invalid_numeric_evidence() {
+    for value in [
+        json!(true),
+        json!("1"),
+        json!(null),
+        json!(9_007_199_254_740_993u64),
+    ] {
+        assert!(apply(
+            weighted_domain(),
+            weight_proposal("unit", "existing", value)
+        )
+        .is_err());
+    }
+    assert!(apply(
+        weighted_domain(),
+        weight_proposal("unit", "missing", json!(1))
+    )
+    .is_err());
+    assert!(apply(domain(), weight_proposal("unit", "existing", json!(1))).is_err());
+    let mut invalid = weighted_domain();
+    invalid
+        .units
+        .get_mut(&UnitId::new("existing"))
+        .unwrap()
+        .properties
+        .insert("weight".into(), PropertyValue::Number(f64::NAN));
+    assert!(apply(invalid, weight_proposal("unit", "existing", json!(1))).is_err());
+}

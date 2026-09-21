@@ -463,6 +463,14 @@ baseline, candidate, added unit, and both input dependencies. No repository writ
 or candidate promotion occurs. Baseline mismatches, malformed patterns, and
 identity collisions are errors.
 
+The same API applies `numeric_property_revision` weight proposals to existing
+unit or relation properties. The snapshot retains typed `PropertyChange` records
+with target, property, original value, and proposed value. Integer and floating
+values keep their types. Missing targets or properties, nonnumeric or nonfinite
+values, unsafe integer conversions, and overflowing changes are rejected. No
+property is created implicitly. Application provenance uses algorithm version
+0.2.0 and records the complete change list.
+
 The caller supplies a unique run ID. Other candidate kinds, frame extension,
 alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.

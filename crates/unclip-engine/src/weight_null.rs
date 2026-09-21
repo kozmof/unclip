@@ -41,7 +41,7 @@ struct Pattern {
 fn invalid(message: &str) -> PluginError {
     PluginError::Message(message.into())
 }
-fn numeric(value: &PropertyValue) -> Result<f64> {
+pub(super) fn numeric(value: &PropertyValue) -> Result<f64> {
     let value = match value {
         PropertyValue::Integer(value) if value.unsigned_abs() <= 9_007_199_254_740_992 => {
             *value as f64
