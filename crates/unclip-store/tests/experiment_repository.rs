@@ -11,7 +11,7 @@ use unclip_store::{
     CompletedExperimentBundle, DomainRevision, DomainRevisionRepository, ExperimentDelta,
     ExperimentMeasurementProfile, ExperimentOutcome, ExperimentRepository,
     MeasurementProfileHeader, ProvenanceRepository, SeaOrmExperimentRepository,
-    SeaOrmProvenanceRepository,
+    SeaOrmProvenanceRepository, StoredProvenance,
 };
 
 fn derived<T, O: OperationKind>(
@@ -175,7 +175,7 @@ async fn assert_no_experiment(db: &DatabaseConnection, provenance: &SeaOrmProven
     ] {
         assert_eq!(count(db, table).await, 0, "{table}");
     }
-    for id in ["experiment", "scalar", "vector"] {
+    for id in ["experiment", "scalar", "vector", "bundle-summary"] {
         assert!(
             provenance
                 .get_provenance(&DerivedId::new(id))
@@ -534,6 +534,19 @@ fn completed_bundle(value: ExperimentOutcome) -> CompletedExperimentBundle {
             bundle_profile("bundle-before", "before-p"),
             bundle_profile("bundle-after", "after-p"),
         ],
+        post_delta_provenance: {
+            let value: unclip_epistemic::Calculated<()> = derived(
+                "bundle-summary",
+                "compare.profile",
+                &["scalar", "vector"],
+                (),
+            );
+            vec![StoredProvenance {
+                id: value.id().clone(),
+                run_id: Some("run".into()),
+                provenance: value.provenance().clone(),
+            }]
+        },
         experiment: experiment(value),
         deltas,
     }
@@ -541,7 +554,7 @@ fn completed_bundle(value: ExperimentOutcome) -> CompletedExperimentBundle {
 
 #[tokio::test]
 async fn completed_bundle_inserts_profiles_deltas_and_experiment_atomically() {
-    let (db, repo, _) = setup().await;
+    let (db, repo, provenance) = setup().await;
     repo.insert_candidate(Some("run".into()), candidate("candidate"))
         .await
         .unwrap();
@@ -561,6 +574,11 @@ async fn completed_bundle_inserts_profiles_deltas_and_experiment_atomically() {
         .all(|delta| delta.before_profile_id == "bundle-before"
             && delta.after_profile_id == "bundle-after"));
     assert_eq!(count(&db, "measurement_profiles").await, 4);
+    assert!(provenance
+        .get_provenance(&DerivedId::new("bundle-summary"))
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]

@@ -31,6 +31,8 @@ struct Request {
     #[serde(default)]
     constraints: Vec<unclip_engine::ExperimentConstraint>,
     #[serde(default)]
+    pareto_dimensions: Vec<unclip_engine::ParetoDimension>,
+    #[serde(default)]
     transfer_measurement_profiles: Vec<String>,
 }
 
@@ -348,6 +350,7 @@ pub(crate) async fn run(
         ExperimentConstraints {
             requirements: &request.constraints,
             transfer_measurements: &transfer,
+            pareto_dimensions: &request.pareto_dimensions,
         },
         unclip_engine::MeasurementRun {
             id: &request.run_id,
@@ -453,6 +456,42 @@ pub(crate) async fn run(
                 provenance: value.provenance().clone(),
             }),
     );
+    prerequisite_provenance.extend(
+        experiment
+            .null_results
+            .iter()
+            .map(|value| StoredProvenance {
+                id: value.id().clone(),
+                run_id: Some(request.run_id.clone()),
+                provenance: value.provenance().clone(),
+            }),
+    );
+    if let Some(value) = &experiment.constraints {
+        prerequisite_provenance.push(StoredProvenance {
+            id: value.id().clone(),
+            run_id: Some(request.run_id.clone()),
+            provenance: value.provenance().clone(),
+        });
+    }
+    if let Some(value) = &experiment.pareto {
+        prerequisite_provenance.push(StoredProvenance {
+            id: value.id().clone(),
+            run_id: Some(request.run_id.clone()),
+            provenance: value.provenance().clone(),
+        });
+    }
+    let post_delta_provenance = vec![
+        StoredProvenance {
+            id: experiment.execution.comparison.profile.id().clone(),
+            run_id: Some(request.run_id.clone()),
+            provenance: experiment.execution.comparison.profile.provenance().clone(),
+        },
+        StoredProvenance {
+            id: experiment.evidence.id().clone(),
+            run_id: Some(request.run_id.clone()),
+            provenance: experiment.evidence.provenance().clone(),
+        },
+    ];
     let run_record = engine.run_record(
         &plan,
         &parsed.params,
@@ -478,6 +517,7 @@ pub(crate) async fn run(
             CompletedExperimentBundle {
                 prerequisite_provenance,
                 profiles: vec![before_profile, after_profile],
+                post_delta_provenance,
                 experiment: persistable.outcome,
                 deltas: persistable.deltas,
             },

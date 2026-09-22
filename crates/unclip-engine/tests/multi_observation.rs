@@ -1693,6 +1693,12 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             pairs,
             unclip_engine::ExperimentConstraints {
                 transfer_measurements: &transfer_measurements,
+                pareto_dimensions: &[unclip_engine::ParetoDimension {
+                    name: "spearman".into(),
+                    left: DerivedId::new("paired/before/sensor.spearman"),
+                    right: DerivedId::new("paired/after/sensor.spearman"),
+                    direction: unclip_engine::ObjectiveDirection::Maximize,
+                }],
                 requirements: &[
                     unclip_engine::ExperimentConstraint::MinimumSamples {
                         measurement: DerivedId::new("paired/before/sensor.spearman"),
@@ -1744,7 +1750,18 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     );
     let evidence = experiment.evidence.value();
     let assessed = experiment.constraints.as_ref().unwrap();
+    let pareto = experiment.pareto.as_ref().unwrap();
     assert_eq!(evidence.constraint_assessment.as_ref(), Some(assessed.id()));
+    assert_eq!(evidence.pareto_assessment.as_ref(), Some(pareto.id()));
+    assert_eq!(evidence.pareto.as_ref(), Some(pareto.value()));
+    assert_eq!(
+        pareto.value().relation,
+        unclip_engine::ParetoRelation::Incomparable
+    );
+    assert_eq!(
+        pareto.provenance().operation,
+        unclip_epistemic::Operation::Calculated
+    );
     assert_eq!(&evidence.constraints, assessed.value());
     assert_eq!(
         evidence.constraints[0].status,
@@ -1809,6 +1826,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     ]);
     expected.insert(proposal.id().clone());
     expected.insert(assessed.id().clone());
+    expected.insert(pareto.id().clone());
     expected.extend(transfer_measurements.iter().map(|v| v.id().clone()));
     assert_eq!(
         evidence.constraints[2].status,

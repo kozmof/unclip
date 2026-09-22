@@ -22,6 +22,10 @@ pub struct CounterfactualEvidence {
     pub constraint_assessment: Option<DerivedId>,
     pub constraints: Vec<super::ConstraintAssessment>,
     pub transfer_measurements: Vec<unclip_store::RecordedInference<unclip_measure::Measurement>>,
+    #[serde(default)]
+    pub pareto_assessment: Option<DerivedId>,
+    #[serde(default)]
+    pub pareto: Option<super::ParetoAssessment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +40,7 @@ pub struct NullEvidence {
 pub struct ExperimentConstraints<'a> {
     pub requirements: &'a [super::ExperimentConstraint],
     pub transfer_measurements: &'a [Tracked<unclip_measure::Measurement>],
+    pub pareto_dimensions: &'a [super::ParetoDimension],
 }
 
 pub struct CounterfactualExperiment {
@@ -43,6 +48,7 @@ pub struct CounterfactualExperiment {
     pub execution: super::CounterfactualComparison,
     pub null_results: Vec<Calculated<unclip_measure::Reading>>,
     pub constraints: Option<Calculated<Vec<super::ConstraintAssessment>>>,
+    pub pareto: Option<Calculated<super::ParetoAssessment>>,
 }
 
 pub struct PersistableExperiment {
@@ -188,6 +194,7 @@ impl super::Engine {
         run: super::MeasurementRun<'_>,
     ) -> Result<CounterfactualExperiment> {
         let constraints = constraint_inputs.requirements;
+        let pareto_dimensions = constraint_inputs.pareto_dimensions;
         let dependencies = DependencyCollector::default();
         let baseline = dependencies.read(inputs.baseline.baseline);
         let frame = dependencies.read(inputs.baseline.frame);
@@ -231,6 +238,8 @@ impl super::Engine {
             constraint_assessment: None,
             constraints: vec![],
             transfer_measurements: vec![],
+            pareto_assessment: None,
+            pareto: None,
             before: vec![],
             after: vec![],
             comparison: DerivedId::new(format!("{}/comparison/profile", run.id)),
@@ -327,6 +336,35 @@ impl super::Engine {
                     value: dependencies.read(input).clone(),
                 });
         }
+        let pareto = if pareto_dimensions.is_empty() {
+            None
+        } else {
+            let measurements = execution
+                .measurements
+                .before
+                .iter()
+                .chain(&execution.measurements.after)
+                .map(|value| Tracked::from_derived(value, value.value().clone()))
+                .collect::<Vec<_>>();
+            let result = self.compare_pareto(
+                &measurements,
+                pareto_dimensions,
+                &constraint_run_id,
+                timestamp.clone(),
+            )?;
+            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+                return Err(PluginError::Message(
+                    "Pareto output identity collides with experimental evidence".into(),
+                ));
+            }
+            evidence.pareto_assessment = Some(result.id().clone());
+            evidence.pareto = Some(
+                dependencies
+                    .read(&Tracked::from_derived(&result, result.value().clone()))
+                    .clone(),
+            );
+            Some(result)
+        };
         let assessments = if constraints.is_empty() {
             None
         } else {
@@ -363,13 +401,13 @@ impl super::Engine {
                 "experimental output identity collides with an input or intermediate result".into(),
             ));
         }
-        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints,"transfer_measurements":evidence.transfer_measurements});
+        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints,"transfer_measurements":evidence.transfer_measurements,"pareto_dimensions":pareto_dimensions});
         let token = ExperimentToken::from_harness(
             EmitMetadata {
                 id,
                 producer: PluginId::new("experiment.counterfactual"),
                 algorithm: "held_out_counterfactual_comparison".into(),
-                version: semver::Version::new(0, 4, 0),
+                version: semver::Version::new(0, 5, 0),
                 params_hash: hash_params(&params),
                 params,
                 source: None,
@@ -385,6 +423,7 @@ impl super::Engine {
             execution,
             null_results,
             constraints: assessments,
+            pareto,
         })
     }
 }

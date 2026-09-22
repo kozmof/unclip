@@ -81,6 +81,8 @@ pub struct CompletedExperimentBundle {
     /// Must be topologically ordered; candidate and observation provenance is preexisting.
     pub prerequisite_provenance: Vec<StoredProvenance>,
     pub profiles: Vec<ExperimentMeasurementProfile>,
+    /// Must be topologically ordered after calculated delta provenance.
+    pub post_delta_provenance: Vec<StoredProvenance>,
     pub experiment: Experimental<ExperimentOutcome>,
     pub deltas: Vec<ExperimentDelta>,
 }
@@ -295,6 +297,7 @@ async fn insert_completed_experiment_in_transaction(
     run_id: &str,
     experiment: Experimental<ExperimentOutcome>,
     deltas: Vec<ExperimentDelta>,
+    post_delta_provenance: Vec<StoredProvenance>,
 ) -> StoreResult<()> {
     let value = experiment.value();
     if value.held_out.is_empty() || value.started_at.is_empty() {
@@ -326,6 +329,9 @@ async fn insert_completed_experiment_in_transaction(
     for delta in deltas {
         require_input(experiment.provenance(), &delta.calculated.id().0)?;
         delta_rows.push(prepare_delta(txn, run_id, experiment.id(), delta).await?);
+    }
+    for value in post_delta_provenance {
+        insert_provenance_in_transaction(txn, value).await?;
     }
     provenance(
         txn,
@@ -401,7 +407,8 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
         deltas: Vec<ExperimentDelta>,
     ) -> StoreResult<()> {
         let txn = self.db.begin().await?;
-        insert_completed_experiment_in_transaction(&txn, run_id, experiment, deltas).await?;
+        insert_completed_experiment_in_transaction(&txn, run_id, experiment, deltas, vec![])
+            .await?;
         txn.commit().await?;
         Ok(())
     }
@@ -421,8 +428,14 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
             }
             insert_profile_in_transaction(&txn, profile.header, profile.measurements).await?;
         }
-        insert_completed_experiment_in_transaction(&txn, run_id, bundle.experiment, bundle.deltas)
-            .await?;
+        insert_completed_experiment_in_transaction(
+            &txn,
+            run_id,
+            bundle.experiment,
+            bundle.deltas,
+            bundle.post_delta_provenance,
+        )
+        .await?;
         txn.commit().await?;
         Ok(())
     }

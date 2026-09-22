@@ -722,6 +722,12 @@ async fn level_domain_frame_and_observe_workflow() {
                 "maximum_added_units":1,
                 "maximum_added_relations":0,
                 "maximum_property_changes":0
+            }],
+            "pareto_dimensions":[{
+                "name":"coverage",
+                "left":"experiment-cli/before/sensor.coverage",
+                "right":"experiment-cli/after/sensor.coverage",
+                "direction":"maximize"
             }]
         })
         .to_string(),
@@ -752,6 +758,7 @@ async fn level_domain_frame_and_observe_workflow() {
         .expect("experiment output should contain typed result JSON");
     assert_eq!(result["null_results"].as_array().unwrap().len(), 1);
     assert_eq!(result["constraints"][0]["status"], "satisfied");
+    assert_eq!(result["pareto"]["relation"], "incomparable");
     assert_eq!(
         result["delta_profile"]["deltas"].as_array().unwrap().len(),
         1
@@ -768,6 +775,32 @@ async fn level_domain_frame_and_observe_workflow() {
         vec![unclip_observe::ObservationId::new("manual-observation")]
     );
     assert_eq!(completed.deltas.len(), 1);
+    let provenance = unclip_store::SeaOrmProvenanceRepository::new(connection);
+    for id in [
+        "experiment-cli/nulls/null.existing-unit",
+        "experiment-cli/constraints",
+        "experiment-cli/pareto",
+        "experiment-cli/comparison/profile",
+        "experiment-cli/experiment",
+        "experiment-cli/experiment/completed",
+    ] {
+        let stored = unclip_store::ProvenanceRepository::get_provenance(
+            &provenance,
+            &unclip_epistemic::DerivedId::new(id),
+        )
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("{id} provenance should be persisted"));
+        if matches!(
+            id,
+            "experiment-cli/experiment" | "experiment-cli/experiment/completed"
+        ) {
+            assert_eq!(
+                stored.provenance.operation,
+                unclip_epistemic::Operation::Experimental
+            );
+        }
+    }
     assert!(unclip_store::MeasurementRepository::get_profile(
         &measurements,
         "experiment-cli/before-profile"
