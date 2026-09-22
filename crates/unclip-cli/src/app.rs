@@ -213,6 +213,11 @@ pub async fn run() -> anyhow::Result<()> {
         },
         Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,
         Command::Level { action } => match action {
+            LevelAction::Candidates {
+                domain,
+                after,
+                limit,
+            } => crate::leveling::candidates(&repos, &domain, after.as_deref(), limit).await?,
             LevelAction::Plugins => unreachable!("plugins returns before opening repositories"),
             LevelAction::Domain { action } => match action {
                 LevelDomainAction::Import { file } => {

@@ -239,6 +239,15 @@ pub(crate) enum Command {
 
 #[derive(Subcommand)]
 pub(crate) enum LevelAction {
+    /// List stored candidates for an explicit domain version as JSON.
+    Candidates {
+        #[arg(long)]
+        domain: String,
+        #[arg(long)]
+        after: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
     /// List the leveling plugins compiled into this binary.
     Plugins,
 

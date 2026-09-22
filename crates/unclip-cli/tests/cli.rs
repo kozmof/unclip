@@ -604,6 +604,7 @@ fn level_help_lists_plugins_command() {
     let out = unclip(&db.path(), &["level", "--help"]);
     assert!(out.status.success(), "help failed: {}", stderr(&out));
     assert!(stdout(&out).contains("plugins"));
+    assert!(stdout(&out).contains("candidates"));
     assert!(stdout(&out).contains("verify"));
     let verify_help = unclip(&db.path(), &["level", "verify", "--help"]);
     assert!(verify_help.status.success());

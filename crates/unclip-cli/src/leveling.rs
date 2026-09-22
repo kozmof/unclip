@@ -1004,3 +1004,28 @@ mod discovery_replay_tests {
         }
     }
 }
+
+pub(crate) async fn candidates(
+    repos: &crate::db::Repos,
+    domain: &str,
+    after: Option<&str>,
+    limit: u64,
+) -> anyhow::Result<()> {
+    use unclip_store::{CandidateRepository, DomainReader};
+    let (domain_id, version) = parse_domain_selector(domain)?;
+    anyhow::ensure!(
+        repos
+            .domains
+            .get_domain_version(&domain_id, &version)
+            .await?
+            .is_some(),
+        "domain version not found: {domain}"
+    );
+    let key = serde_json::to_string(&(&domain_id.0, &version.0))?;
+    let after = after.map(unclip_epistemic::DerivedId::new);
+    let records = repos
+        .experiments
+        .list_candidates(&key, after.as_ref(), limit)
+        .await?;
+    crate::output::write_stdout(&format!("{}\n", serde_json::to_string_pretty(&records)?))
+}

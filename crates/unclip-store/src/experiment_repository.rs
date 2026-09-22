@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, QueryOrder, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -22,7 +22,7 @@ use crate::{
 
 pub use unclip_domain::{CandidateKind, CandidateProposal};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandidateRecord {
     pub id: DerivedId,
     pub created_at: String,
@@ -95,6 +95,12 @@ pub trait CandidateRepository: Sync {
         candidate: Calculated<CandidateProposal>,
     ) -> StoreResult<()>;
     async fn get_candidate(&self, id: &DerivedId) -> StoreResult<Option<CandidateRecord>>;
+    async fn list_candidates(
+        &self,
+        domain_version_id: &str,
+        after: Option<&DerivedId>,
+        limit: u64,
+    ) -> StoreResult<Vec<CandidateRecord>>;
 }
 
 #[async_trait]
@@ -208,6 +214,42 @@ impl CandidateRepository for SeaOrmExperimentRepository {
         .await?;
         txn.commit().await?;
         Ok(())
+    }
+    async fn list_candidates(
+        &self,
+        domain_version_id: &str,
+        after: Option<&DerivedId>,
+        limit: u64,
+    ) -> StoreResult<Vec<CandidateRecord>> {
+        if domain_version_id.is_empty() || !(1..=1000).contains(&limit) {
+            return Err(invalid(
+                "candidate listing requires a domain and limit between 1 and 1000",
+            ));
+        }
+        let mut query = candidates::Entity::find()
+            .filter(candidates::Column::DomainVersionId.eq(domain_version_id));
+        if let Some(after) = after {
+            query = query.filter(candidates::Column::Id.gt(&after.0));
+        }
+        query
+            .order_by_asc(candidates::Column::Id)
+            .limit(limit)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|row| {
+                Ok(CandidateRecord {
+                    id: DerivedId::new(row.id),
+                    created_at: row.created_at,
+                    proposal: CandidateProposal {
+                        domain_version_id: row.domain_version_id,
+                        kind: serde_json::from_value(Value::String(row.kind))
+                            .context("invalid stored candidate kind")?,
+                        value: parse(&row.value_json)?,
+                    },
+                })
+            })
+            .collect()
     }
     async fn get_candidate(&self, id: &DerivedId) -> StoreResult<Option<CandidateRecord>> {
         let Some(row) = candidates::Entity::find_by_id(&id.0).one(&self.db).await? else {

@@ -471,3 +471,32 @@ async fn revision_failures_do_not_leave_provenance_or_create_versions() {
         .is_err());
     assert_eq!(count(&db, "domain_versions").await, 2);
 }
+
+#[tokio::test]
+async fn candidate_listing_is_domain_scoped_ordered_and_bounded() {
+    let (_, repo, _) = setup().await;
+    for id in ["c", "a", "b"] {
+        repo.insert_candidate(None, candidate(id)).await.unwrap();
+    }
+    let first = repo.list_candidates("d1", None, 2).await.unwrap();
+    assert_eq!(
+        first.iter().map(|c| c.id.0.as_str()).collect::<Vec<_>>(),
+        vec!["a", "b"]
+    );
+    assert_eq!(first[0].proposal, proposal());
+    let next = repo
+        .list_candidates("d1", Some(&first[1].id), 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        next.iter().map(|c| c.id.0.as_str()).collect::<Vec<_>>(),
+        vec!["c"]
+    );
+    assert!(repo
+        .list_candidates("d2", None, 2)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(repo.list_candidates("d1", None, 0).await.is_err());
+    assert!(repo.list_candidates("d1", None, 1001).await.is_err());
+}

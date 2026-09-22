@@ -66,6 +66,7 @@ pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
 
 /// A bundle of repositories sharing one connection.
 pub struct Repos {
+    pub experiments: unclip_store::SeaOrmExperimentRepository,
     pub branches: SeaOrmBranchRepository,
     pub domains: SeaOrmDomainRepository,
     pub engine_runs: SeaOrmEngineRunRepository,
@@ -88,6 +89,7 @@ pub async fn open_repos(path: &Path, create: bool) -> anyhow::Result<Repos> {
         open_existing(path).await?
     };
     Ok(Repos {
+        experiments: unclip_store::SeaOrmExperimentRepository::new(conn.clone()),
         branches: SeaOrmBranchRepository::new(conn.clone()),
         domains: SeaOrmDomainRepository::new(conn.clone()),
         engine_runs: SeaOrmEngineRunRepository::new(conn.clone()),
