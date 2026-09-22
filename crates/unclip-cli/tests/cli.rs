@@ -659,45 +659,107 @@ async fn level_domain_frame_and_observe_workflow() {
     assert_eq!(stored.measurements.len(), 1);
     assert_eq!(stored.measurements[0].sensor.0, "sensor.coverage");
 
-    let candidate_id = unclip_epistemic::DerivedId::new("experiment-candidate");
-    let dependencies = unclip_epistemic::DependencyCollector::default();
-    dependencies.read(&unclip_epistemic::Tracked::from_recorded(
-        unclip_epistemic::DerivedId::new(&derived_id),
-        (),
-    ));
-    let candidate_params = serde_json::json!({"fixture":true});
-    let candidate = unclip_epistemic::CalculationToken::from_harness(
-        unclip_epistemic::EmitMetadata {
-            id: candidate_id.clone(),
-            producer: unclip_epistemic::PluginId::new("generate.fixture"),
-            algorithm: "generate.fixture".into(),
-            version: "0.1.0".parse().unwrap(),
-            params_hash: unclip_epistemic::hash_params(&candidate_params),
-            params: candidate_params,
-            source: None,
-            timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
-            domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
-            frame_version: None,
-            model: None,
+    let training_evidence = unclip_epistemic::DerivedId::new("training-evidence");
+    let root_params = serde_json::json!({"fixture":"training-only"});
+    let provenance = unclip_store::SeaOrmProvenanceRepository::new(connection.clone());
+    unclip_store::ProvenanceRepository::insert_provenance(
+        &provenance,
+        unclip_store::StoredProvenance {
+            id: training_evidence.clone(),
+            run_id: None,
+            provenance: unclip_epistemic::Provenance {
+                operation: unclip_epistemic::Operation::Calculated,
+                producer: unclip_epistemic::PluginId::new("fixture.training"),
+                algorithm: "fixture.training".into(),
+                version: "0.1.0".parse().unwrap(),
+                params_hash: unclip_epistemic::hash_params(&root_params),
+                params: root_params,
+                inputs: vec![],
+                source: None,
+                timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
+                domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
+                frame_version: None,
+                model: None,
+            },
         },
-        dependencies,
     )
-    .emit(unclip_store::CandidateProposal {
+    .await
+    .unwrap();
+    let leaked_intermediate = unclip_epistemic::DerivedId::new("leaked-intermediate");
+    let leaked_params = serde_json::json!({"fixture":"transitive-leak"});
+    unclip_store::ProvenanceRepository::insert_provenance(
+        &provenance,
+        unclip_store::StoredProvenance {
+            id: leaked_intermediate.clone(),
+            run_id: None,
+            provenance: unclip_epistemic::Provenance {
+                operation: unclip_epistemic::Operation::Calculated,
+                producer: unclip_epistemic::PluginId::new("fixture.intermediate"),
+                algorithm: "fixture.intermediate".into(),
+                version: "0.1.0".parse().unwrap(),
+                params_hash: unclip_epistemic::hash_params(&leaked_params),
+                params: leaked_params,
+                inputs: vec![unclip_epistemic::DerivedId::new(&derived_id)],
+                source: None,
+                timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
+                domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
+                frame_version: None,
+                model: None,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let proposal = unclip_store::CandidateProposal {
         domain_version_id: serde_json::to_string(&("coffee", "7")).unwrap(),
         kind: unclip_store::CandidateKind::AtomicMeaning,
         value: serde_json::json!({
             "pattern":{"matching":"exact_observed_label","observed_label":"new evidence"},
-            "observation_count":1,
-            "examples":[{"observation":"manual-observation"}]
+            "fixture":"training-only"
         })
         .as_object()
         .unwrap()
         .clone(),
-    });
+    };
+    let make_candidate = |id: &str, input: unclip_epistemic::DerivedId| {
+        let dependencies = unclip_epistemic::DependencyCollector::default();
+        dependencies.read(&unclip_epistemic::Tracked::from_recorded(input, ()));
+        let params = serde_json::json!({"fixture":true});
+        unclip_epistemic::CalculationToken::from_harness(
+            unclip_epistemic::EmitMetadata {
+                id: unclip_epistemic::DerivedId::new(id),
+                producer: unclip_epistemic::PluginId::new("generate.fixture"),
+                algorithm: "generate.fixture".into(),
+                version: "0.1.0".parse().unwrap(),
+                params_hash: unclip_epistemic::hash_params(&params),
+                params,
+                source: None,
+                timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
+                domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
+                frame_version: None,
+                model: None,
+            },
+            dependencies,
+        )
+        .emit(proposal.clone())
+    };
+    let candidate_id = unclip_epistemic::DerivedId::new("experiment-candidate");
+    let leaked_candidate_id = unclip_epistemic::DerivedId::new("leaked-candidate");
     let experiments = unclip_store::SeaOrmExperimentRepository::new(connection.clone());
-    unclip_store::CandidateRepository::insert_candidate(&experiments, None, candidate)
-        .await
-        .unwrap();
+    unclip_store::CandidateRepository::insert_candidate(
+        &experiments,
+        None,
+        make_candidate(&candidate_id.0, training_evidence),
+    )
+    .await
+    .unwrap();
+    unclip_store::CandidateRepository::insert_candidate(
+        &experiments,
+        None,
+        make_candidate(&leaked_candidate_id.0, leaked_intermediate),
+    )
+    .await
+    .unwrap();
     let experiment_profile = db.write(
         "experiment-profile.json",
         &serde_json::json!({
@@ -763,6 +825,42 @@ async fn level_domain_frame_and_observe_workflow() {
         result["delta_profile"]["deltas"].as_array().unwrap().len(),
         1
     );
+    let leaked_request = db.write(
+        "leaked-experiment-request.json",
+        &serde_json::json!({
+            "run_id":"experiment-leak",
+            "candidate":leaked_candidate_id,
+            "training":[],
+            "held_out":["manual-observation"],
+            "comparison_sensor":"sensor.coverage"
+        })
+        .to_string(),
+    );
+    let rejected = unclip(
+        &path,
+        &[
+            "level",
+            "experiment",
+            "--profile",
+            experiment_profile.to_str().unwrap(),
+            "--request",
+            leaked_request.to_str().unwrap(),
+        ],
+    );
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("candidate provenance depends on held-out evidence"),
+        "unexpected leakage error: {}",
+        stderr(&rejected)
+    );
+    let runs = unclip_store::SeaOrmEngineRunRepository::new(connection.clone());
+    assert!(
+        unclip_store::EngineRunRepository::get_run(&runs, "experiment-leak")
+            .await
+            .unwrap()
+            .is_none(),
+        "rejected leakage must not create an engine run"
+    );
     let completed = unclip_store::ExperimentRepository::get_completed_experiment(
         &experiments,
         &unclip_epistemic::DerivedId::new("experiment-cli/experiment/completed"),
@@ -775,7 +873,7 @@ async fn level_domain_frame_and_observe_workflow() {
         vec![unclip_observe::ObservationId::new("manual-observation")]
     );
     assert_eq!(completed.deltas.len(), 1);
-    let provenance = unclip_store::SeaOrmProvenanceRepository::new(connection);
+    let provenance = unclip_store::SeaOrmProvenanceRepository::new(connection.clone());
     for id in [
         "experiment-cli/nulls/null.existing-unit",
         "experiment-cli/constraints",

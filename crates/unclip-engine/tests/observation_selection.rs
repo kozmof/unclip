@@ -145,3 +145,70 @@ fn rejects_ambiguous_missing_overlapping_or_empty_selections() {
         .select_observations(&inputs, &[], &ids(&["a"]), "run", Timestamp::new("now"))
         .is_ok());
 }
+
+#[test]
+fn candidate_ancestry_excludes_held_out_observations_and_inference_products() {
+    let engine = Engine::with_builtins().unwrap();
+    let selected = engine
+        .select_observations(
+            &[
+                observation("training", "training-p"),
+                observation("held", "held-p"),
+            ],
+            &ids(&["training"]),
+            &ids(&["held"]),
+            "run",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    let candidate = DerivedId::new("candidate");
+    assert!(engine
+        .validate_candidate_ancestry(
+            &candidate,
+            &[DerivedId::new("training-p")],
+            selected.value(),
+            &[DerivedId::new("held-alignment")],
+        )
+        .is_ok());
+    for ancestry in [
+        vec![DerivedId::new("held-p")],
+        vec![
+            DerivedId::new("training-p"),
+            DerivedId::new("held-alignment"),
+        ],
+    ] {
+        let error = engine
+            .validate_candidate_ancestry(
+                &candidate,
+                &ancestry,
+                selected.value(),
+                &[DerivedId::new("held-alignment")],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("held-out evidence"));
+    }
+
+    let shared = engine
+        .select_observations(
+            &[
+                observation("training", "batch"),
+                observation("held", "batch"),
+            ],
+            &ids(&["training"]),
+            &ids(&["held"]),
+            "shared",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    assert!(engine
+        .validate_candidate_ancestry(&candidate, &[DerivedId::new("batch")], shared.value(), &[],)
+        .is_err());
+    assert!(engine
+        .validate_candidate_ancestry(
+            &candidate,
+            std::slice::from_ref(&candidate),
+            selected.value(),
+            &[],
+        )
+        .is_err());
+}

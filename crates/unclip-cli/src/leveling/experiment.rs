@@ -242,6 +242,7 @@ pub(crate) async fn run(
             .is_some(),
         "candidate provenance not found"
     );
+    let candidate_ancestors = repos.provenance.ancestors(&request.candidate).await?;
     let candidate = Tracked::from_recorded(request.candidate.clone(), candidate_record.proposal);
 
     let selected_ids = request
@@ -311,6 +312,17 @@ pub(crate) async fn run(
         &request.held_out,
         &request.run_id,
         Timestamp::new(timestamp.clone()),
+    )?;
+    let held_out_inference_products = alignments
+        .iter()
+        .map(|value| value.id().clone())
+        .chain(rankings.iter().map(|value| value.id().clone()))
+        .collect::<Vec<_>>();
+    engine.validate_candidate_ancestry(
+        candidate.id(),
+        &candidate_ancestors,
+        split.value(),
+        &held_out_inference_products,
     )?;
     let tracked_split = Tracked::from_derived(&split, split.value().clone());
     let application_id = format!("{}/application", request.run_id);

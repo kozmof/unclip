@@ -22,6 +22,56 @@ fn invalid(message: &str) -> PluginError {
 }
 
 impl super::Engine {
+    /// Reject a candidate whose transitive provenance reaches held-out observations
+    /// or their selected inference products. Shared provenance across training and
+    /// held-out entries is conservatively treated as leakage.
+    pub fn validate_candidate_ancestry(
+        &self,
+        candidate: &DerivedId,
+        candidate_ancestors: &[DerivedId],
+        split: &ObservationSplit,
+        held_out_inference_products: &[DerivedId],
+    ) -> Result<()> {
+        if candidate.0.trim().is_empty() || split.held_out.is_empty() {
+            return Err(invalid(
+                "candidate leakage validation requires candidate and held-out identities",
+            ));
+        }
+        let mut ancestry = BTreeSet::new();
+        for id in candidate_ancestors {
+            if id.0.trim().is_empty() || id == candidate || !ancestry.insert(id) {
+                return Err(invalid(
+                    "candidate ancestry requires unique nonempty acyclic identities",
+                ));
+            }
+        }
+        let mut held_out = split
+            .held_out
+            .iter()
+            .map(|entry| &entry.provenance)
+            .collect::<BTreeSet<_>>();
+        for id in held_out_inference_products {
+            if id.0.trim().is_empty() || id == candidate {
+                return Err(invalid(
+                    "held-out inference products require nonempty identities distinct from the candidate",
+                ));
+            }
+            held_out.insert(id);
+        }
+        let leaked = ancestry
+            .intersection(&held_out)
+            .map(|id| id.0.as_str())
+            .collect::<Vec<_>>();
+        if leaked.is_empty() {
+            Ok(())
+        } else {
+            Err(invalid(&format!(
+                "candidate provenance depends on held-out evidence: {}",
+                leaked.join(", ")
+            )))
+        }
+    }
+
     /// Select by observation identity, never by input ordering, labels or inferred time.
     /// Each split retains the caller's order and immutable input values for replay.
     /// This checks split disjointness; it does not certify candidate ancestry is leak-free.
