@@ -352,6 +352,14 @@ pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> any
     {
         return empirical::verify(repositories, &run).await;
     }
+    if run
+        .metadata
+        .get("stage")
+        .and_then(serde_json::Value::as_str)
+        == Some("discovery")
+    {
+        return discovery::verify(repositories, &run).await;
+    }
     let replay = unclip_store::EngineRunRepository::replay_run(&repositories.engine_runs, run_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("engine run not found: {run_id}"))?;

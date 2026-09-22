@@ -1,11 +1,62 @@
 //! Candidate generation from explicitly selected stored evidence.
 use anyhow::{ensure, Context};
+use serde::Deserialize;
 use std::collections::BTreeSet;
-use unclip_epistemic::{Timestamp, Tracked};
+use unclip_epistemic::{DerivedId, Timestamp, Tracked};
 use unclip_store::{
-    CandidateRepository, DomainReader, EngineRunRepository, EngineRunStatus, MeasurementRepository,
-    ObservationRepository,
+    CandidateRepository, DomainReader, EngineRunRecord, EngineRunRepository, EngineRunStatus,
+    MeasurementRecord, MeasurementRepository, ObservationRepository, ProvenanceRepository,
+    RecordedInference,
 };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectedStructure {
+    #[allow(dead_code)]
+    id: String,
+    provenance: DerivedId,
+    value: unclip_measure::EmpiricalStructure,
+}
+
+fn calculate(
+    run: &EngineRunRecord,
+    domain: &str,
+    measurements: Vec<MeasurementRecord>,
+    observations: Vec<RecordedInference<unclip_observe::Observation>>,
+    structures: Vec<SelectedStructure>,
+) -> anyhow::Result<Vec<unclip_epistemic::Calculated<unclip_domain::CandidateProposal>>> {
+    let (profile, params) = super::resolved_profile(&run.resolved_plan)?;
+    let engine = unclip_engine::Engine::with_builtins()?;
+    let plan = engine.plan(&profile)?;
+    let measurements = measurements
+        .into_iter()
+        .map(|record| Tracked::from_recorded(record.provenance, record.measurement))
+        .collect::<Vec<_>>();
+    let observations = observations
+        .into_iter()
+        .map(|record| Tracked::from_recorded(record.provenance, record.value))
+        .collect::<Vec<_>>();
+    let structures = structures
+        .into_iter()
+        .map(|record| Tracked::from_recorded(record.provenance, record.value))
+        .collect::<Vec<_>>();
+    let (domain_id, version) = super::parse_domain_selector(domain)?;
+    let domain_key = serde_json::to_string(&(&domain_id.0, &version.0))?;
+    Ok(engine.generate_candidates(
+        &plan,
+        unclip_engine::CandidateInputs {
+            domain_version_id: &domain_key,
+            measurements: &measurements,
+            observations: &observations,
+            structures: &structures,
+        },
+        unclip_engine::MeasurementRun {
+            id: &run.id,
+            timestamp: Timestamp::new(run.started_at.clone()),
+            params: &params,
+        },
+    )?)
+}
 
 pub(crate) async fn discover(
     repos: &crate::db::Repos,
@@ -162,5 +213,80 @@ pub(crate) async fn discover(
             serde_json::to_string(candidate.value())?
         );
     }
+    Ok(())
+}
+
+pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> anyhow::Result<()> {
+    ensure!(
+        run.status == EngineRunStatus::Completed,
+        "discovery run is not completed: {}",
+        run.id
+    );
+    let snapshot = run
+        .metadata
+        .get("snapshot")
+        .context("discovery run has no input snapshot")?;
+    let domain = snapshot
+        .get("domain")
+        .and_then(serde_json::Value::as_str)
+        .context("discovery snapshot has no domain selector")?;
+    let measurements: Vec<MeasurementRecord> = serde_json::from_value(
+        snapshot
+            .get("measurements")
+            .cloned()
+            .context("discovery snapshot has no measurements")?,
+    )?;
+    let observations: Vec<RecordedInference<unclip_observe::Observation>> = serde_json::from_value(
+        snapshot
+            .get("observations")
+            .cloned()
+            .context("discovery snapshot has no observations")?,
+    )?;
+    let structures: Vec<SelectedStructure> = serde_json::from_value(
+        snapshot
+            .get("structures")
+            .cloned()
+            .context("discovery snapshot has no structures")?,
+    )?;
+    let outputs = calculate(run, domain, measurements, observations, structures)?;
+    let manifest: Vec<DerivedId> = serde_json::from_value(
+        run.metadata
+            .get("outputs")
+            .cloned()
+            .context("discovery run has no output manifest")?,
+    )?;
+    ensure!(
+        outputs
+            .iter()
+            .map(|value| value.id().clone())
+            .collect::<Vec<_>>()
+            == manifest,
+        "discovery output manifest differs from stored run"
+    );
+    for output in &outputs {
+        let stored = repos
+            .experiments
+            .get_candidate(output.id())
+            .await?
+            .with_context(|| format!("candidate not found: {}", output.id()))?;
+        let provenance = repos
+            .provenance
+            .get_provenance(output.id())
+            .await?
+            .with_context(|| format!("candidate provenance not found: {}", output.id()))?;
+        ensure!(
+            stored.proposal == *output.value()
+                && stored.created_at == run.started_at
+                && provenance.provenance == *output.provenance()
+                && provenance.run_id.as_ref() == Some(&run.id),
+            "discovery candidate differs from stored result: {}",
+            output.id()
+        );
+    }
+    crate::output::outln!(
+        "VERIFIED\tDISCOVERY_REPLAY\trun={} candidates={}",
+        run.id,
+        outputs.len()
+    );
     Ok(())
 }

@@ -454,6 +454,19 @@ async fn level_domain_frame_and_observe_workflow() {
     );
     assert!(stdout(&discovered).contains("CALCULATED\tDISCOVERY\trun="));
     assert!(!stdout(&discovered).contains("CANDIDATE\t"));
+    let discovery_output = stdout(&discovered);
+    let discovery_run = discovery_output
+        .lines()
+        .find_map(|line| line.strip_prefix("CALCULATED\tDISCOVERY\trun="))
+        .expect("discovery output should identify its run");
+    let verified = unclip(&path, &["level", "verify", discovery_run]);
+    assert!(
+        verified.status.success(),
+        "verify failed: {}",
+        stderr(&verified)
+    );
+    assert!(stdout(&verified).contains("VERIFIED\tDISCOVERY_REPLAY"));
+    assert!(stdout(&verified).contains("candidates=0"));
     let listed = unclip(&path, &["level", "candidates", "--domain", "coffee@7"]);
     assert!(listed.status.success());
     assert_eq!(
