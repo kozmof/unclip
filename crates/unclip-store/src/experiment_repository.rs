@@ -16,7 +16,9 @@ use unclip_epistemic::{Calculated, DerivedId, Experimental, Provenance};
 use unclip_measure::{Delta, MeasurementValue};
 
 use crate::{
-    provenance_repository::insert_provenance_in_transaction, StoreError, StoreResult,
+    measurement_repository::{insert_profile_in_transaction, insert_sensor_run_in_transaction},
+    provenance_repository::insert_provenance_in_transaction,
+    MeasurementProfileHeader, MeasurementRecord, SensorRunRecord, StoreError, StoreResult,
     StoredProvenance,
 };
 
@@ -69,6 +71,20 @@ pub struct CompletedExperimentRecord {
     pub deltas: Vec<ExperimentDeltaRecord>,
 }
 
+pub struct ExperimentMeasurementProfile {
+    pub header: MeasurementProfileHeader,
+    pub sensor_runs: Vec<SensorRunRecord>,
+    pub measurements: Vec<MeasurementRecord>,
+}
+
+pub struct CompletedExperimentBundle {
+    /// Must be topologically ordered; candidate and observation provenance is preexisting.
+    pub prerequisite_provenance: Vec<StoredProvenance>,
+    pub profiles: Vec<ExperimentMeasurementProfile>,
+    pub experiment: Experimental<ExperimentOutcome>,
+    pub deltas: Vec<ExperimentDelta>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DomainRevision {
@@ -112,6 +128,12 @@ pub trait ExperimentRepository: Sync {
         run_id: &str,
         experiment: Experimental<ExperimentOutcome>,
         deltas: Vec<ExperimentDelta>,
+    ) -> StoreResult<()>;
+    /// Persist prerequisite calculations, profiles, deltas, and the completed result atomically.
+    async fn insert_completed_experiment_bundle(
+        &self,
+        run_id: &str,
+        bundle: CompletedExperimentBundle,
     ) -> StoreResult<()>;
     /// Planned/running/failed records are not completed results and are rejected.
     async fn get_completed_experiment(
@@ -268,6 +290,108 @@ impl CandidateRepository for SeaOrmExperimentRepository {
     }
 }
 
+async fn insert_completed_experiment_in_transaction(
+    txn: &DatabaseTransaction,
+    run_id: &str,
+    experiment: Experimental<ExperimentOutcome>,
+    deltas: Vec<ExperimentDelta>,
+) -> StoreResult<()> {
+    let value = experiment.value();
+    if value.held_out.is_empty() || value.started_at.is_empty() {
+        return Err(invalid(
+            "completed experiments require held-out observations and a start timestamp",
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for observation in value.training.iter().chain(&value.held_out) {
+        if !seen.insert(observation) {
+            return Err(invalid(
+                "experiment observation splits must be disjoint and unique",
+            ));
+        }
+    }
+    let candidate = candidates::Entity::find_by_id(&value.candidate_id.0)
+        .one(txn)
+        .await?
+        .ok_or_else(|| invalid("experiment candidate not found"))?;
+    require_input(experiment.provenance(), &candidate.provenance_id)?;
+    for observation in value.training.iter().chain(&value.held_out) {
+        let recorded = observations::Entity::find_by_id(&observation.0)
+            .one(txn)
+            .await?
+            .ok_or_else(|| invalid("experiment observation not found"))?;
+        require_input(experiment.provenance(), &recorded.provenance_id)?;
+    }
+    let mut delta_rows = Vec::new();
+    for delta in deltas {
+        require_input(experiment.provenance(), &delta.calculated.id().0)?;
+        delta_rows.push(prepare_delta(txn, run_id, experiment.id(), delta).await?);
+    }
+    provenance(
+        txn,
+        Some(run_id.into()),
+        experiment.id(),
+        experiment.provenance(),
+    )
+    .await?;
+    experiments::Entity::insert(experiments::ActiveModel {
+        id: Set(experiment.id().0.clone()),
+        engine_run_id: Set(run_id.into()),
+        candidate_id: Set(value.candidate_id.0.clone()),
+        domain_version_id: Set(value.domain_version_id.clone()),
+        frame_version_id: Set(value.frame_version_id.clone()),
+        plan_json: Set(json(&value.plan)?),
+        status: Set("planned".into()),
+        result_json: Set(None),
+        provenance_id: Set(experiment.id().0.clone()),
+        started_at: Set(value.started_at.clone()),
+        completed_at: Set(None),
+    })
+    .exec(txn)
+    .await?;
+    for (split, selected) in [("training", &value.training), ("held_out", &value.held_out)] {
+        for (position, observation) in selected.iter().enumerate() {
+            experiment_observations::Entity::insert(experiment_observations::ActiveModel {
+                experiment_id: Set(experiment.id().0.clone()),
+                observation_id: Set(observation.0.clone()),
+                split: Set(split.into()),
+                position: Set(i64::try_from(position)
+                    .map_err(|_| invalid("too many experiment observations"))?),
+            })
+            .exec(txn)
+            .await?;
+        }
+    }
+    for row in delta_rows {
+        experiment_deltas::Entity::insert(row).exec(txn).await?;
+    }
+    experiments::Entity::update_many()
+        .col_expr(
+            experiments::Column::Status,
+            sea_orm::sea_query::Expr::value("running"),
+        )
+        .filter(experiments::Column::Id.eq(&experiment.id().0))
+        .exec(txn)
+        .await?;
+    experiments::Entity::update_many()
+        .col_expr(
+            experiments::Column::Status,
+            sea_orm::sea_query::Expr::value("completed"),
+        )
+        .col_expr(
+            experiments::Column::ResultJson,
+            sea_orm::sea_query::Expr::value(json(&value.result)?),
+        )
+        .col_expr(
+            experiments::Column::CompletedAt,
+            sea_orm::sea_query::Expr::value(experiment.provenance().timestamp.0.clone()),
+        )
+        .filter(experiments::Column::Id.eq(&experiment.id().0))
+        .exec(txn)
+        .await?;
+    Ok(())
+}
+
 #[async_trait]
 impl ExperimentRepository for SeaOrmExperimentRepository {
     async fn insert_completed_experiment(
@@ -276,103 +400,33 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
         experiment: Experimental<ExperimentOutcome>,
         deltas: Vec<ExperimentDelta>,
     ) -> StoreResult<()> {
-        let value = experiment.value();
-        if value.held_out.is_empty() || value.started_at.is_empty() {
-            return Err(invalid(
-                "completed experiments require held-out observations and a start timestamp",
-            ));
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for observation in value.training.iter().chain(&value.held_out) {
-            if !seen.insert(observation) {
-                return Err(invalid(
-                    "experiment observation splits must be disjoint and unique",
-                ));
-            }
-        }
         let txn = self.db.begin().await?;
-        let candidate = candidates::Entity::find_by_id(&value.candidate_id.0)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| invalid("experiment candidate not found"))?;
-        require_input(experiment.provenance(), &candidate.provenance_id)?;
-        for observation in value.training.iter().chain(&value.held_out) {
-            let recorded = observations::Entity::find_by_id(&observation.0)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| invalid("experiment observation not found"))?;
-            require_input(experiment.provenance(), &recorded.provenance_id)?;
+        insert_completed_experiment_in_transaction(&txn, run_id, experiment, deltas).await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn insert_completed_experiment_bundle(
+        &self,
+        run_id: &str,
+        bundle: CompletedExperimentBundle,
+    ) -> StoreResult<()> {
+        let txn = self.db.begin().await?;
+        for value in bundle.prerequisite_provenance {
+            insert_provenance_in_transaction(&txn, value).await?;
         }
-        let mut delta_rows = Vec::new();
-        for delta in deltas {
-            require_input(experiment.provenance(), &delta.calculated.id().0)?;
-            delta_rows.push(prepare_delta(&txn, run_id, experiment.id(), delta).await?);
-        }
-        provenance(
-            &txn,
-            Some(run_id.into()),
-            experiment.id(),
-            experiment.provenance(),
-        )
-        .await?;
-        experiments::Entity::insert(experiments::ActiveModel {
-            id: Set(experiment.id().0.clone()),
-            engine_run_id: Set(run_id.into()),
-            candidate_id: Set(value.candidate_id.0.clone()),
-            domain_version_id: Set(value.domain_version_id.clone()),
-            frame_version_id: Set(value.frame_version_id.clone()),
-            plan_json: Set(json(&value.plan)?),
-            status: Set("planned".into()),
-            result_json: Set(None),
-            provenance_id: Set(experiment.id().0.clone()),
-            started_at: Set(value.started_at.clone()),
-            completed_at: Set(None),
-        })
-        .exec(&txn)
-        .await?;
-        for (split, selected) in [("training", &value.training), ("held_out", &value.held_out)] {
-            for (position, observation) in selected.iter().enumerate() {
-                experiment_observations::Entity::insert(experiment_observations::ActiveModel {
-                    experiment_id: Set(experiment.id().0.clone()),
-                    observation_id: Set(observation.0.clone()),
-                    split: Set(split.into()),
-                    position: Set(i64::try_from(position)
-                        .map_err(|_| invalid("too many experiment observations"))?),
-                })
-                .exec(&txn)
-                .await?;
+        for profile in bundle.profiles {
+            for sensor_run in profile.sensor_runs {
+                insert_sensor_run_in_transaction(&txn, sensor_run).await?;
             }
+            insert_profile_in_transaction(&txn, profile.header, profile.measurements).await?;
         }
-        for row in delta_rows {
-            experiment_deltas::Entity::insert(row).exec(&txn).await?;
-        }
-        experiments::Entity::update_many()
-            .col_expr(
-                experiments::Column::Status,
-                sea_orm::sea_query::Expr::value("running"),
-            )
-            .filter(experiments::Column::Id.eq(&experiment.id().0))
-            .exec(&txn)
-            .await?;
-        experiments::Entity::update_many()
-            .col_expr(
-                experiments::Column::Status,
-                sea_orm::sea_query::Expr::value("completed"),
-            )
-            .col_expr(
-                experiments::Column::ResultJson,
-                sea_orm::sea_query::Expr::value(json(&value.result)?),
-            )
-            .col_expr(
-                experiments::Column::CompletedAt,
-                sea_orm::sea_query::Expr::value(experiment.provenance().timestamp.0.clone()),
-            )
-            .filter(experiments::Column::Id.eq(&experiment.id().0))
-            .exec(&txn)
+        insert_completed_experiment_in_transaction(&txn, run_id, bundle.experiment, bundle.deltas)
             .await?;
         txn.commit().await?;
         Ok(())
     }
+
     async fn get_completed_experiment(
         &self,
         id: &DerivedId,

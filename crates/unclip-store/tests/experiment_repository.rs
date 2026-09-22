@@ -7,9 +7,11 @@ use unclip_epistemic::{
 use unclip_measure::{Delta, MeasurementValue};
 use unclip_observe::ObservationId;
 use unclip_store::{
-    connect_and_migrate, CandidateKind, CandidateProposal, CandidateRepository, DomainRevision,
-    DomainRevisionRepository, ExperimentDelta, ExperimentOutcome, ExperimentRepository,
-    ProvenanceRepository, SeaOrmExperimentRepository, SeaOrmProvenanceRepository,
+    connect_and_migrate, CandidateKind, CandidateProposal, CandidateRepository,
+    CompletedExperimentBundle, DomainRevision, DomainRevisionRepository, ExperimentDelta,
+    ExperimentMeasurementProfile, ExperimentOutcome, ExperimentRepository,
+    MeasurementProfileHeader, ProvenanceRepository, SeaOrmExperimentRepository,
+    SeaOrmProvenanceRepository,
 };
 
 fn derived<T, O: OperationKind>(
@@ -499,4 +501,80 @@ async fn candidate_listing_is_domain_scoped_ordered_and_bounded() {
         .is_empty());
     assert!(repo.list_candidates("d1", None, 0).await.is_err());
     assert!(repo.list_candidates("d1", None, 1001).await.is_err());
+}
+
+fn bundle_profile(id: &str, provenance: &str) -> ExperimentMeasurementProfile {
+    ExperimentMeasurementProfile {
+        header: MeasurementProfileHeader {
+            id: id.into(),
+            engine_run_id: "run".into(),
+            observation_id: None,
+            frame: unclip_domain::FrameId::new("f"),
+            frame_version: unclip_epistemic::FrameVersion::new("1"),
+            provenance: DerivedId::new(provenance),
+            created_at: "start".into(),
+        },
+        sensor_runs: vec![],
+        measurements: vec![],
+    }
+}
+
+fn completed_bundle(value: ExperimentOutcome) -> CompletedExperimentBundle {
+    let deltas = deltas()
+        .into_iter()
+        .map(|mut delta| {
+            delta.before_profile_id = "bundle-before".into();
+            delta.after_profile_id = "bundle-after".into();
+            delta
+        })
+        .collect();
+    CompletedExperimentBundle {
+        prerequisite_provenance: vec![],
+        profiles: vec![
+            bundle_profile("bundle-before", "before-p"),
+            bundle_profile("bundle-after", "after-p"),
+        ],
+        experiment: experiment(value),
+        deltas,
+    }
+}
+
+#[tokio::test]
+async fn completed_bundle_inserts_profiles_deltas_and_experiment_atomically() {
+    let (db, repo, _) = setup().await;
+    repo.insert_candidate(Some("run".into()), candidate("candidate"))
+        .await
+        .unwrap();
+    let bundle = completed_bundle(outcome());
+    repo.insert_completed_experiment_bundle("run", bundle)
+        .await
+        .unwrap();
+    let stored = repo
+        .get_completed_experiment(&DerivedId::new("experiment"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.deltas.len(), 2);
+    assert!(stored
+        .deltas
+        .iter()
+        .all(|delta| delta.before_profile_id == "bundle-before"
+            && delta.after_profile_id == "bundle-after"));
+    assert_eq!(count(&db, "measurement_profiles").await, 4);
+}
+
+#[tokio::test]
+async fn completed_bundle_rolls_back_staged_profiles_and_delta_provenance() {
+    let (db, repo, provenance) = setup().await;
+    repo.insert_candidate(Some("run".into()), candidate("candidate"))
+        .await
+        .unwrap();
+    let mut value = outcome();
+    value.frame_version_id = "absent".into();
+    assert!(repo
+        .insert_completed_experiment_bundle("run", completed_bundle(value))
+        .await
+        .is_err());
+    assert_eq!(count(&db, "measurement_profiles").await, 2);
+    assert_no_experiment(&db, &provenance).await;
 }

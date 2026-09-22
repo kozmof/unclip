@@ -29,9 +29,9 @@ pub use engine_run_repository::{
 pub use error::{StoreError, StoreResult};
 pub use experiment_repository::{
     CandidateKind, CandidateProposal, CandidateRecord, CandidateRepository,
-    CompletedExperimentRecord, DomainRevision, DomainRevisionRecord, DomainRevisionRepository,
-    ExperimentDelta, ExperimentDeltaRecord, ExperimentOutcome, ExperimentRepository,
-    SeaOrmExperimentRepository,
+    CompletedExperimentBundle, CompletedExperimentRecord, DomainRevision, DomainRevisionRecord,
+    DomainRevisionRepository, ExperimentDelta, ExperimentDeltaRecord, ExperimentMeasurementProfile,
+    ExperimentOutcome, ExperimentRepository, SeaOrmExperimentRepository,
 };
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{

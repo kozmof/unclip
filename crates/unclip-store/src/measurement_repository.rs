@@ -264,29 +264,79 @@ async fn insert_measurement(
     Ok(())
 }
 
+pub(crate) async fn insert_sensor_run_in_transaction(
+    txn: &DatabaseTransaction,
+    run: SensorRunRecord,
+) -> StoreResult<()> {
+    if sensor_runs::Entity::find_by_id(&run.id)
+        .one(txn)
+        .await?
+        .is_some()
+    {
+        return Err(StoreError::AlreadyExists { path: run.id });
+    }
+    sensor_runs::Entity::insert(sensor_runs::ActiveModel {
+        id: Set(run.id),
+        engine_run_id: Set(run.engine_run_id),
+        sensor_id: Set(run.sensor.0),
+        sensor_version: Set(run.sensor_version.to_string()),
+        params_json: Set(serde_json::to_string(&run.params).map_err(anyhow::Error::from)?),
+        params_hash: Set(run.params_hash.0),
+        status: Set(run.status),
+        started_at: Set(run.started_at),
+        completed_at: Set(run.completed_at),
+    })
+    .exec(txn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn insert_profile_in_transaction(
+    txn: &DatabaseTransaction,
+    header: MeasurementProfileHeader,
+    records: Vec<MeasurementRecord>,
+) -> StoreResult<()> {
+    if measurement_profiles::Entity::find_by_id(&header.id)
+        .one(txn)
+        .await?
+        .is_some()
+    {
+        return Err(StoreError::AlreadyExists { path: header.id });
+    }
+    let frame_version_id = frame_versions::Entity::find()
+        .filter(frame_versions::Column::FrameId.eq(&header.frame.0))
+        .filter(frame_versions::Column::Version.eq(&header.frame_version.0))
+        .one(txn)
+        .await?
+        .ok_or_else(|| StoreError::NotFound {
+            path: format!(
+                "frame {} version {}",
+                header.frame.0, header.frame_version.0
+            ),
+        })?
+        .id;
+    measurement_profiles::Entity::insert(measurement_profiles::ActiveModel {
+        id: Set(header.id.clone()),
+        engine_run_id: Set(header.engine_run_id),
+        observation_id: Set(header.observation_id),
+        frame_version_id: Set(frame_version_id),
+        provenance_id: Set(header.provenance.0),
+        created_at: Set(header.created_at),
+    })
+    .exec(txn)
+    .await?;
+    for record in records {
+        insert_measurement(txn, &header.id, record).await?;
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl MeasurementRepository for SeaOrmMeasurementRepository {
     async fn insert_sensor_run(&self, run: SensorRunRecord) -> StoreResult<()> {
-        if sensor_runs::Entity::find_by_id(&run.id)
-            .one(&self.db)
-            .await?
-            .is_some()
-        {
-            return Err(StoreError::AlreadyExists { path: run.id });
-        }
-        sensor_runs::Entity::insert(sensor_runs::ActiveModel {
-            id: Set(run.id),
-            engine_run_id: Set(run.engine_run_id),
-            sensor_id: Set(run.sensor.0),
-            sensor_version: Set(run.sensor_version.to_string()),
-            params_json: Set(serde_json::to_string(&run.params).map_err(anyhow::Error::from)?),
-            params_hash: Set(run.params_hash.0),
-            status: Set(run.status),
-            started_at: Set(run.started_at),
-            completed_at: Set(run.completed_at),
-        })
-        .exec(&self.db)
-        .await?;
+        let txn = self.db.begin().await?;
+        insert_sensor_run_in_transaction(&txn, run).await?;
+        txn.commit().await?;
         Ok(())
     }
 
@@ -296,38 +346,7 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
         records: Vec<MeasurementRecord>,
     ) -> StoreResult<()> {
         let txn = self.db.begin().await?;
-        if measurement_profiles::Entity::find_by_id(&header.id)
-            .one(&txn)
-            .await?
-            .is_some()
-        {
-            return Err(StoreError::AlreadyExists { path: header.id });
-        }
-        let frame_version_id = frame_versions::Entity::find()
-            .filter(frame_versions::Column::FrameId.eq(&header.frame.0))
-            .filter(frame_versions::Column::Version.eq(&header.frame_version.0))
-            .one(&txn)
-            .await?
-            .ok_or_else(|| StoreError::NotFound {
-                path: format!(
-                    "frame {} version {}",
-                    header.frame.0, header.frame_version.0
-                ),
-            })?
-            .id;
-        measurement_profiles::Entity::insert(measurement_profiles::ActiveModel {
-            id: Set(header.id.clone()),
-            engine_run_id: Set(header.engine_run_id),
-            observation_id: Set(header.observation_id),
-            frame_version_id: Set(frame_version_id),
-            provenance_id: Set(header.provenance.0),
-            created_at: Set(header.created_at),
-        })
-        .exec(&txn)
-        .await?;
-        for record in records {
-            insert_measurement(&txn, &header.id, record).await?;
-        }
+        insert_profile_in_transaction(&txn, header, records).await?;
         txn.commit().await?;
         Ok(())
     }
