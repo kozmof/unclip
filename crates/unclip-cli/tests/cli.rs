@@ -67,6 +67,32 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+fn canonical_experiment_result(mut value: serde_json::Value, run_id: &str) -> serde_json::Value {
+    fn replace_run_id(value: &mut serde_json::Value, run_id: &str) {
+        match value {
+            serde_json::Value::String(text) => {
+                if let Some(suffix) = text.strip_prefix(run_id) {
+                    *text = format!("RUN{suffix}");
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    replace_run_id(value, run_id);
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for value in values.values_mut() {
+                    replace_run_id(value, run_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    replace_run_id(&mut value, run_id);
+    value
+}
+
 #[test]
 fn query_rejects_an_invalid_scope() {
     let db = TempDb::new();
@@ -825,6 +851,55 @@ async fn level_domain_frame_and_observe_workflow() {
         result["delta_profile"]["deltas"].as_array().unwrap().len(),
         1
     );
+    let repeated_request = db.write(
+        "repeated-experiment-request.json",
+        &serde_json::json!({
+            "run_id":"experiment-repeated",
+            "candidate":candidate_id,
+            "training":[],
+            "held_out":["manual-observation"],
+            "comparison_sensor":"sensor.coverage",
+            "constraints":[{
+                "kind":"complexity_budget",
+                "maximum_added_units":1,
+                "maximum_added_relations":0,
+                "maximum_property_changes":0
+            }],
+            "pareto_dimensions":[{
+                "name":"coverage",
+                "left":"experiment-repeated/before/sensor.coverage",
+                "right":"experiment-repeated/after/sensor.coverage",
+                "direction":"maximize"
+            }]
+        })
+        .to_string(),
+    );
+    let repeated = unclip(
+        &path,
+        &[
+            "level",
+            "experiment",
+            "--profile",
+            experiment_profile.to_str().unwrap(),
+            "--request",
+            repeated_request.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        repeated.status.success(),
+        "repeated level experiment failed: {}",
+        stderr(&repeated)
+    );
+    let repeated_result = stdout(&repeated)
+        .lines()
+        .find_map(|line| line.strip_prefix("RESULT\t"))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .expect("repeated experiment output should contain typed result JSON");
+    assert_eq!(
+        canonical_experiment_result(result.clone(), "experiment-cli"),
+        canonical_experiment_result(repeated_result, "experiment-repeated"),
+        "the same evidence and configuration must reproduce calculated result values"
+    );
     let leaked_request = db.write(
         "leaked-experiment-request.json",
         &serde_json::json!({
@@ -873,6 +948,44 @@ async fn level_domain_frame_and_observe_workflow() {
         vec![unclip_observe::ObservationId::new("manual-observation")]
     );
     assert_eq!(completed.deltas.len(), 1);
+    let repeated_completed = unclip_store::ExperimentRepository::get_completed_experiment(
+        &experiments,
+        &unclip_epistemic::DerivedId::new("experiment-repeated/experiment/completed"),
+    )
+    .await
+    .unwrap()
+    .expect("repeated completed experiment should be persisted");
+    assert_eq!(completed.outcome.plan, repeated_completed.outcome.plan);
+    assert_eq!(
+        completed.outcome.training,
+        repeated_completed.outcome.training
+    );
+    assert_eq!(
+        completed.outcome.held_out,
+        repeated_completed.outcome.held_out
+    );
+    assert_eq!(completed.deltas.len(), repeated_completed.deltas.len());
+    for (first, repeated) in completed.deltas.iter().zip(&repeated_completed.deltas) {
+        assert_eq!(first.comparator_version, repeated.comparator_version);
+        assert_eq!(first.delta, repeated.delta);
+    }
+    for side in ["before", "after"] {
+        let first = unclip_store::MeasurementRepository::get_profile(
+            &measurements,
+            &format!("experiment-cli/{side}-profile"),
+        )
+        .await
+        .unwrap()
+        .expect("first calculated measurement profile should be persisted");
+        let repeated = unclip_store::MeasurementRepository::get_profile(
+            &measurements,
+            &format!("experiment-repeated/{side}-profile"),
+        )
+        .await
+        .unwrap()
+        .expect("repeated calculated measurement profile should be persisted");
+        assert_eq!(first, repeated, "{side} measurements must reproduce");
+    }
     let provenance = unclip_store::SeaOrmProvenanceRepository::new(connection.clone());
     for id in [
         "experiment-cli/nulls/null.existing-unit",
