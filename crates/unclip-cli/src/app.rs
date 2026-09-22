@@ -213,6 +213,9 @@ pub async fn run() -> anyhow::Result<()> {
         },
         Command::Patterns => matching::patterns_cmd(&repos.patterns).await?,
         Command::Level { action } => match action {
+            LevelAction::Experiment { profile, request } => {
+                crate::leveling::experiment::run(&repos, &profile, &request).await?
+            }
             LevelAction::Discover {
                 profile,
                 measurement_profiles,

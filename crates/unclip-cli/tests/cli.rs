@@ -651,13 +651,130 @@ async fn level_domain_frame_and_observe_workflow() {
     let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
         .await
         .unwrap();
-    let measurements = unclip_store::SeaOrmMeasurementRepository::new(connection);
+    let measurements = unclip_store::SeaOrmMeasurementRepository::new(connection.clone());
     let stored = unclip_store::MeasurementRepository::get_profile(&measurements, profile_id)
         .await
         .unwrap()
         .expect("measurement profile should be persisted");
     assert_eq!(stored.measurements.len(), 1);
     assert_eq!(stored.measurements[0].sensor.0, "sensor.coverage");
+
+    let candidate_id = unclip_epistemic::DerivedId::new("experiment-candidate");
+    let dependencies = unclip_epistemic::DependencyCollector::default();
+    dependencies.read(&unclip_epistemic::Tracked::from_recorded(
+        unclip_epistemic::DerivedId::new(&derived_id),
+        (),
+    ));
+    let candidate_params = serde_json::json!({"fixture":true});
+    let candidate = unclip_epistemic::CalculationToken::from_harness(
+        unclip_epistemic::EmitMetadata {
+            id: candidate_id.clone(),
+            producer: unclip_epistemic::PluginId::new("generate.fixture"),
+            algorithm: "generate.fixture".into(),
+            version: "0.1.0".parse().unwrap(),
+            params_hash: unclip_epistemic::hash_params(&candidate_params),
+            params: candidate_params,
+            source: None,
+            timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
+            domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
+            frame_version: None,
+            model: None,
+        },
+        dependencies,
+    )
+    .emit(unclip_store::CandidateProposal {
+        domain_version_id: serde_json::to_string(&("coffee", "7")).unwrap(),
+        kind: unclip_store::CandidateKind::AtomicMeaning,
+        value: serde_json::json!({
+            "pattern":{"matching":"exact_observed_label","observed_label":"new evidence"},
+            "observation_count":1,
+            "examples":[{"observation":"manual-observation"}]
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+    });
+    let experiments = unclip_store::SeaOrmExperimentRepository::new(connection.clone());
+    unclip_store::CandidateRepository::insert_candidate(&experiments, None, candidate)
+        .await
+        .unwrap();
+    let experiment_profile = db.write(
+        "experiment-profile.json",
+        &serde_json::json!({
+            "domain":"coffee@7",
+            "frame":"coffee.general@2",
+            "sensors":[{"id":"sensor.coverage"}],
+            "comparators":[{"id":"compare.scalar-difference"}],
+            "null_models":[{"id":"null.existing-unit"}]
+        })
+        .to_string(),
+    );
+    let experiment_request = db.write(
+        "experiment-request.json",
+        &serde_json::json!({
+            "run_id":"experiment-cli",
+            "candidate":candidate_id,
+            "training":[],
+            "held_out":["manual-observation"],
+            "comparison_sensor":"sensor.coverage",
+            "constraints":[{
+                "kind":"complexity_budget",
+                "maximum_added_units":1,
+                "maximum_added_relations":0,
+                "maximum_property_changes":0
+            }]
+        })
+        .to_string(),
+    );
+    let executed = unclip(
+        &path,
+        &[
+            "level",
+            "experiment",
+            "--profile",
+            experiment_profile.to_str().unwrap(),
+            "--request",
+            experiment_request.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        executed.status.success(),
+        "level experiment failed: {}",
+        stderr(&executed)
+    );
+    assert!(
+        stdout(&executed).contains("EXPERIMENT\tEXPERIMENTAL\texperiment-cli/experiment/completed")
+    );
+    let result = stdout(&executed)
+        .lines()
+        .find_map(|line| line.strip_prefix("RESULT\t"))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .expect("experiment output should contain typed result JSON");
+    assert_eq!(result["null_results"].as_array().unwrap().len(), 1);
+    assert_eq!(result["constraints"][0]["status"], "satisfied");
+    assert_eq!(
+        result["delta_profile"]["deltas"].as_array().unwrap().len(),
+        1
+    );
+    let completed = unclip_store::ExperimentRepository::get_completed_experiment(
+        &experiments,
+        &unclip_epistemic::DerivedId::new("experiment-cli/experiment/completed"),
+    )
+    .await
+    .unwrap()
+    .expect("completed experiment should be persisted");
+    assert_eq!(
+        completed.outcome.held_out,
+        vec![unclip_observe::ObservationId::new("manual-observation")]
+    );
+    assert_eq!(completed.deltas.len(), 1);
+    assert!(unclip_store::MeasurementRepository::get_profile(
+        &measurements,
+        "experiment-cli/before-profile"
+    )
+    .await
+    .unwrap()
+    .is_some());
 
     let unversioned = unclip(&path, &["level", "domain", "show", "coffee"]);
     assert!(!unversioned.status.success());
@@ -671,6 +788,7 @@ fn level_help_lists_plugins_command() {
     assert!(out.status.success(), "help failed: {}", stderr(&out));
     assert!(stdout(&out).contains("plugins"));
     assert!(stdout(&out).contains("candidates"));
+    assert!(stdout(&out).contains("experiment"));
     assert!(stdout(&out).contains("verify"));
     let verify_help = unclip(&db.path(), &["level", "verify", "--help"]);
     assert!(verify_help.status.success());

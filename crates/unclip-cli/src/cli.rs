@@ -239,6 +239,13 @@ pub(crate) enum Command {
 
 #[derive(Subcommand)]
 pub(crate) enum LevelAction {
+    /// Execute and persist an explicit held-out candidate experiment.
+    Experiment {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        request: PathBuf,
+    },
     /// Generate candidates from explicitly selected stored evidence.
     Discover {
         #[arg(long)]
