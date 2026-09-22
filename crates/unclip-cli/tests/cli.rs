@@ -786,6 +786,17 @@ async fn level_domain_frame_and_observe_workflow() {
     )
     .await
     .unwrap();
+    let domains = unclip_store::SeaOrmDomainRepository::new(connection.clone());
+    let active_domain_id = unclip_domain::DomainId::new("coffee");
+    let active_domain_version = unclip_epistemic::DomainVersion::new("7");
+    let active_domain_before = unclip_store::DomainReader::get_domain_version(
+        &domains,
+        &active_domain_id,
+        &active_domain_version,
+    )
+    .await
+    .unwrap()
+    .expect("active domain should exist before experiments");
     let experiment_profile = db.write(
         "experiment-profile.json",
         &serde_json::json!({
@@ -1019,6 +1030,41 @@ async fn level_domain_frame_and_observe_workflow() {
     .await
     .unwrap()
     .is_some());
+
+    let active_domain_after = unclip_store::DomainReader::get_domain_version(
+        &domains,
+        &active_domain_id,
+        &active_domain_version,
+    )
+    .await
+    .unwrap()
+    .expect("active domain should remain after experiments");
+    assert_eq!(
+        active_domain_after, active_domain_before,
+        "experiment candidate application must not mutate the stored active domain"
+    );
+    assert!(!active_domain_after
+        .units
+        .contains_key(&unclip_domain::UnitId::new(
+            "candidate:experiment-candidate"
+        )));
+    for version in [
+        "counterfactual:experiment-cli/application",
+        "counterfactual:experiment-repeated/application",
+        "counterfactual:experiment-leak/application",
+    ] {
+        assert!(
+            unclip_store::DomainReader::get_domain_version(
+                &domains,
+                &active_domain_id,
+                &unclip_epistemic::DomainVersion::new(version),
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "temporary counterfactual version must not be persisted: {version}"
+        );
+    }
 
     let unversioned = unclip(&path, &["level", "domain", "show", "coffee"]);
     assert!(!unversioned.status.success());
