@@ -35,6 +35,7 @@ mod graph_comparison;
 mod held_out;
 pub use experiment::{
     CounterfactualEvidence, CounterfactualExperiment, ExperimentConstraints, NullEvidence,
+    PersistableExperiment,
 };
 mod motif_application;
 mod observation_selection;

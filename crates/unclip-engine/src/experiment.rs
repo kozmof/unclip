@@ -45,7 +45,137 @@ pub struct CounterfactualExperiment {
     pub constraints: Option<Calculated<Vec<super::ConstraintAssessment>>>,
 }
 
+pub struct PersistableExperiment {
+    pub outcome: Experimental<unclip_store::ExperimentOutcome>,
+    pub deltas: Vec<unclip_store::ExperimentDelta>,
+}
+
 impl super::Engine {
+    /// Convert executed evidence to the storage repository's completed bundle.
+    /// Direct dependencies are the persisted candidate, selected observations,
+    /// and calculated deltas; the typed result remains intact in `result`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn persistable_experiment(
+        &self,
+        experiment: &CounterfactualExperiment,
+        split: &Calculated<super::ObservationSplit>,
+        candidate: &Tracked<unclip_domain::CandidateProposal>,
+        domain_version_id: &str,
+        frame_version_id: &str,
+        before_profile_id: &str,
+        after_profile_id: &str,
+        started_at: &str,
+    ) -> Result<PersistableExperiment> {
+        let invalid = |message: &str| PluginError::Message(message.into());
+        if domain_version_id.trim().is_empty()
+            || frame_version_id.trim().is_empty()
+            || before_profile_id.trim().is_empty()
+            || after_profile_id.trim().is_empty()
+            || before_profile_id == after_profile_id
+            || started_at.trim().is_empty()
+        {
+            return Err(invalid(
+                "persistable experiments require distinct profiles and nonempty storage identities",
+            ));
+        }
+        let evidence = experiment.evidence.value();
+        if evidence.candidate != *candidate.id() || evidence.split != *split.id() {
+            return Err(invalid(
+                "persisted candidate and split must match the executed experiment",
+            ));
+        }
+        let dependencies = DependencyCollector::default();
+        dependencies.read(candidate);
+        let split_value = split.value();
+        for entry in split_value.training.iter().chain(&split_value.held_out) {
+            dependencies.read(&Tracked::from_recorded(
+                entry.provenance.clone(),
+                entry.value.clone(),
+            ));
+        }
+        let deltas = experiment
+            .execution
+            .comparison
+            .deltas
+            .iter()
+            .map(|delta| {
+                dependencies.read(&Tracked::from_derived(delta, delta.value().clone()));
+                unclip_store::ExperimentDelta {
+                    before_profile_id: before_profile_id.into(),
+                    after_profile_id: after_profile_id.into(),
+                    calculated: delta.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        if deltas.is_empty() {
+            return Err(invalid(
+                "persistable experiments require calculated comparison deltas",
+            ));
+        }
+        let plan = experiment
+            .evidence
+            .provenance()
+            .params
+            .get("plan")
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .ok_or_else(|| invalid("experimental evidence has no resolved plan"))?;
+        let result = serde_json::to_value(evidence)
+            .map_err(|error| invalid(&error.to_string()))?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| invalid("experimental evidence must serialize as an object"))?;
+        let value = unclip_store::ExperimentOutcome {
+            candidate_id: candidate.id().clone(),
+            domain_version_id: domain_version_id.into(),
+            frame_version_id: frame_version_id.into(),
+            plan,
+            result,
+            training: split_value
+                .training
+                .iter()
+                .map(|entry| entry.value.id.clone())
+                .collect(),
+            held_out: split_value
+                .held_out
+                .iter()
+                .map(|entry| entry.value.id.clone())
+                .collect(),
+            started_at: started_at.into(),
+        };
+        let params = serde_json::json!({
+            "evidence": experiment.evidence.id(),
+            "before_profile": before_profile_id,
+            "after_profile": after_profile_id,
+        });
+        let id = DerivedId::new(format!("{}/completed", experiment.evidence.id().0));
+        if dependencies.snapshot().contains(&id) {
+            return Err(invalid(
+                "persisted experiment identity collides with an evidence input",
+            ));
+        }
+        let token = ExperimentToken::from_harness(
+            EmitMetadata {
+                id,
+                producer: PluginId::new("experiment.persist"),
+                algorithm: "completed_counterfactual_bundle".into(),
+                version: semver::Version::new(0, 1, 0),
+                params_hash: hash_params(&params),
+                params,
+                source: None,
+                timestamp: experiment.evidence.provenance().timestamp.clone(),
+                domain_version: experiment.evidence.provenance().domain_version.clone(),
+                frame_version: experiment.evidence.provenance().frame_version.clone(),
+                model: None,
+            },
+            dependencies,
+        );
+        Ok(PersistableExperiment {
+            outcome: token.emit(value),
+            deltas,
+        })
+    }
+
     /// Emit evidence of an executed comparison, not candidate acceptance or promotion.
     /// Nulls use held-out observations and baseline rankings; constraints retain independent statuses.
     pub fn run_counterfactual_experiment(

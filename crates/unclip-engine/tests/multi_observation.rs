@@ -1842,6 +1842,55 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let restored: unclip_engine::CounterfactualEvidence =
         serde_json::from_value(serde_json::to_value(evidence).unwrap()).unwrap();
     assert_eq!(&restored, evidence);
+    let persisted = engine
+        .persistable_experiment(
+            &experiment,
+            &selected,
+            &proposal,
+            "domain-version",
+            "frame-version",
+            "before-profile",
+            "after-profile",
+            "now",
+        )
+        .unwrap();
+    assert_eq!(persisted.outcome.value().candidate_id, *proposal.id());
+    assert_eq!(
+        persisted.outcome.value().result,
+        serde_json::to_value(evidence)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone()
+    );
+    assert_eq!(
+        persisted.outcome.value().training,
+        Vec::<ObservationId>::new()
+    );
+    assert_eq!(
+        persisted.outcome.value().held_out,
+        fixture
+            .observations
+            .iter()
+            .map(|value| value.id.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(persisted.deltas.len(), compared.comparison.deltas.len());
+    assert!(persisted.deltas.iter().all(|value| {
+        value.before_profile_id == "before-profile" && value.after_profile_id == "after-profile"
+    }));
+    let mut persisted_inputs = vec![proposal.id().clone()];
+    persisted_inputs.extend(inputs.observations.iter().map(|value| value.id().clone()));
+    persisted_inputs.extend(
+        compared
+            .comparison
+            .deltas
+            .iter()
+            .map(|value| value.id().clone()),
+    );
+    persisted_inputs.sort();
+    persisted_inputs.dedup();
+    assert_eq!(persisted.outcome.provenance().inputs, persisted_inputs);
     assert_eq!(compared.measurements.before, result.before);
     assert_eq!(compared.measurements.after, result.after);
     assert_eq!(compared.comparison.deltas.len(), 2);
