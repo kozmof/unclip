@@ -1031,6 +1031,128 @@ async fn level_domain_frame_and_observe_workflow() {
     .unwrap()
     .is_some());
 
+    let observation_records = unclip_store::SeaOrmObservationRepository::new(connection.clone());
+    unclip_store::ObservationRepository::insert_alignment(
+        &observation_records,
+        "manual-alignment",
+        unclip_observe::Alignment {
+            observation: unclip_observe::ObservationId::new("manual-observation"),
+            candidates: vec![unclip_observe::AlignmentCandidate {
+                observed: unclip_observe::ObservedUnitId::new("observed"),
+                domain: unclip_domain::UnitId::new("sensory"),
+                confidence: 1.0,
+                evidence: vec![],
+            }],
+        },
+        &active_domain_id,
+        &active_domain_version,
+        &unclip_epistemic::DerivedId::new(&derived_id),
+    )
+    .await
+    .unwrap();
+    unclip_store::ObservationRepository::insert_ranking(
+        &observation_records,
+        "manual-ranking",
+        unclip_observe::PartialRanking {
+            observation: unclip_observe::ObservationId::new("manual-observation"),
+            tiers: vec![unclip_observe::RankTier {
+                units: vec![unclip_observe::ObservedUnitId::new("observed")],
+            }],
+            unknown: vec![],
+        },
+        &unclip_epistemic::DerivedId::new(&derived_id),
+    )
+    .await
+    .unwrap();
+    let ranking_profile = db.write(
+        "ranking-experiment-profile.json",
+        &serde_json::json!({
+            "domain":"coffee@7",
+            "frame":"coffee.general@2",
+            "sensors":[{"id":"sensor.permutation"}],
+            "comparators":[{"id":"compare.rbo","params":{"p":0.9}}]
+        })
+        .to_string(),
+    );
+    let ranking_request = db.write(
+        "ranking-experiment-request.json",
+        &serde_json::json!({
+            "run_id":"experiment-ranking",
+            "candidate":candidate_id,
+            "training":[],
+            "held_out":["manual-observation"],
+            "comparison_sensor":"sensor.permutation"
+        })
+        .to_string(),
+    );
+    let ranked = unclip(
+        &path,
+        &[
+            "level",
+            "experiment",
+            "--profile",
+            ranking_profile.to_str().unwrap(),
+            "--request",
+            ranking_request.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        ranked.status.success(),
+        "ranking experiment failed: {}",
+        stderr(&ranked)
+    );
+    let ranking_result = stdout(&ranked)
+        .lines()
+        .find_map(|line| line.strip_prefix("RESULT\t"))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .expect("ranking experiment should emit typed result JSON");
+    let ranking_delta = &ranking_result["delta_profile"]["deltas"][0]["delta"];
+    assert_eq!(ranking_delta["comparator"], "compare.rbo");
+    assert_eq!(ranking_delta["value"]["kind"], "structured");
+    assert_eq!(ranking_delta["value"]["value"]["status"], "rbo");
+    assert_eq!(ranking_delta["value"]["value"]["similarity"], 1.0);
+    assert_eq!(
+        ranking_delta["value"]["value"]["before"]["tiers"][0][0],
+        "sensory"
+    );
+    assert_eq!(
+        ranking_delta["value"]["value"]["before"]["unknown"],
+        serde_json::json!(["social"])
+    );
+    let ranking_completed = unclip_store::ExperimentRepository::get_completed_experiment(
+        &experiments,
+        &unclip_epistemic::DerivedId::new("experiment-ranking/experiment/completed"),
+    )
+    .await
+    .unwrap()
+    .expect("ranking experiment should be persisted");
+    assert_eq!(ranking_completed.deltas.len(), 1);
+    assert_eq!(
+        ranking_completed.deltas[0].delta.comparator,
+        unclip_epistemic::PluginId::new("compare.rbo")
+    );
+    assert_eq!(
+        ranking_completed.outcome.plan["comparators"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        ranking_completed.outcome.plan["comparators"][0]["id"],
+        "compare.rbo"
+    );
+    assert!(matches!(
+        &ranking_completed.deltas[0].delta.value,
+        unclip_measure::MeasurementValue::Structured(value) if value["status"] == "rbo"
+    ));
+    assert!(
+        !serde_json::to_string(&ranking_completed.outcome)
+            .unwrap()
+            .contains("compare.scalar-difference"),
+        "the ranking experiment must not require a scalar comparator"
+    );
+
     let active_domain_after = unclip_store::DomainReader::get_domain_version(
         &domains,
         &active_domain_id,
@@ -1052,6 +1174,7 @@ async fn level_domain_frame_and_observe_workflow() {
         "counterfactual:experiment-cli/application",
         "counterfactual:experiment-repeated/application",
         "counterfactual:experiment-leak/application",
+        "counterfactual:experiment-ranking/application",
     ] {
         assert!(
             unclip_store::DomainReader::get_domain_version(
