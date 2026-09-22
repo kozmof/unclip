@@ -435,6 +435,59 @@ async fn level_domain_frame_and_observe_workflow() {
     );
     assert!(stdout(&explained).contains("OBSERVATION\tINFERRED\tinfer.manual@1.0.0"));
     assert!(stdout(&explained).contains("id=manual-observation units=1 relations=0"));
+    let discovery_profile = db.write("discovery.json", &serde_json::json!({"domain":"coffee@7","candidate_generators":[{"id":"generate.persistent-residual","params":{"minimum_observations":2}}]}).to_string());
+    let discovered = unclip(
+        &path,
+        &[
+            "level",
+            "discover",
+            "--profile",
+            discovery_profile.to_str().unwrap(),
+            "--observation",
+            "manual-observation",
+        ],
+    );
+    assert!(
+        discovered.status.success(),
+        "discovery failed: {}",
+        stderr(&discovered)
+    );
+    assert!(stdout(&discovered).contains("CALCULATED\tDISCOVERY\trun="));
+    assert!(!stdout(&discovered).contains("CANDIDATE\t"));
+    let listed = unclip(&path, &["level", "candidates", "--domain", "coffee@7"]);
+    assert!(listed.status.success());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&listed)).unwrap(),
+        serde_json::json!([])
+    );
+    let missing = unclip(
+        &path,
+        &[
+            "level",
+            "discover",
+            "--profile",
+            discovery_profile.to_str().unwrap(),
+            "--observation",
+            "missing",
+        ],
+    );
+    assert!(!missing.status.success());
+    assert!(stderr(&missing).contains("observation not found"));
+    let duplicate = unclip(
+        &path,
+        &[
+            "level",
+            "discover",
+            "--profile",
+            discovery_profile.to_str().unwrap(),
+            "--observation",
+            "manual-observation",
+            "--observation",
+            "manual-observation",
+        ],
+    );
+    assert!(!duplicate.status.success());
+    assert!(stderr(&duplicate).contains("duplicate observation selection"));
 
     let frame_fixture = db.write(
         "frame.yaml",

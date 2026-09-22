@@ -239,6 +239,17 @@ pub(crate) enum Command {
 
 #[derive(Subcommand)]
 pub(crate) enum LevelAction {
+    /// Generate candidates from explicitly selected stored evidence.
+    Discover {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long = "measurement-profile")]
+        measurement_profiles: Vec<String>,
+        #[arg(long = "observation")]
+        observations: Vec<String>,
+        #[arg(long = "structure")]
+        structures: Vec<String>,
+    },
     /// List stored candidates for an explicit domain version as JSON.
     Candidates {
         #[arg(long)]
