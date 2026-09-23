@@ -60,10 +60,12 @@ pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatr
 pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
 pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
 mod ranking_comparison;
+mod revision;
 pub use distribution_comparison::{
     DistributionComparison, DistributionNormalization, JensenShannonComparator,
 };
 pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
+pub use revision::{RevisionAttempt, RevisionStep, RevisionTestOutcome};
 mod context_null;
 mod discovery;
 pub use comparison::{ScalarDifference, ScalarDifferenceComparator};
