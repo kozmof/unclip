@@ -38,6 +38,7 @@ pub use experiment::{
     PersistableExperiment,
 };
 mod motif_application;
+mod motif_null;
 mod observation_selection;
 pub use held_out::{
     CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
@@ -79,6 +80,7 @@ mod null_models;
 pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
 mod ranking_null;
 pub use discovery::{CandidateInputs, PersistentResidualGenerator};
+pub use motif_null::ExistingMotifNull;
 pub use null_models::{NullInputs, RandomCooccurrenceNull};
 pub use ranking_null::RankingConstraintNull;
 
@@ -130,6 +132,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(WeightChangeNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ContextualCooccurrenceNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(CouplingZeroNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(ExistingMotifNull::default()))?;
     Ok(registry)
 }
 

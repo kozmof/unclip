@@ -222,6 +222,11 @@ fn emit_attempt(
             "minimal_revision_dynamic_coupling",
             semver::Version::new(0, 1, 0),
         ),
+        RevisionStep::Structural => (
+            "structural",
+            "minimal_revision_structural",
+            semver::Version::new(0, 1, 0),
+        ),
         _ => return Err(invalid("revision step is not implemented")),
     };
     let output_id = DerivedId::new(format!("{run_id}/revision/{slug}"));
@@ -508,6 +513,91 @@ impl crate::Engine {
             experiment,
             Some(prior),
             RevisionStep::DynamicCoupling,
+            outcome,
+            reason,
+            run_id,
+            timestamp,
+        )
+    }
+
+    /// Record a graph-motif structural test after dynamic coupling was insufficient.
+    ///
+    /// Semantic-role and transformation candidates remain unavailable until they
+    /// have explicit calculated evidence and application schemas.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_structural_test(
+        &self,
+        prior: &Experimental<RevisionAttempt>,
+        candidate: &Tracked<CandidateProposal>,
+        counterfactual: &Calculated<CounterfactualSnapshot>,
+        experiment: &Experimental<CounterfactualEvidence>,
+        outcome: RevisionTestOutcome,
+        reason: &str,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Experimental<RevisionAttempt>> {
+        let reason = reason.trim();
+        let proposal = validate_experiment(
+            "structural revision",
+            candidate,
+            counterfactual,
+            experiment,
+            outcome,
+            reason,
+            run_id,
+        )?;
+        validate_prior(prior, RevisionStep::DynamicCoupling, experiment)?;
+        if proposal.kind != CandidateKind::GraphMotif {
+            return Err(invalid(
+                "structural revision currently supports only calculated graph-motif evidence",
+            ));
+        }
+        let snapshot = counterfactual.value();
+        if snapshot.added_units.len() != 1
+            || !snapshot.added_relations.is_empty()
+            || !snapshot.property_changes.is_empty()
+        {
+            return Err(invalid(
+                "graph-motif revision must add exactly one unit without changing relations or properties",
+            ));
+        }
+        let unit = snapshot
+            .domain
+            .units
+            .get(&snapshot.added_units[0])
+            .ok_or_else(|| invalid("graph-motif unit is absent from the counterfactual"))?;
+        let pattern = proposal
+            .value
+            .get("pattern")
+            .ok_or_else(|| invalid("graph-motif candidate requires a pattern"))?;
+        if unit.kind != unclip_domain::UnitKind::GraphMotif
+            || unit.label.is_some()
+            || unit.properties.get("graph_pattern")
+                != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+            || unit.properties.get("candidate_evidence")
+                != Some(&unclip_domain::PropertyValue::Structured(
+                    serde_json::Value::Object(proposal.value.clone()),
+                ))
+        {
+            return Err(invalid(
+                "graph motif must remain anonymous and retain its exact pattern and candidate evidence",
+            ));
+        }
+        if !has_measured_null(
+            experiment.value(),
+            "null.existing-motif",
+            "existing_motif_exact_pattern",
+        ) {
+            return Err(invalid(
+                "graph-motif revision requires a measured null.existing-motif result",
+            ));
+        }
+        emit_attempt(
+            candidate,
+            counterfactual,
+            experiment,
+            Some(prior),
+            RevisionStep::Structural,
             outcome,
             reason,
             run_id,

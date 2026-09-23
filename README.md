@@ -199,12 +199,12 @@ Engine-profile YAML and JSON accept optional `candidate_generators` and
 fields as sensors. Selections are explicit and version-checked; recorded plans
 pin resolved versions, parameters, and hashes. Older profiles default these
 lists to empty. Built-in generators are `generate.persistent-residual`,
-`generate.missing-relation`, `generate.recurring-motif`, and
+`generate.missing-relation`, `generate.recurring-motif`,
 `generate.pairwise-coupling`, `generate.temporal-coupling`,
 `generate.community`, and `generate.latent-axis`;
 null models are `null.random-cooccurrence`, `null.ranking-constraints`,
-`null.existing-unit`, `null.existing-relation`, `null.weight-change`, and
-`null.contextual-cooccurrence`.
+`null.existing-unit`, `null.existing-relation`, `null.weight-change`,
+`null.contextual-cooccurrence`, `null.coupling-zero`, and `null.existing-motif`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -325,6 +325,13 @@ whether that distance is within tolerance. The candidate and baseline domain are
 tracked and fully validated first. Relative-rank variance is `NotApplicable`
 because zero variance represents stability rather than a universal independence
 baseline. This diagnostic is not a significance, exchangeability, or causal test.
+
+`null.existing-motif` checks a validated recurring graph-motif proposal against
+existing `GraphMotif` units with the exact same `graph_pattern`. It reports all
+matching unit identities and retains the candidate and baseline domain as inputs.
+Labels do not participate in matching. An empty result is an explicit absence of an
+exact stored pattern; it does not establish semantic novelty or explanatory
+adequacy, and the diagnostic makes no acceptance decision.
 
 `null.contextual-cooccurrence` repeats the fixed-margin endpoint co-presence null
 within explicit metadata groups. For example:
@@ -531,18 +538,24 @@ transformation, and cross-domain proposals remain unsupported. Frame extension,
 alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 
-`Engine::record_delta_w_test`, `Engine::record_delta_e_test`, and
-`Engine::record_dynamic_coupling_test` implement the first three ordered
-minimal-revision steps. Each larger step requires the immediately preceding step
+`Engine::record_delta_w_test`, `Engine::record_delta_e_test`,
+`Engine::record_dynamic_coupling_test`, and `Engine::record_structural_test`
+implement the ordered minimal-revision steps through evidence-backed graph motifs.
+Each larger step requires the immediately preceding step
 to be insufficient for the same baseline, frame, and observation split. Weight,
 relation, and coupling attempts validate their specific counterfactual shape and
 require measured `null.weight-change`, `null.existing-relation`, and
-`null.coupling-zero` evidence respectively. Dynamic couplings remain anonymous
+`null.coupling-zero` evidence respectively. Graph-motif attempts add one
+anonymous structural unit, retain their exact pattern and calculated candidate
+evidence, and require measured `null.existing-motif` evidence. Dynamic couplings remain
+anonymous
 and explicitly non-causal. A sufficient earlier attempt stops the ladder. The
 caller records each verdict and reason; explicit constraints must all be satisfied
 for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
 candidate, counterfactual, experiment, and prior attempt without scalarizing
-evidence. Structural and `Delta V` steps are not yet executable.
+evidence. Semantic-role and transformation candidates remain unavailable until
+they have explicit calculated-evidence and application schemas; `Delta V` is
+not yet executable.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.
