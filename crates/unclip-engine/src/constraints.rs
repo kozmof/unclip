@@ -74,6 +74,7 @@ impl super::Engine {
         let output = DerivedId::new(format!("{run_id}/constraints"));
         let mut selected = BTreeMap::new();
         for input in measurements {
+            super::require_calculated_evidence(input, "constraint input measurement")?;
             if input.id().0.trim().is_empty()
                 || input.id() == &output
                 || input.id() == application.id()

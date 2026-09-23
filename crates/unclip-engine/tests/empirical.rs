@@ -1,6 +1,9 @@
 use std::num::NonZeroUsize;
 use unclip_engine::{EmpiricalMethod, Engine};
-use unclip_epistemic::{DerivedId, PluginId, Timestamp, Tracked};
+use unclip_epistemic::{
+    hash_params, DependencyCollector, DerivedId, EmitMetadata, InterpretationToken, ModelRef,
+    Operation, PluginId, Timestamp, Tracked,
+};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 
 fn input(id: &str, correlation: f64) -> Tracked<Measurement> {
@@ -175,4 +178,41 @@ fn matrix_sample_floor_is_not_a_measured_empty_structure() {
         )
         .unwrap();
     assert!(measured[0].structure.is_some());
+}
+
+#[test]
+fn interpreted_measurements_cannot_be_reused_as_empirical_evidence() {
+    let source = input("calculated", 1.0);
+    let dependencies = DependencyCollector::default();
+    let value = dependencies.read(&source).clone();
+    let params = serde_json::json!({"model": "fixture/labeler"});
+    let interpreted = InterpretationToken::from_harness(
+        EmitMetadata {
+            id: DerivedId::new("interpreted/measurement"),
+            producer: PluginId::new("interpret.fixture"),
+            algorithm: "interpret.fixture".into(),
+            version: semver::Version::new(1, 0, 0),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp: Timestamp::new("now"),
+            domain_version: None,
+            frame_version: None,
+            model: Some(ModelRef::versioned("fixture/labeler", "1")),
+        },
+        dependencies,
+    )
+    .emit(value);
+
+    let error = Engine::with_builtins()
+        .unwrap()
+        .derive_empirical(
+            &[Tracked::from(&interpreted)],
+            methods()[0],
+            "run",
+            Timestamp::new("now"),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("must be calculated evidence"));
+    assert_eq!(interpreted.provenance().operation, Operation::Interpreted);
 }

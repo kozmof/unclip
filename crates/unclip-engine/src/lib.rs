@@ -86,7 +86,7 @@ use std::collections::BTreeMap;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
     hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, InferenceToken,
-    Inferred, Interpreted, PluginId, SourceRef, Timestamp, Tracked,
+    Inferred, Interpreted, Operation, PluginId, SourceRef, Timestamp, Tracked,
 };
 use unclip_measure::{EmpiricalStructure, Measurement, MeasurementContext};
 use unclip_observe::{Alignment, Observation, PartialRanking};
@@ -216,6 +216,17 @@ fn calculation_stage(plugin: &PluginId) -> u8 {
         "sensor.coverage" => 0,
         "sensor.residual" => 1,
         _ => 2,
+    }
+}
+
+/// Require measurement evidence produced by calculation. Values restored through a
+/// type-specific repository have no in-memory operation marker and remain trusted.
+pub(crate) fn require_calculated_evidence<T>(input: &Tracked<T>, kind: &str) -> Result<()> {
+    match input.operation() {
+        None | Some(Operation::Calculated) => Ok(()),
+        Some(operation) => Err(unclip_plugin::PluginError::Message(format!(
+            "{kind} must be calculated evidence, found {operation:?}"
+        ))),
     }
 }
 
@@ -430,6 +441,7 @@ impl Engine {
         }
         let mut seen = std::collections::BTreeSet::new();
         for structure in structures {
+            require_calculated_evidence(structure, "interpretation source structure")?;
             if structure.id().0.is_empty() {
                 return Err(unclip_plugin::PluginError::Message(
                     "interpretation source structure ID must not be empty".into(),

@@ -115,6 +115,8 @@ impl super::Engine {
         after: &Tracked<Measurement>,
         run: super::MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Delta>>> {
+        super::require_calculated_evidence(before, "comparison input measurement")?;
+        super::require_calculated_evidence(after, "comparison input measurement")?;
         let mut comparators = plan.comparators.iter().collect::<Vec<_>>();
         comparators.sort_by_key(|p| &p.descriptor().id);
         let mut results = Vec::new();

@@ -42,6 +42,7 @@ fn index<'a>(
 ) -> Result<BTreeMap<DerivedId, &'a Tracked<Measurement>>> {
     let mut result = BTreeMap::new();
     for input in inputs {
+        super::require_calculated_evidence(input, "profile input measurement")?;
         if input.id().0.is_empty() || result.insert(input.id().clone(), input).is_some() {
             return Err(invalid(
                 "profile measurements require unique nonempty derived identities",

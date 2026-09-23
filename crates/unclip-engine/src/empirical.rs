@@ -87,6 +87,7 @@ impl super::Engine {
         };
         let mut seen = BTreeSet::new();
         for measurement in measurements {
+            super::require_calculated_evidence(measurement, "empirical input measurement")?;
             if measurement.id().0.is_empty() {
                 return Err(invalid("empirical input measurement ID must not be empty"));
             }

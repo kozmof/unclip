@@ -177,6 +177,12 @@ impl super::Engine {
         inputs: CandidateInputs<'_>,
         run: super::MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
+        for measurement in inputs.measurements {
+            super::require_calculated_evidence(measurement, "candidate input measurement")?;
+        }
+        for structure in inputs.structures {
+            super::require_calculated_evidence(structure, "candidate input structure")?;
+        }
         let mut generators = plan.candidate_generators.iter().collect::<Vec<_>>();
         generators.sort_by_key(|generator| &generator.descriptor().id);
         let mut results = Vec::new();

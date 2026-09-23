@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use unclip_engine::{Engine, InterpretationRun};
 use unclip_epistemic::{
-    hash_params, DerivedId, ModelRef, Operation, PluginId, Provenance, Timestamp, Tracked,
+    hash_params, DependencyCollector, DerivedId, EmitMetadata, InterpretationToken, ModelRef,
+    Operation, PluginId, Provenance, Timestamp, Tracked,
 };
 use unclip_measure::EmpiricalStructure;
 use unclip_plugin::{
@@ -216,4 +217,58 @@ async fn rejects_missing_run_or_sources_and_duplicate_source_ids() {
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
+    let params = interpreter_params();
+    let interpreted = InterpretationToken::from_harness(
+        EmitMetadata {
+            id: DerivedId::new("interpreted/structure"),
+            producer: PluginId::new("interpret.fixture"),
+            algorithm: "interpret.fixture".into(),
+            version: semver::Version::new(1, 0, 0),
+            params_hash: hash_params(&params),
+            params: params.clone(),
+            source: None,
+            timestamp: Timestamp::new("now"),
+            domain_version: None,
+            frame_version: None,
+            model: Some(ModelRef::versioned(
+                "fixture/semantic-labeler",
+                "2026-09-23",
+            )),
+        },
+        DependencyCollector::default(),
+    )
+    .emit(EmpiricalStructure {
+        kind: "communities".into(),
+        value: json!({"members": ["a", "b"]}),
+    });
+    let source = Tracked::from(&interpreted);
+    let engine = Engine::with_builtins().unwrap();
+    let plan = engine
+        .plan(&EngineProfile {
+            interpreters: vec![PluginSelection::any("interpret.llm-label")],
+            ..EngineProfile::default()
+        })
+        .unwrap();
+    let plugin_params = [(PluginId::new("interpret.llm-label"), params)]
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+
+    let error = engine
+        .interpret(
+            &plan,
+            &[source],
+            InterpretationRun {
+                id: "run",
+                timestamp: Timestamp::new("now"),
+                params: &plugin_params,
+                io: &UnexpectedIo,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("must be calculated evidence"));
 }

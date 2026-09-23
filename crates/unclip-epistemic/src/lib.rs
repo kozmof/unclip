@@ -222,6 +222,7 @@ pub type Interpreted<T> = Derived<T, ops::Interpretation>;
 pub struct Tracked<T> {
     id: DerivedId,
     value: T,
+    operation: Option<Operation>,
 }
 
 impl<T, O: OperationKind> From<&Derived<T, O>> for Tracked<T>
@@ -232,6 +233,7 @@ where
         Self {
             id: value.id.clone(),
             value: value.value.clone(),
+            operation: Some(O::OPERATION),
         }
     }
 }
@@ -242,16 +244,27 @@ impl<T> Tracked<T> {
         Self {
             id: source.id.clone(),
             value,
+            operation: Some(O::OPERATION),
         }
     }
 
     /// Restore a tracked value using its persisted provenance identity.
     pub fn from_recorded(id: DerivedId, value: T) -> Self {
-        Self { id, value }
+        Self {
+            id,
+            value,
+            operation: None,
+        }
     }
 
     pub fn id(&self) -> &DerivedId {
         &self.id
+    }
+
+    /// Operation retained from an in-memory derived value. Persisted values use
+    /// their type-specific repository as the trusted operation boundary.
+    pub fn operation(&self) -> Option<Operation> {
+        self.operation
     }
 }
 
@@ -386,6 +399,27 @@ mod tests {
     }
 
     #[test]
+    fn tracked_values_retain_their_in_memory_operation() {
+        let interpreted = InterpretationToken::from_harness(
+            metadata("interpretation"),
+            DependencyCollector::default(),
+        )
+        .emit(1);
+        assert_eq!(
+            Tracked::from(&interpreted).operation(),
+            Some(Operation::Interpreted)
+        );
+        assert_eq!(
+            Tracked::from_derived(&interpreted, 2).operation(),
+            Some(Operation::Interpreted)
+        );
+        assert_eq!(
+            Tracked::from_recorded(DerivedId::new("recorded"), 3).operation(),
+            None
+        );
+    }
+
+    #[test]
     fn parameter_hash_is_recursive_and_order_independent() {
         let left = serde_json::json!({"z": 1, "nested": {"b": 2, "a": [3, 4]}});
         let right = serde_json::json!({"nested": {"a": [3, 4], "b": 2}, "z": 1});
@@ -411,10 +445,12 @@ mod tests {
         let a = Tracked {
             id: DerivedId::new("a"),
             value: 1,
+            operation: None,
         };
         let b = Tracked {
             id: DerivedId::new("b"),
             value: 2,
+            operation: None,
         };
         let collector = DependencyCollector::default();
         collector.read(&b);

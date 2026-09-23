@@ -66,6 +66,7 @@ impl super::Engine {
         let dependencies = DependencyCollector::default();
         let mut selected = BTreeMap::new();
         for input in measurements {
+            super::require_calculated_evidence(input, "Pareto input measurement")?;
             if input.id().0.trim().is_empty()
                 || input.id() == &output
                 || selected
