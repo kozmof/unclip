@@ -136,6 +136,18 @@ fn validate_experiment<'a>(
             "{step} requires completed before/after measurements and typed comparison deltas"
         )));
     }
+    for delta in &evidence.delta_profile.deltas {
+        if delta.id.0.trim().is_empty()
+            || !experiment_inputs.contains(&delta.id)
+            || !evidence.before.contains(&delta.pair.before)
+            || !evidence.after.contains(&delta.pair.after)
+            || !evidence.delta_profile.pairs.contains(&delta.pair)
+        {
+            return Err(invalid(format!(
+                "{step} comparison deltas must track explicitly selected before and after measurements"
+            )));
+        }
+    }
     if outcome == RevisionTestOutcome::Sufficient
         && evidence
             .constraints
@@ -203,6 +215,11 @@ fn emit_attempt(
         RevisionStep::DeltaE => (
             "delta-e",
             "minimal_revision_delta_e",
+            semver::Version::new(0, 1, 0),
+        ),
+        RevisionStep::DynamicCoupling => (
+            "dynamic-coupling",
+            "minimal_revision_dynamic_coupling",
             semver::Version::new(0, 1, 0),
         ),
         _ => return Err(invalid("revision step is not implemented")),
@@ -399,6 +416,98 @@ impl crate::Engine {
             experiment,
             Some(prior),
             RevisionStep::DeltaE,
+            outcome,
+            reason,
+            run_id,
+            timestamp,
+        )
+    }
+
+    /// Record a dynamic-coupling test after Delta E was explicitly insufficient.
+    ///
+    /// The counterfactual must add exactly one anonymous, explicitly non-causal
+    /// coupling and must compete with the zero-association baseline diagnostic.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_dynamic_coupling_test(
+        &self,
+        prior: &Experimental<RevisionAttempt>,
+        candidate: &Tracked<CandidateProposal>,
+        counterfactual: &Calculated<CounterfactualSnapshot>,
+        experiment: &Experimental<CounterfactualEvidence>,
+        outcome: RevisionTestOutcome,
+        reason: &str,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Experimental<RevisionAttempt>> {
+        let reason = reason.trim();
+        let proposal = validate_experiment(
+            "dynamic coupling",
+            candidate,
+            counterfactual,
+            experiment,
+            outcome,
+            reason,
+            run_id,
+        )?;
+        validate_prior(prior, RevisionStep::DeltaE, experiment)?;
+        if proposal.kind != CandidateKind::DynamicCoupling {
+            return Err(invalid(
+                "dynamic coupling can test only an explicit coupling revision",
+            ));
+        }
+        let matching = proposal
+            .value
+            .get("pattern")
+            .and_then(|pattern| pattern.get("matching"))
+            .and_then(serde_json::Value::as_str);
+        if !matches!(
+            matching,
+            Some("thresholded_pairwise_association" | "lagged_directional_association")
+        ) {
+            return Err(invalid("dynamic coupling pattern is not supported"));
+        }
+        let snapshot = counterfactual.value();
+        if snapshot.added_units.len() != 1
+            || !snapshot.added_relations.is_empty()
+            || !snapshot.property_changes.is_empty()
+        {
+            return Err(invalid(
+                "dynamic coupling must add exactly one unit without changing relations or properties",
+            ));
+        }
+        let unit = snapshot
+            .domain
+            .units
+            .get(&snapshot.added_units[0])
+            .ok_or_else(|| invalid("dynamic coupling unit is absent from the counterfactual"))?;
+        if unit.kind != unclip_domain::UnitKind::DynamicCoupling
+            || unit.label.is_some()
+            || unit.properties.get("causal_claim")
+                != Some(&unclip_domain::PropertyValue::Boolean(false))
+            || unit.properties.get("candidate_evidence")
+                != Some(&unclip_domain::PropertyValue::Structured(
+                    serde_json::Value::Object(proposal.value.clone()),
+                ))
+        {
+            return Err(invalid(
+                "dynamic coupling must remain anonymous, non-causal, and retain its candidate evidence",
+            ));
+        }
+        if !has_measured_null(
+            experiment.value(),
+            "null.coupling-zero",
+            "zero_association_baseline",
+        ) {
+            return Err(invalid(
+                "dynamic coupling requires a measured null.coupling-zero result",
+            ));
+        }
+        emit_attempt(
+            candidate,
+            counterfactual,
+            experiment,
+            Some(prior),
+            RevisionStep::DynamicCoupling,
             outcome,
             reason,
             run_id,

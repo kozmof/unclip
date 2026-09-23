@@ -64,16 +64,16 @@ fn proposal(kind: CandidateKind) -> CandidateProposal {
     }
 }
 
-fn comparison() -> DeltaProfile {
+fn comparison(before: &str, after: &str, delta: &str) -> DeltaProfile {
     let pair = ComparisonPair {
-        before: DerivedId::new("before"),
-        after: DerivedId::new("after"),
+        before: DerivedId::new(before),
+        after: DerivedId::new(after),
     };
     DeltaProfile {
         pairs: vec![pair.clone()],
         deltas: vec![ProfileDelta {
             pair,
-            id: DerivedId::new("delta"),
+            id: DerivedId::new(delta),
             delta: Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
@@ -141,6 +141,7 @@ fn fixture(
         "before",
         "after",
         "comparison",
+        "delta",
     ] {
         dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
     }
@@ -173,7 +174,7 @@ fn fixture(
         before: vec![DerivedId::new("before")],
         after: vec![DerivedId::new("after")],
         comparison: DerivedId::new("comparison"),
-        delta_profile: comparison(),
+        delta_profile: comparison("before", "after", "delta"),
         null_results: include_null.then(weight_null).into_iter().collect(),
         constraint_assessment: constraint_status
             .as_ref()
@@ -405,6 +406,7 @@ fn relation_fixture(
         "relation-before",
         "relation-after",
         "relation-comparison",
+        "relation-delta",
     ] {
         dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
     }
@@ -437,7 +439,7 @@ fn relation_fixture(
         before: vec![DerivedId::new("relation-before")],
         after: vec![DerivedId::new("relation-after")],
         comparison: DerivedId::new("relation-comparison"),
-        delta_profile: comparison(),
+        delta_profile: comparison("relation-before", "relation-after", "relation-delta"),
         null_results: include_null
             .then(existing_relation_null)
             .into_iter()
@@ -584,6 +586,266 @@ fn delta_e_requires_relation_null_evidence_and_satisfied_constraints() {
             RevisionTestOutcome::Insufficient,
             "reviewed",
             "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .is_ok());
+}
+
+fn coupling_proposal() -> CandidateProposal {
+    CandidateProposal {
+        domain_version_id: serde_json::to_string(&("d", "1")).unwrap(),
+        kind: CandidateKind::DynamicCoupling,
+        value: json!({
+            "pattern": {
+                "matching": "thresholded_pairwise_association",
+                "metric": "spearman",
+                "units": ["existing", "target"]
+            },
+            "evidence": {
+                "measurement": "coupling-matrix",
+                "sensor": "sensor.spearman",
+                "sensor_version": "0.1.0",
+                "context": {"values": {}},
+                "cell": {"status": "value", "value": 0.8, "sample_count": 4}
+            },
+            "selection": {"threshold": 0.7, "minimum_samples": 2},
+            "causal_claim": false
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+    }
+}
+
+fn coupling_zero_null() -> NullEvidence {
+    NullEvidence {
+        id: DerivedId::new("coupling-null"),
+        model: PluginId::new("null.coupling-zero"),
+        reading: Reading::Value {
+            value: MeasurementValue::Structured(json!({
+                "model": "zero_association_baseline",
+                "observed_value": 0.8,
+                "baseline_value": 0.0,
+                "within_tolerance": false,
+                "causal_claim": false
+            })),
+        },
+    }
+}
+
+fn coupling_constraint(status: ConstraintStatus) -> ConstraintAssessment {
+    ConstraintAssessment {
+        constraint: ExperimentConstraint::ComplexityBudget {
+            maximum_added_units: 1,
+            maximum_added_relations: 0,
+            maximum_property_changes: 0,
+        },
+        status,
+        observed: BTreeMap::from([
+            ("added_units".into(), 1),
+            ("added_relations".into(), 0),
+            ("property_changes".into(), 0),
+        ]),
+        reading: None,
+        transfer: None,
+    }
+}
+
+fn coupling_fixture(
+    include_null: bool,
+    constraint_status: Option<ConstraintStatus>,
+) -> (
+    Engine,
+    Tracked<CandidateProposal>,
+    unclip_epistemic::Calculated<unclip_engine::CounterfactualSnapshot>,
+    unclip_epistemic::Experimental<CounterfactualEvidence>,
+) {
+    let engine = Engine::with_builtins().unwrap();
+    let candidate =
+        Tracked::from_recorded(DerivedId::new("coupling-candidate"), coupling_proposal());
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), domain());
+    let counterfactual = engine
+        .apply_candidate(
+            &baseline,
+            &candidate,
+            "coupling-trial",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    let dependencies = DependencyCollector::default();
+    dependencies.read(&candidate);
+    dependencies.read(&Tracked::from(&counterfactual));
+    for id in [
+        "baseline",
+        "frame",
+        "split",
+        "coupling-before",
+        "coupling-after",
+        "coupling-comparison",
+        "coupling-delta",
+    ] {
+        dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
+    }
+    if include_null {
+        dependencies.read(&Tracked::from_recorded(DerivedId::new("coupling-null"), ()));
+    }
+    let params = json!({"fixture": "coupling"});
+    let experiment = ExperimentToken::from_harness(
+        EmitMetadata {
+            id: DerivedId::new("coupling-experiment"),
+            producer: PluginId::new("experiment.counterfactual"),
+            algorithm: "held_out_counterfactual_comparison".into(),
+            version: semver::Version::new(0, 5, 0),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp: Timestamp::new("now"),
+            domain_version: Some(DomainVersion::new("1")),
+            frame_version: Some(FrameVersion::new("1")),
+            model: None,
+        },
+        dependencies,
+    )
+    .emit(CounterfactualEvidence {
+        baseline: DerivedId::new("baseline"),
+        frame: DerivedId::new("frame"),
+        split: DerivedId::new("split"),
+        counterfactual: counterfactual.id().clone(),
+        candidate: candidate.id().clone(),
+        before: vec![DerivedId::new("coupling-before")],
+        after: vec![DerivedId::new("coupling-after")],
+        comparison: DerivedId::new("coupling-comparison"),
+        delta_profile: comparison("coupling-before", "coupling-after", "coupling-delta"),
+        null_results: include_null.then(coupling_zero_null).into_iter().collect(),
+        constraint_assessment: constraint_status
+            .as_ref()
+            .map(|_| DerivedId::new("coupling-constraints")),
+        constraints: constraint_status
+            .into_iter()
+            .map(coupling_constraint)
+            .collect(),
+        transfer_measurements: vec![],
+        pareto_assessment: None,
+        pareto: None,
+    });
+    (engine, candidate, counterfactual, experiment)
+}
+
+fn delta_e_prior(
+    outcome: RevisionTestOutcome,
+) -> unclip_epistemic::Experimental<unclip_engine::RevisionAttempt> {
+    let weight = delta_w_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) = relation_fixture(true, None, "1");
+    engine
+        .record_delta_e_test(
+            &weight,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            outcome,
+            "relation evidence was reviewed after weight revision failed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .unwrap()
+}
+
+#[test]
+fn dynamic_coupling_requires_and_records_an_insufficient_delta_e_attempt() {
+    let prior = delta_e_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) =
+        coupling_fixture(true, Some(ConstraintStatus::Satisfied));
+    let record = || {
+        engine
+            .record_dynamic_coupling_test(
+                &prior,
+                &candidate,
+                &counterfactual,
+                &experiment,
+                RevisionTestOutcome::Sufficient,
+                "non-causal coupling explains held-out evidence after relation revision failed",
+                "coupling-ladder",
+                Timestamp::new("now"),
+            )
+            .unwrap()
+    };
+    let attempt = record();
+    assert_eq!(attempt, record());
+    assert_eq!(attempt.value().step, RevisionStep::DynamicCoupling);
+    assert_eq!(attempt.value().prior, Some(prior.id().clone()));
+    assert_eq!(attempt.value().baseline, DerivedId::new("baseline"));
+    assert_eq!(
+        attempt.provenance().inputs,
+        vec![
+            DerivedId::new("coupling-candidate"),
+            DerivedId::new("coupling-experiment"),
+            DerivedId::new("coupling-trial/counterfactual"),
+            DerivedId::new("relation-ladder/revision/delta-e"),
+        ]
+    );
+}
+
+#[test]
+fn sufficient_or_out_of_order_prior_attempts_stop_dynamic_coupling() {
+    let (engine, candidate, counterfactual, experiment) = coupling_fixture(true, None);
+    let record = |prior| {
+        engine.record_dynamic_coupling_test(
+            prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "coupling-ladder",
+            Timestamp::new("now"),
+        )
+    };
+    let sufficient_delta_e = delta_e_prior(RevisionTestOutcome::Sufficient);
+    assert!(record(&sufficient_delta_e).is_err());
+    let out_of_order_delta_w = delta_w_prior(RevisionTestOutcome::Insufficient);
+    assert!(record(&out_of_order_delta_w).is_err());
+}
+
+#[test]
+fn dynamic_coupling_requires_its_null_and_satisfied_constraints() {
+    let prior = delta_e_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) = coupling_fixture(false, None);
+    assert!(engine
+        .record_dynamic_coupling_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "coupling-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+
+    let (engine, candidate, counterfactual, experiment) =
+        coupling_fixture(true, Some(ConstraintStatus::Violated));
+    assert!(engine
+        .record_dynamic_coupling_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Sufficient,
+            "reviewed",
+            "coupling-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+    assert!(engine
+        .record_dynamic_coupling_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "coupling-ladder",
             Timestamp::new("now"),
         )
         .is_ok());

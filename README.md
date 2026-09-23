@@ -317,6 +317,15 @@ precision are rejected. This is a baseline-retention diagnostic, not a statistic
 significance test or a measure of explanatory improvement. Held-out comparison
 and application of weight revisions remain experiment-harness work.
 
+`null.coupling-zero` checks supported dynamic-coupling evidence against an
+explicit zero-association baseline. Configure a finite nonnegative
+`absolute_tolerance`. Spearman, Kendall, mutual-information, and lagged-coefficient
+proposals retain their signed observed value, absolute distance from zero, and
+whether that distance is within tolerance. The candidate and baseline domain are
+tracked and fully validated first. Relative-rank variance is `NotApplicable`
+because zero variance represents stability rather than a universal independence
+baseline. This diagnostic is not a significance, exchangeability, or causal test.
+
 `null.contextual-cooccurrence` repeats the fixed-margin endpoint co-presence null
 within explicit metadata groups. For example:
 
@@ -522,17 +531,18 @@ transformation, and cross-domain proposals remain unsupported. Frame extension,
 alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 
-`Engine::record_delta_w_test` implements the first minimal-revision ladder step.
-It accepts only a one-property `WeightRevision` counterfactual with completed
-before/after measurements, typed comparison deltas, and a measured
-`null.weight-change` result. `Engine::record_delta_e_test` handles the next step:
-it requires an insufficient `Delta W` attempt from the same baseline, frame, and
-observation split, then validates a one-relation counterfactual and a measured
-`null.existing-relation` result. A sufficient earlier attempt stops the ladder.
-The caller records each explicit verdict and reason; explicit constraints must all
-be satisfied for a sufficient verdict. Each `RevisionAttempt` is experimental and
-tracks its candidate, counterfactual, experiment, and prior attempt without
-scalarizing their evidence. Later ladder steps are not yet executable.
+`Engine::record_delta_w_test`, `Engine::record_delta_e_test`, and
+`Engine::record_dynamic_coupling_test` implement the first three ordered
+minimal-revision steps. Each larger step requires the immediately preceding step
+to be insufficient for the same baseline, frame, and observation split. Weight,
+relation, and coupling attempts validate their specific counterfactual shape and
+require measured `null.weight-change`, `null.existing-relation`, and
+`null.coupling-zero` evidence respectively. Dynamic couplings remain anonymous
+and explicitly non-causal. A sufficient earlier attempt stops the ladder. The
+caller records each verdict and reason; explicit constraints must all be satisfied
+for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
+candidate, counterfactual, experiment, and prior attempt without scalarizing
+evidence. Structural and `Delta V` steps are not yet executable.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

@@ -67,11 +67,13 @@ pub use distribution_comparison::{
 pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
 pub use revision::{RevisionAttempt, RevisionStep, RevisionTestOutcome};
 mod context_null;
+mod coupling_null;
 mod discovery;
 pub use comparison::{ScalarDifference, ScalarDifferenceComparator};
 mod domain_null;
 mod weight_null;
 pub use context_null::ContextualCooccurrenceNull;
+pub use coupling_null::CouplingZeroNull;
 pub use weight_null::WeightChangeNull;
 mod null_models;
 pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
@@ -127,6 +129,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(ExistingRelationNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(WeightChangeNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ContextualCooccurrenceNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(CouplingZeroNull::default()))?;
     Ok(registry)
 }
 
