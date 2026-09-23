@@ -1,4 +1,43 @@
 //! Plugin contracts, capability-aware contexts, and explicit runtime registry.
+//!
+//! Interpreter implementations must return an epistemically typed value. A raw
+//! model response does not satisfy the contract.
+//!
+//! ```compile_fail
+//! use async_trait::async_trait;
+//! use unclip_epistemic::InterpretationToken;
+//! use unclip_measure::EmpiricalStructure;
+//! use unclip_plugin::{
+//!     InterpretationIo, Interpreter, Params, PluginDescriptor, Result,
+//! };
+//!
+//! struct RawInterpreter;
+//!
+//! #[async_trait]
+//! impl Interpreter for RawInterpreter {
+//!     fn descriptor(&self) -> &PluginDescriptor { todo!() }
+//!
+//!     async fn interpret(
+//!         &self,
+//!         _: &EmpiricalStructure,
+//!         _: &Params,
+//!         _: &dyn InterpretationIo,
+//!         _: InterpretationToken,
+//!     ) -> Result<serde_json::Value> {
+//!         todo!()
+//!     }
+//! }
+//! ```
+//!
+//! A calculated result also cannot be relabeled as interpreted.
+//!
+//! ```compile_fail
+//! use unclip_epistemic::{Calculated, Interpreted};
+//!
+//! fn relabel(value: Calculated<serde_json::Value>) -> Interpreted<serde_json::Value> {
+//!     value
+//! }
+//! ```
 
 #![forbid(unsafe_code)]
 
@@ -361,6 +400,10 @@ pub trait InterpretationIo: Send + Sync {
     async fn request(&self, request: &InterpretationRequest) -> Result<serde_json::Value>;
 }
 
+/// Assigns semantic meaning to an empirical structure.
+///
+/// The operation-specific token is the only output constructor supplied by the
+/// harness, and the return type retains the `Interpreted<T>` marker.
 #[async_trait]
 pub trait Interpreter: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;

@@ -199,6 +199,8 @@ mod tests {
             .await
             .unwrap();
 
+        fn require_interpreted<T>(_: &Interpreted<T>) {}
+        require_interpreted(&output);
         assert_eq!(output.provenance().operation, Operation::Interpreted);
         assert_eq!(output.value()["label"], "shared ritual");
         assert_eq!(
