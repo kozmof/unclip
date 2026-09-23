@@ -214,7 +214,9 @@ pub(crate) async fn run(
         .with_context(|| format!("measurement frame not found: {frame_selector}"))?;
     let parsed = document.resolve()?;
     ensure!(
-        parsed.profile.inferrers.is_empty() && parsed.profile.candidate_generators.is_empty(),
+        parsed.profile.inferrers.is_empty()
+            && parsed.profile.candidate_generators.is_empty()
+            && parsed.profile.interpreters.is_empty(),
         "experiments execute sensors, comparators, and null models only"
     );
     ensure!(

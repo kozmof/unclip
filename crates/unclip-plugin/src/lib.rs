@@ -480,6 +480,10 @@ impl Registry {
         self.comparators.values()
     }
 
+    pub fn interpreters(&self) -> impl Iterator<Item = &Arc<dyn Interpreter>> {
+        self.interpreters.values()
+    }
+
     pub fn candidate_generators(&self) -> impl Iterator<Item = &Arc<dyn CandidateGenerator>> {
         self.generators.values()
     }
@@ -495,6 +499,7 @@ impl Registry {
             .iter()
             .chain(&profile.inferrers)
             .chain(&profile.comparators)
+            .chain(&profile.interpreters)
             .chain(&profile.candidate_generators)
             .chain(&profile.null_models)
         {
@@ -510,6 +515,9 @@ impl Registry {
                 &plugin.descriptor().version
             })?,
             comparators: resolve_ids(&self.comparators, &profile.comparators, |plugin| {
+                &plugin.descriptor().version
+            })?,
+            interpreters: resolve_ids(&self.interpreters, &profile.interpreters, |plugin| {
                 &plugin.descriptor().version
             })?,
             candidate_generators: resolve_ids(
@@ -580,6 +588,7 @@ pub struct EngineProfile {
     pub sensors: Vec<PluginSelection>,
     pub inferrers: Vec<PluginSelection>,
     pub comparators: Vec<PluginSelection>,
+    pub interpreters: Vec<PluginSelection>,
     pub candidate_generators: Vec<PluginSelection>,
     pub null_models: Vec<PluginSelection>,
 }
@@ -588,6 +597,7 @@ pub struct RunPlan {
     pub sensors: Vec<Arc<dyn Sensor>>,
     pub inferrers: Vec<Arc<dyn Inferrer>>,
     pub comparators: Vec<Arc<dyn Comparator>>,
+    pub interpreters: Vec<Arc<dyn Interpreter>>,
     pub candidate_generators: Vec<Arc<dyn CandidateGenerator>>,
     pub null_models: Vec<Arc<dyn NullModel>>,
 }

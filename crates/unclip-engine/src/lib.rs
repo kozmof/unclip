@@ -307,6 +307,14 @@ impl Engine {
                 entry(&descriptor.id, &descriptor.version, params)
             })
             .collect::<Vec<_>>();
+        let mut interpreters = plan
+            .interpreters
+            .iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor();
+                entry(&descriptor.id, &descriptor.version, params)
+            })
+            .collect::<Vec<_>>();
         let mut candidate_generators = plan
             .candidate_generators
             .iter()
@@ -329,6 +337,7 @@ impl Engine {
         inferrers.sort_by(by_id);
         sensors.sort_by(by_id);
         comparators.sort_by(by_id);
+        interpreters.sort_by(by_id);
         candidate_generators.sort_by(by_id);
         null_models.sort_by(by_id);
 
@@ -338,6 +347,7 @@ impl Engine {
                 "inferrers": inferrers,
                 "sensors": sensors,
                 "comparators": comparators,
+                "interpreters": interpreters,
                 "candidate_generators": candidate_generators,
                 "null_models": null_models,
             }),
@@ -623,6 +633,7 @@ mod tests {
         assert!(plan.sensors.is_empty());
         assert!(plan.inferrers.is_empty());
         assert!(plan.comparators.is_empty());
+        assert!(plan.interpreters.is_empty());
     }
 
     #[test]

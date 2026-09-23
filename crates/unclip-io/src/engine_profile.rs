@@ -45,6 +45,8 @@ pub struct EngineProfileDocument {
     #[serde(default)]
     pub comparators: Vec<PluginConfig>,
     #[serde(default)]
+    pub interpreters: Vec<PluginConfig>,
+    #[serde(default)]
     pub candidate_generators: Vec<PluginConfig>,
     #[serde(default)]
     pub null_models: Vec<PluginConfig>,
@@ -77,6 +79,7 @@ fn validate(document: &EngineProfileDocument) -> anyhow::Result<()> {
         .iter()
         .chain(&document.inferrers)
         .chain(&document.comparators)
+        .chain(&document.interpreters)
         .chain(&document.candidate_generators)
         .chain(&document.null_models)
     {
@@ -114,6 +117,7 @@ impl EngineProfileDocument {
             .iter()
             .chain(&self.inferrers)
             .chain(&self.comparators)
+            .chain(&self.interpreters)
             .chain(&self.candidate_generators)
             .chain(&self.null_models)
             .map(|plugin| (plugin.id.clone(), plugin.params.clone()))
@@ -123,6 +127,7 @@ impl EngineProfileDocument {
                 sensors: selections(&self.sensors),
                 inferrers: selections(&self.inferrers),
                 comparators: selections(&self.comparators),
+                interpreters: selections(&self.interpreters),
                 candidate_generators: selections(&self.candidate_generators),
                 null_models: selections(&self.null_models),
             },
@@ -236,6 +241,10 @@ null_models:
   - id: null.fixture
     version: '=1.0.0'
     params: {seed: 7}
+interpreters:
+  - id: interpret.fixture
+    version: ^2.0
+    params: {temperature: 0}
 "#,
         )
         .unwrap();
@@ -245,17 +254,26 @@ null_models:
             "generate.fixture"
         );
         assert_eq!(parsed.profile.null_models[0].id.0, "null.fixture");
+        assert_eq!(parsed.profile.interpreters[0].id.0, "interpret.fixture");
         assert!(parsed.profile.candidate_generators[0]
             .version
             .matches(&semver::Version::new(1, 3, 0)));
         assert_eq!(parsed.params[&PluginId::new("null.fixture")]["seed"], 7);
+        assert_eq!(
+            parsed.params[&PluginId::new("interpret.fixture")]["temperature"],
+            0
+        );
         let encoded = serde_json::to_string(&document).unwrap();
         assert_eq!(parse_engine_profile(&encoded).unwrap(), document);
         let old = parse_engine_profile("sensors: []")
             .unwrap()
             .resolve()
             .unwrap();
-        assert!(old.profile.candidate_generators.is_empty() && old.profile.null_models.is_empty());
+        assert!(
+            old.profile.candidate_generators.is_empty()
+                && old.profile.null_models.is_empty()
+                && old.profile.interpreters.is_empty()
+        );
     }
     #[test]
     fn discovery_configuration_rejects_duplicate_ids_and_invalid_parameters() {
@@ -266,6 +284,8 @@ null_models:
             "candidate_generators: [{id: '', params: {}}]",
             "null_models: [{id: null.fixture, version: not-semver}]",
             "candidate_generators: [{id: generator, typo: true}]",
+            "interpreters: [{id: interpreter, params: []}]",
+            "sensors: [{id: same}]\ninterpreters: [{id: same}]",
         ] {
             assert!(parse_engine_profile(text).is_err(), "accepted {text}");
         }

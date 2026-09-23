@@ -88,6 +88,7 @@ pub(crate) async fn discover(
         parsed.profile.sensors.is_empty()
             && parsed.profile.inferrers.is_empty()
             && parsed.profile.comparators.is_empty()
+            && parsed.profile.interpreters.is_empty()
             && parsed.profile.null_models.is_empty(),
         "discovery executes only candidate generators"
     );

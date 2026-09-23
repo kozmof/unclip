@@ -39,6 +39,15 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
             descriptor.supports
         );
     }
+    for plugin in registry.interpreters() {
+        found = true;
+        let descriptor = plugin.descriptor();
+        crate::output::outln!(
+            "{}\tINTERPRETED\t{}\t-\tinterpretation",
+            descriptor.id,
+            descriptor.version
+        );
+    }
 
     for plugin in registry.candidate_generators() {
         found = true;
@@ -195,8 +204,11 @@ pub(crate) async fn observe(
     .ok_or_else(|| anyhow::anyhow!("domain version not found: {domain_selector}"))?;
     let parsed = document.resolve()?;
     anyhow::ensure!(
-        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty() && parsed.profile.comparators.is_empty(),
-        "observation and measurement commands do not execute candidate generators, null models, or comparators"
+        parsed.profile.candidate_generators.is_empty()
+            && parsed.profile.null_models.is_empty()
+            && parsed.profile.comparators.is_empty()
+            && parsed.profile.interpreters.is_empty(),
+        "observation and measurement commands do not execute candidate generators, null models, interpreters, or comparators"
     );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
@@ -319,6 +331,11 @@ fn resolved_profile(
     let inferrers = section(value, "inferrers", &mut params)?;
     let sensors = section(value, "sensors", &mut params)?;
     let comparators = section(value, "comparators", &mut params)?;
+    let interpreters = if value.get("interpreters").is_some() {
+        section(value, "interpreters", &mut params)?
+    } else {
+        Vec::new()
+    };
     let candidate_generators = if value.get("candidate_generators").is_some() {
         section(value, "candidate_generators", &mut params)?
     } else {
@@ -334,6 +351,7 @@ fn resolved_profile(
             sensors,
             inferrers,
             comparators,
+            interpreters,
             candidate_generators,
             null_models,
         },
@@ -728,8 +746,11 @@ pub(crate) async fn measure(
 
     let parsed = document.resolve()?;
     anyhow::ensure!(
-        parsed.profile.candidate_generators.is_empty() && parsed.profile.null_models.is_empty() && parsed.profile.comparators.is_empty(),
-        "observation and measurement commands do not execute candidate generators, null models, or comparators"
+        parsed.profile.candidate_generators.is_empty()
+            && parsed.profile.null_models.is_empty()
+            && parsed.profile.comparators.is_empty()
+            && parsed.profile.interpreters.is_empty(),
+        "observation and measurement commands do not execute candidate generators, null models, interpreters, or comparators"
     );
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
@@ -992,22 +1013,32 @@ mod discovery_replay_tests {
     fn replay_restores_exact_discovery_selections_and_accepts_legacy_plans() {
         let mut plan = serde_json::json!({"sensors":[],"inferrers":[],"comparators":[]});
         let (legacy, _) = resolved_profile(&plan).unwrap();
-        assert!(legacy.candidate_generators.is_empty() && legacy.null_models.is_empty());
+        assert!(
+            legacy.candidate_generators.is_empty()
+                && legacy.null_models.is_empty()
+                && legacy.interpreters.is_empty()
+        );
         plan["candidate_generators"] =
             serde_json::json!([{"id":"generate.fixture","version":"1.2.3","params":{"count":2}}]);
         plan["null_models"] =
             serde_json::json!([{"id":"null.fixture","version":"1.0.0","params":{"seed":7}}]);
+        plan["interpreters"] = serde_json::json!([{"id":"interpret.fixture","version":"2.1.0","params":{"temperature":0}}]);
         let (profile, params) = resolved_profile(&plan).unwrap();
         assert_eq!(
             profile.candidate_generators[0].version.to_string(),
             "=1.2.3"
         );
         assert_eq!(profile.null_models[0].version.to_string(), "=1.0.0");
+        assert_eq!(profile.interpreters[0].version.to_string(), "=2.1.0");
         assert_eq!(
             params[&unclip_epistemic::PluginId::new("generate.fixture")]["count"],
             2
         );
-        for key in ["candidate_generators", "null_models"] {
+        assert_eq!(
+            params[&unclip_epistemic::PluginId::new("interpret.fixture")]["temperature"],
+            0
+        );
+        for key in ["candidate_generators", "null_models", "interpreters"] {
             let mut invalid = plan.clone();
             invalid[key] = serde_json::Value::Null;
             assert!(resolved_profile(&invalid).is_err());
