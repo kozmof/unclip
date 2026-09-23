@@ -539,23 +539,22 @@ alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 
 `Engine::record_delta_w_test`, `Engine::record_delta_e_test`,
-`Engine::record_dynamic_coupling_test`, and `Engine::record_structural_test`
-implement the ordered minimal-revision steps through evidence-backed graph motifs.
-Each larger step requires the immediately preceding step
-to be insufficient for the same baseline, frame, and observation split. Weight,
+`Engine::record_dynamic_coupling_test`, `Engine::record_structural_test`, and
+`Engine::record_delta_v_test` implement the ordered minimal-revision path through
+an evidence-backed graph motif and an atomic membership revision. Each larger step
+requires the immediately preceding step to be insufficient for the same baseline, frame, and observation split. Weight,
 relation, and coupling attempts validate their specific counterfactual shape and
 require measured `null.weight-change`, `null.existing-relation`, and
 `null.coupling-zero` evidence respectively. Graph-motif attempts add one
 anonymous structural unit, retain their exact pattern and calculated candidate
-evidence, and require measured `null.existing-motif` evidence. Dynamic couplings remain
-anonymous
-and explicitly non-causal. A sufficient earlier attempt stops the ladder. The
-caller records each verdict and reason; explicit constraints must all be satisfied
+evidence, and require measured `null.existing-motif` evidence. Dynamic couplings
+remain anonymous and explicitly non-causal. A sufficient earlier attempt stops the ladder. The caller records each verdict and reason; explicit constraints must all be satisfied
 for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
 candidate, counterfactual, experiment, and prior attempt without scalarizing
-evidence. Semantic-role and transformation candidates remain unavailable until
-they have explicit calculated-evidence and application schemas; `Delta V` is
-not yet executable.
+evidence. Delta V accepts a complete persistent-residual candidate supported by
+at least two ordered distinct observations, adds one anonymous atomic unit, and
+requires measured `null.existing-unit` evidence. Semantic-role and transformation candidates remain unavailable until
+they have explicit calculated evidence and application schemas.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

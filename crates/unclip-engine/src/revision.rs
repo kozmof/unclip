@@ -1,5 +1,7 @@
 //! Ordered minimal-revision tests without scalarizing experiment evidence.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
@@ -49,6 +51,86 @@ pub struct RevisionAttempt {
 
 fn invalid(message: impl Into<String>) -> PluginError {
     PluginError::Message(message.into())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AtomicRevisionEvidence {
+    pattern: AtomicRevisionPattern,
+    observation_count: usize,
+    observations: Vec<unclip_observe::ObservationId>,
+    examples: Vec<AtomicRevisionExample>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AtomicRevisionPattern {
+    matching: String,
+    observed_label: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AtomicRevisionExample {
+    observation: unclip_observe::ObservationId,
+    unit: unclip_observe::ObservedUnitId,
+    measurements: Vec<DerivedId>,
+}
+
+fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json::Value> {
+    let evidence: AtomicRevisionEvidence =
+        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
+            .map_err(|error| invalid(error.to_string()))?;
+    if evidence.pattern.matching != "exact_observed_label"
+        || evidence.pattern.observed_label.trim().is_empty()
+        || evidence.observation_count < 2
+        || evidence.observation_count != evidence.observations.len()
+        || evidence
+            .observations
+            .iter()
+            .any(|observation| observation.0.trim().is_empty())
+        || evidence
+            .observations
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || evidence.examples.len() < evidence.observation_count
+    {
+        return Err(invalid(
+            "Delta V requires a nonempty exact-label pattern supported by at least two ordered distinct observations",
+        ));
+    }
+    let selected = evidence.observations.iter().collect::<BTreeSet<_>>();
+    let mut covered = BTreeSet::new();
+    let mut examples = BTreeSet::new();
+    for example in &evidence.examples {
+        if !selected.contains(&example.observation)
+            || example.unit.0.trim().is_empty()
+            || example.measurements.is_empty()
+            || example
+                .measurements
+                .iter()
+                .any(|measurement| measurement.0.trim().is_empty())
+            || example
+                .measurements
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || !examples.insert((&example.observation, &example.unit))
+        {
+            return Err(invalid(
+                "Delta V residual examples must be unique, selected, and retain ordered measurement evidence",
+            ));
+        }
+        covered.insert(&example.observation);
+    }
+    if covered != selected {
+        return Err(invalid(
+            "Delta V residual examples must cover every supporting observation",
+        ));
+    }
+    Ok(proposal
+        .value
+        .get("pattern")
+        .expect("validated atomic revision pattern"))
 }
 
 fn has_measured_null(evidence: &CounterfactualEvidence, plugin: &str, model: &str) -> bool {
@@ -227,7 +309,11 @@ fn emit_attempt(
             "minimal_revision_structural",
             semver::Version::new(0, 1, 0),
         ),
-        _ => return Err(invalid("revision step is not implemented")),
+        RevisionStep::DeltaV => (
+            "delta-v",
+            "minimal_revision_delta_v",
+            semver::Version::new(0, 1, 0),
+        ),
     };
     let output_id = DerivedId::new(format!("{run_id}/revision/{slug}"));
     let mut inputs = vec![candidate.id(), counterfactual.id(), experiment.id()];
@@ -598,6 +684,92 @@ impl crate::Engine {
             experiment,
             Some(prior),
             RevisionStep::Structural,
+            outcome,
+            reason,
+            run_id,
+            timestamp,
+        )
+    }
+
+    /// Record an atomic membership revision after structural change was insufficient.
+    ///
+    /// The new unit stays anonymous and retains the exact calculated residual
+    /// evidence. Semantic naming remains a later interpretation operation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_delta_v_test(
+        &self,
+        prior: &Experimental<RevisionAttempt>,
+        candidate: &Tracked<CandidateProposal>,
+        counterfactual: &Calculated<CounterfactualSnapshot>,
+        experiment: &Experimental<CounterfactualEvidence>,
+        outcome: RevisionTestOutcome,
+        reason: &str,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Experimental<RevisionAttempt>> {
+        let reason = reason.trim();
+        let proposal = validate_experiment(
+            "Delta V",
+            candidate,
+            counterfactual,
+            experiment,
+            outcome,
+            reason,
+            run_id,
+        )?;
+        validate_prior(prior, RevisionStep::Structural, experiment)?;
+        if proposal.kind != CandidateKind::AtomicMeaning {
+            return Err(invalid(
+                "Delta V currently supports only calculated atomic-meaning residual evidence",
+            ));
+        }
+        let pattern = validate_atomic_revision(proposal)?;
+        let snapshot = counterfactual.value();
+        if snapshot.added_units.len() != 1
+            || !snapshot.added_relations.is_empty()
+            || !snapshot.property_changes.is_empty()
+        {
+            return Err(invalid(
+                "Delta V must add exactly one unit without changing relations or properties",
+            ));
+        }
+        let unit = snapshot
+            .domain
+            .units
+            .get(&snapshot.added_units[0])
+            .ok_or_else(|| invalid("Delta V unit is absent from the counterfactual"))?;
+        if unit.kind != unclip_domain::UnitKind::AtomicMeaning
+            || unit.label.is_some()
+            || unit.properties.get("candidate_id")
+                != Some(&unclip_domain::PropertyValue::Text(
+                    candidate.id().0.clone(),
+                ))
+            || unit.properties.get("candidate_pattern")
+                != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+            || unit.properties.get("candidate_evidence")
+                != Some(&unclip_domain::PropertyValue::Structured(
+                    serde_json::Value::Object(proposal.value.clone()),
+                ))
+        {
+            return Err(invalid(
+                "Delta V unit must remain anonymous and retain its exact candidate identity, pattern, and evidence",
+            ));
+        }
+        if !has_measured_null(
+            experiment.value(),
+            "null.existing-unit",
+            "existing_domain_exact_match",
+        ) {
+            return Err(invalid(
+                "Delta V requires a measured null.existing-unit result",
+            ));
+        }
+        emit_attempt(
+            candidate,
+            counterfactual,
+            experiment,
+            Some(prior),
+            RevisionStep::DeltaV,
             outcome,
             reason,
             run_id,
