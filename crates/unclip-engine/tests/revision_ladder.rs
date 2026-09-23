@@ -7,7 +7,8 @@ use unclip_domain::{
 };
 use unclip_engine::{
     ComparisonPair, ConstraintAssessment, ConstraintStatus, CounterfactualEvidence, DeltaProfile,
-    Engine, ExperimentConstraint, NullEvidence, ProfileDelta, RevisionStep, RevisionTestOutcome,
+    Engine, ExperimentConstraint, NullEvidence, ProfileDelta, RelationBindings, RevisionStep,
+    RevisionTestOutcome,
 };
 use unclip_epistemic::{
     hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
@@ -19,15 +20,28 @@ fn domain() -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units: BTreeMap::from([(
-            UnitId::new("existing"),
-            Unit {
-                id: UnitId::new("existing"),
-                kind: UnitKind::AtomicMeaning,
-                label: Some("known".into()),
-                properties: BTreeMap::from([("weight".into(), PropertyValue::Number(0.5))]),
-            },
-        )]),
+        units: [
+            (
+                UnitId::new("existing"),
+                Unit {
+                    id: UnitId::new("existing"),
+                    kind: UnitKind::AtomicMeaning,
+                    label: Some("known".into()),
+                    properties: BTreeMap::from([("weight".into(), PropertyValue::Number(0.5))]),
+                },
+            ),
+            (
+                UnitId::new("target"),
+                Unit {
+                    id: UnitId::new("target"),
+                    kind: UnitKind::AtomicMeaning,
+                    label: Some("destination".into()),
+                    properties: BTreeMap::new(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
         relations: BTreeMap::new(),
     }
 }
@@ -303,4 +317,274 @@ fn delta_w_rejects_larger_revision_kinds_and_unreasoned_verdicts() {
             Timestamp::new("now"),
         )
         .is_err());
+}
+
+fn relation_proposal() -> CandidateProposal {
+    CandidateProposal {
+        domain_version_id: serde_json::to_string(&("d", "1")).unwrap(),
+        kind: CandidateKind::Relation,
+        value: json!({
+            "pattern": {
+                "matching": "exact_directed_observed_relation",
+                "source_label": "known",
+                "target_label": "destination",
+                "relation_kind": "near"
+            }
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+    }
+}
+
+fn existing_relation_null() -> NullEvidence {
+    NullEvidence {
+        id: DerivedId::new("relation-null"),
+        model: PluginId::new("null.existing-relation"),
+        reading: Reading::Value {
+            value: MeasurementValue::Structured(json!({
+                "model": "existing_domain_exact_match",
+                "match_count": 0,
+                "has_existing_alternative": false
+            })),
+        },
+    }
+}
+
+fn relation_constraint(status: ConstraintStatus) -> ConstraintAssessment {
+    ConstraintAssessment {
+        constraint: ExperimentConstraint::ComplexityBudget {
+            maximum_added_units: 0,
+            maximum_added_relations: 1,
+            maximum_property_changes: 0,
+        },
+        status,
+        observed: BTreeMap::from([
+            ("added_units".into(), 0),
+            ("added_relations".into(), 1),
+            ("property_changes".into(), 0),
+        ]),
+        reading: None,
+        transfer: None,
+    }
+}
+
+fn relation_fixture(
+    include_null: bool,
+    constraint_status: Option<ConstraintStatus>,
+    frame_version: &str,
+) -> (
+    Engine,
+    Tracked<CandidateProposal>,
+    unclip_epistemic::Calculated<unclip_engine::CounterfactualSnapshot>,
+    unclip_epistemic::Experimental<CounterfactualEvidence>,
+) {
+    let engine = Engine::with_builtins().unwrap();
+    let candidate =
+        Tracked::from_recorded(DerivedId::new("relation-candidate"), relation_proposal());
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), domain());
+    let counterfactual = engine
+        .apply_candidate_with_relation_bindings(
+            &baseline,
+            &candidate,
+            Some(&RelationBindings {
+                source: UnitId::new("existing"),
+                target: UnitId::new("target"),
+            }),
+            "relation-trial",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    let dependencies = DependencyCollector::default();
+    dependencies.read(&candidate);
+    dependencies.read(&Tracked::from(&counterfactual));
+    for id in [
+        "baseline",
+        "frame",
+        "split",
+        "relation-before",
+        "relation-after",
+        "relation-comparison",
+    ] {
+        dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
+    }
+    if include_null {
+        dependencies.read(&Tracked::from_recorded(DerivedId::new("relation-null"), ()));
+    }
+    let params = json!({"fixture": "relation"});
+    let experiment = ExperimentToken::from_harness(
+        EmitMetadata {
+            id: DerivedId::new("relation-experiment"),
+            producer: PluginId::new("experiment.counterfactual"),
+            algorithm: "held_out_counterfactual_comparison".into(),
+            version: semver::Version::new(0, 5, 0),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp: Timestamp::new("now"),
+            domain_version: Some(DomainVersion::new("1")),
+            frame_version: Some(FrameVersion::new(frame_version)),
+            model: None,
+        },
+        dependencies,
+    )
+    .emit(CounterfactualEvidence {
+        baseline: DerivedId::new("baseline"),
+        frame: DerivedId::new("frame"),
+        split: DerivedId::new("split"),
+        counterfactual: counterfactual.id().clone(),
+        candidate: candidate.id().clone(),
+        before: vec![DerivedId::new("relation-before")],
+        after: vec![DerivedId::new("relation-after")],
+        comparison: DerivedId::new("relation-comparison"),
+        delta_profile: comparison(),
+        null_results: include_null
+            .then(existing_relation_null)
+            .into_iter()
+            .collect(),
+        constraint_assessment: constraint_status
+            .as_ref()
+            .map(|_| DerivedId::new("relation-constraints")),
+        constraints: constraint_status
+            .into_iter()
+            .map(relation_constraint)
+            .collect(),
+        transfer_measurements: vec![],
+        pareto_assessment: None,
+        pareto: None,
+    });
+    (engine, candidate, counterfactual, experiment)
+}
+
+fn delta_w_prior(
+    outcome: RevisionTestOutcome,
+) -> unclip_epistemic::Experimental<unclip_engine::RevisionAttempt> {
+    let (engine, candidate, counterfactual, experiment) =
+        fixture(CandidateKind::WeightRevision, true, None);
+    engine
+        .record_delta_w_test(
+            &candidate,
+            &counterfactual,
+            &experiment,
+            outcome,
+            "weight evidence was reviewed first",
+            "weight-ladder",
+            Timestamp::new("now"),
+        )
+        .unwrap()
+}
+
+#[test]
+fn delta_e_requires_and_records_an_insufficient_delta_w_attempt() {
+    let prior = delta_w_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) =
+        relation_fixture(true, Some(ConstraintStatus::Satisfied), "1");
+    let record = || {
+        engine
+            .record_delta_e_test(
+                &prior,
+                &candidate,
+                &counterfactual,
+                &experiment,
+                RevisionTestOutcome::Sufficient,
+                "the relation explains held-out evidence after weight revision failed",
+                "relation-ladder",
+                Timestamp::new("now"),
+            )
+            .unwrap()
+    };
+    let attempt = record();
+    assert_eq!(attempt, record());
+    assert_eq!(attempt.value().step, RevisionStep::DeltaE);
+    assert_eq!(attempt.value().prior, Some(prior.id().clone()));
+    assert_eq!(attempt.value().baseline, DerivedId::new("baseline"));
+    assert_eq!(attempt.value().frame, DerivedId::new("frame"));
+    assert_eq!(attempt.value().split, DerivedId::new("split"));
+    assert_eq!(
+        attempt.provenance().inputs,
+        vec![
+            DerivedId::new("relation-candidate"),
+            DerivedId::new("relation-experiment"),
+            DerivedId::new("relation-trial/counterfactual"),
+            DerivedId::new("weight-ladder/revision/delta-w"),
+        ]
+    );
+}
+
+#[test]
+fn sufficient_or_different_context_delta_w_attempts_stop_delta_e() {
+    let (engine, candidate, counterfactual, experiment) = relation_fixture(true, None, "1");
+    let record = |prior| {
+        engine.record_delta_e_test(
+            prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+    };
+    assert!(record(&delta_w_prior(RevisionTestOutcome::Sufficient)).is_err());
+
+    let prior = delta_w_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) = relation_fixture(true, None, "2");
+    assert!(engine
+        .record_delta_e_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+}
+
+#[test]
+fn delta_e_requires_relation_null_evidence_and_satisfied_constraints() {
+    let prior = delta_w_prior(RevisionTestOutcome::Insufficient);
+    let (engine, candidate, counterfactual, experiment) = relation_fixture(false, None, "1");
+    assert!(engine
+        .record_delta_e_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+
+    let (engine, candidate, counterfactual, experiment) =
+        relation_fixture(true, Some(ConstraintStatus::Violated), "1");
+    assert!(engine
+        .record_delta_e_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Sufficient,
+            "reviewed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+    assert!(engine
+        .record_delta_e_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "relation-ladder",
+            Timestamp::new("now"),
+        )
+        .is_ok());
 }

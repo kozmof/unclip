@@ -525,11 +525,14 @@ creating this snapshot alone does not establish that a candidate explains data.
 `Engine::record_delta_w_test` implements the first minimal-revision ladder step.
 It accepts only a one-property `WeightRevision` counterfactual with completed
 before/after measurements, typed comparison deltas, and a measured
-`null.weight-change` result. The caller records an explicit `sufficient` or
-`insufficient` verdict and reason; explicit constraints must all be satisfied for
-a sufficient verdict. The resulting `RevisionAttempt` is experimental and tracks
-the candidate, counterfactual, and experiment without scalarizing their evidence.
-Larger ladder steps are not yet executable.
+`null.weight-change` result. `Engine::record_delta_e_test` handles the next step:
+it requires an insufficient `Delta W` attempt from the same baseline, frame, and
+observation split, then validates a one-relation counterfactual and a measured
+`null.existing-relation` result. A sufficient earlier attempt stops the ladder.
+The caller records each explicit verdict and reason; explicit constraints must all
+be satisfied for a sufficient verdict. Each `RevisionAttempt` is experimental and
+tracks its candidate, counterfactual, experiment, and prior attempt without
+scalarizing their evidence. Later ladder steps are not yet executable.
 
 Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
 discovery command and experiment execution are still pending.

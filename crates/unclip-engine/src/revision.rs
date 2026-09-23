@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Experimental,
-    PluginId, Timestamp, Tracked,
+    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken,
+    Experimental, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{PluginError, Result};
@@ -35,9 +35,14 @@ pub enum RevisionTestOutcome {
 #[serde(deny_unknown_fields)]
 pub struct RevisionAttempt {
     pub step: RevisionStep,
+    #[serde(default)]
+    pub prior: Option<DerivedId>,
     pub candidate: DerivedId,
     pub counterfactual: DerivedId,
     pub experiment: DerivedId,
+    pub baseline: DerivedId,
+    pub frame: DerivedId,
+    pub split: DerivedId,
     pub outcome: RevisionTestOutcome,
     pub reason: String,
 }
@@ -46,17 +51,214 @@ fn invalid(message: impl Into<String>) -> PluginError {
     PluginError::Message(message.into())
 }
 
-fn has_weight_retention_null(evidence: &CounterfactualEvidence) -> bool {
+fn has_measured_null(evidence: &CounterfactualEvidence, plugin: &str, model: &str) -> bool {
     evidence.null_results.iter().any(|result| {
-        result.model == PluginId::new("null.weight-change")
+        result.model == PluginId::new(plugin)
             && matches!(
                 &result.reading,
                 Reading::Value {
                     value: MeasurementValue::Structured(value)
-                } if value.get("model").and_then(serde_json::Value::as_str)
-                    == Some("retain_existing_numeric_property")
+                } if value.get("model").and_then(serde_json::Value::as_str) == Some(model)
             )
     })
+}
+
+fn validate_experiment<'a>(
+    step: &str,
+    candidate: &'a Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+) -> Result<&'a CandidateProposal> {
+    crate::require_calculated_evidence(candidate, "revision candidate")?;
+    if run_id.trim().is_empty() || reason.is_empty() {
+        return Err(invalid(format!(
+            "{step} tests require a run identity and an explicit reason"
+        )));
+    }
+    if candidate.id().0.trim().is_empty()
+        || counterfactual.id().0.trim().is_empty()
+        || experiment.id().0.trim().is_empty()
+    {
+        return Err(invalid(format!(
+            "{step} evidence identities must be nonempty"
+        )));
+    }
+    let proposal = DependencyCollector::default().read(candidate);
+    let snapshot = counterfactual.value();
+    let evidence = experiment.value();
+    if snapshot.candidate != *candidate.id()
+        || evidence.candidate != *candidate.id()
+        || evidence.counterfactual != *counterfactual.id()
+        || snapshot.baseline_domain_version_id != proposal.domain_version_id
+    {
+        return Err(invalid(format!(
+            "{step} candidate, counterfactual, experiment, and baseline must match"
+        )));
+    }
+    if !counterfactual.provenance().inputs.contains(candidate.id())
+        || !counterfactual
+            .provenance()
+            .inputs
+            .contains(&evidence.baseline)
+        || !experiment.provenance().inputs.contains(candidate.id())
+        || !experiment.provenance().inputs.contains(counterfactual.id())
+    {
+        return Err(invalid(format!(
+            "{step} evidence must track the candidate and counterfactual dependencies"
+        )));
+    }
+    let experiment_inputs = &experiment.provenance().inputs;
+    for required in [
+        &evidence.baseline,
+        &evidence.frame,
+        &evidence.split,
+        &evidence.comparison,
+    ]
+    .into_iter()
+    .chain(evidence.before.iter())
+    .chain(evidence.after.iter())
+    .chain(evidence.null_results.iter().map(|result| &result.id))
+    {
+        if required.0.trim().is_empty() || !experiment_inputs.contains(required) {
+            return Err(invalid(format!(
+                "{step} experiment must track its baseline, frame, split, measurements, comparison, and null evidence"
+            )));
+        }
+    }
+    if evidence.before.is_empty()
+        || evidence.after.is_empty()
+        || evidence.delta_profile.deltas.is_empty()
+    {
+        return Err(invalid(format!(
+            "{step} requires completed before/after measurements and typed comparison deltas"
+        )));
+    }
+    if outcome == RevisionTestOutcome::Sufficient
+        && evidence
+            .constraints
+            .iter()
+            .any(|constraint| constraint.status != ConstraintStatus::Satisfied)
+    {
+        return Err(invalid(format!(
+            "{step} cannot be sufficient while an explicit constraint is unsatisfied"
+        )));
+    }
+    Ok(proposal)
+}
+
+fn validate_prior(
+    prior: &Experimental<RevisionAttempt>,
+    expected: RevisionStep,
+    experiment: &Experimental<CounterfactualEvidence>,
+) -> Result<()> {
+    let value = prior.value();
+    if value.step != expected || value.outcome != RevisionTestOutcome::Insufficient {
+        return Err(invalid(format!(
+            "the prior {expected:?} step must be recorded as insufficient"
+        )));
+    }
+    if value.reason.trim().is_empty()
+        || !prior.provenance().inputs.contains(&value.candidate)
+        || !prior.provenance().inputs.contains(&value.counterfactual)
+        || !prior.provenance().inputs.contains(&value.experiment)
+    {
+        return Err(invalid(
+            "the prior revision attempt must retain its reason and evidence dependencies",
+        ));
+    }
+    if value.baseline != experiment.value().baseline
+        || value.frame != experiment.value().frame
+        || value.split != experiment.value().split
+        || prior.provenance().domain_version != experiment.provenance().domain_version
+        || prior.provenance().frame_version != experiment.provenance().frame_version
+    {
+        return Err(invalid(
+            "ordered revision attempts must use the same domain and frame context",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_attempt(
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    prior: Option<&Experimental<RevisionAttempt>>,
+    step: RevisionStep,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let (slug, algorithm, version) = match step {
+        RevisionStep::DeltaW => (
+            "delta-w",
+            "minimal_revision_delta_w",
+            semver::Version::new(0, 1, 0),
+        ),
+        RevisionStep::DeltaE => (
+            "delta-e",
+            "minimal_revision_delta_e",
+            semver::Version::new(0, 1, 0),
+        ),
+        _ => return Err(invalid("revision step is not implemented")),
+    };
+    let output_id = DerivedId::new(format!("{run_id}/revision/{slug}"));
+    let mut inputs = vec![candidate.id(), counterfactual.id(), experiment.id()];
+    if let Some(prior) = prior {
+        inputs.push(prior.id());
+    }
+    if inputs.contains(&&output_id) {
+        return Err(invalid(format!(
+            "{step:?} output identity collides with its evidence"
+        )));
+    }
+    let dependencies = DependencyCollector::default();
+    dependencies.read(candidate);
+    dependencies.read(&Tracked::from(counterfactual));
+    dependencies.read(&Tracked::from(experiment));
+    if let Some(prior) = prior {
+        dependencies.read(&Tracked::from(prior));
+    }
+    let prior_id = prior.map(|attempt| attempt.id().clone());
+    let params = serde_json::json!({
+        "step": step,
+        "prior": prior_id,
+        "outcome": outcome,
+        "reason": reason,
+    });
+    let token = ExperimentToken::from_harness(
+        EmitMetadata {
+            id: output_id,
+            producer: PluginId::new("experiment.revision-ladder"),
+            algorithm: algorithm.into(),
+            version,
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp,
+            domain_version: experiment.provenance().domain_version.clone(),
+            frame_version: experiment.provenance().frame_version.clone(),
+            model: None,
+        },
+        dependencies,
+    );
+    Ok(token.emit(RevisionAttempt {
+        step,
+        prior: prior_id,
+        candidate: candidate.id().clone(),
+        counterfactual: counterfactual.id().clone(),
+        experiment: experiment.id().clone(),
+        baseline: experiment.value().baseline.clone(),
+        frame: experiment.value().frame.clone(),
+        split: experiment.value().split.clone(),
+        outcome,
+        reason: reason.into(),
+    }))
 }
 
 impl crate::Engine {
@@ -64,80 +266,34 @@ impl crate::Engine {
     ///
     /// The caller supplies the explicit sufficiency verdict and reason. Typed
     /// deltas, null evidence, Pareto relations, and constraints stay separate;
-    /// this method never turns them into a score. Later ladder steps must consume
-    /// an insufficient earlier attempt before they can be tested.
+    /// this method never turns them into a score.
     #[allow(clippy::too_many_arguments)]
     pub fn record_delta_w_test(
         &self,
         candidate: &Tracked<CandidateProposal>,
-        counterfactual: &unclip_epistemic::Calculated<CounterfactualSnapshot>,
+        counterfactual: &Calculated<CounterfactualSnapshot>,
         experiment: &Experimental<CounterfactualEvidence>,
         outcome: RevisionTestOutcome,
         reason: &str,
         run_id: &str,
         timestamp: Timestamp,
     ) -> Result<Experimental<RevisionAttempt>> {
-        crate::require_calculated_evidence(candidate, "revision candidate")?;
         let reason = reason.trim();
-        if run_id.trim().is_empty() || reason.is_empty() {
-            return Err(invalid(
-                "Delta W tests require a run identity and an explicit reason",
-            ));
-        }
-        if candidate.id().0.trim().is_empty()
-            || counterfactual.id().0.trim().is_empty()
-            || experiment.id().0.trim().is_empty()
-        {
-            return Err(invalid("Delta W evidence identities must be nonempty"));
-        }
-        let dependencies = DependencyCollector::default();
-        let proposal = dependencies.read(candidate).clone();
+        let proposal = validate_experiment(
+            "Delta W",
+            candidate,
+            counterfactual,
+            experiment,
+            outcome,
+            reason,
+            run_id,
+        )?;
         if proposal.kind != CandidateKind::WeightRevision {
             return Err(invalid(
                 "Delta W can test only an explicit numeric-property weight revision",
             ));
         }
         let snapshot = counterfactual.value();
-        let evidence = experiment.value();
-        if snapshot.candidate != *candidate.id()
-            || evidence.candidate != *candidate.id()
-            || evidence.counterfactual != *counterfactual.id()
-            || snapshot.baseline_domain_version_id != proposal.domain_version_id
-        {
-            return Err(invalid(
-                "Delta W candidate, counterfactual, experiment, and baseline must match",
-            ));
-        }
-        if !counterfactual.provenance().inputs.contains(candidate.id())
-            || !counterfactual
-                .provenance()
-                .inputs
-                .contains(&evidence.baseline)
-            || !experiment.provenance().inputs.contains(candidate.id())
-            || !experiment.provenance().inputs.contains(counterfactual.id())
-        {
-            return Err(invalid(
-                "Delta W evidence must track the candidate and counterfactual dependencies",
-            ));
-        }
-        let experiment_inputs = &experiment.provenance().inputs;
-        for required in [
-            &evidence.baseline,
-            &evidence.frame,
-            &evidence.split,
-            &evidence.comparison,
-        ]
-        .into_iter()
-        .chain(evidence.before.iter())
-        .chain(evidence.after.iter())
-        .chain(evidence.null_results.iter().map(|result| &result.id))
-        {
-            if required.0.trim().is_empty() || !experiment_inputs.contains(required) {
-                return Err(invalid(
-                    "Delta W experiment must track its baseline, frame, split, measurements, comparison, and null evidence",
-                ));
-            }
-        }
         if !snapshot.added_units.is_empty()
             || !snapshot.added_relations.is_empty()
             || snapshot.property_changes.len() != 1
@@ -146,67 +302,107 @@ impl crate::Engine {
                 "Delta W must change exactly one existing numeric property",
             ));
         }
-        if evidence.before.is_empty()
-            || evidence.after.is_empty()
-            || evidence.delta_profile.deltas.is_empty()
-        {
-            return Err(invalid(
-                "Delta W requires completed before/after measurements and typed comparison deltas",
-            ));
-        }
-        if !has_weight_retention_null(evidence) {
+        if !has_measured_null(
+            experiment.value(),
+            "null.weight-change",
+            "retain_existing_numeric_property",
+        ) {
             return Err(invalid(
                 "Delta W requires a measured null.weight-change result",
             ));
         }
-        if outcome == RevisionTestOutcome::Sufficient
-            && evidence
-                .constraints
-                .iter()
-                .any(|constraint| constraint.status != ConstraintStatus::Satisfied)
+        emit_attempt(
+            candidate,
+            counterfactual,
+            experiment,
+            None,
+            RevisionStep::DeltaW,
+            outcome,
+            reason,
+            run_id,
+            timestamp,
+        )
+    }
+
+    /// Record a relation revision test after Delta W was explicitly insufficient.
+    ///
+    /// The relation counterfactual must add exactly one explicitly bound edge and
+    /// must compete with the existing-relation null. A sufficient earlier weight
+    /// revision stops the ladder before this method can emit an attempt.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_delta_e_test(
+        &self,
+        prior: &Experimental<RevisionAttempt>,
+        candidate: &Tracked<CandidateProposal>,
+        counterfactual: &Calculated<CounterfactualSnapshot>,
+        experiment: &Experimental<CounterfactualEvidence>,
+        outcome: RevisionTestOutcome,
+        reason: &str,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Experimental<RevisionAttempt>> {
+        let reason = reason.trim();
+        let proposal = validate_experiment(
+            "Delta E",
+            candidate,
+            counterfactual,
+            experiment,
+            outcome,
+            reason,
+            run_id,
+        )?;
+        validate_prior(prior, RevisionStep::DeltaW, experiment)?;
+        if proposal.kind != CandidateKind::Relation {
+            return Err(invalid(
+                "Delta E can test only an explicit relation revision",
+            ));
+        }
+        let snapshot = counterfactual.value();
+        if !snapshot.added_units.is_empty()
+            || snapshot.added_relations.len() != 1
+            || !snapshot.property_changes.is_empty()
         {
             return Err(invalid(
-                "Delta W cannot be sufficient while an explicit constraint is unsatisfied",
+                "Delta E must add exactly one relation without changing units or properties",
             ));
         }
-
-        let output_id = DerivedId::new(format!("{run_id}/revision/delta-w"));
-        if [candidate.id(), counterfactual.id(), experiment.id()].contains(&&output_id) {
+        let relation = snapshot
+            .domain
+            .relations
+            .get(&snapshot.added_relations[0])
+            .ok_or_else(|| invalid("Delta E added relation is absent from the counterfactual"))?;
+        let bindings = counterfactual
+            .provenance()
+            .params
+            .get("relation_bindings")
+            .ok_or_else(|| invalid("Delta E requires explicit relation bindings"))?;
+        if bindings.get("source").and_then(serde_json::Value::as_str) != Some(&relation.source.0)
+            || bindings.get("target").and_then(serde_json::Value::as_str)
+                != Some(&relation.target.0)
+        {
             return Err(invalid(
-                "Delta W output identity collides with its evidence",
+                "Delta E relation endpoints must match the explicit bindings",
             ));
         }
-        dependencies.read(&Tracked::from(counterfactual));
-        dependencies.read(&Tracked::from(experiment));
-        let params = serde_json::json!({
-            "step": RevisionStep::DeltaW,
-            "outcome": outcome,
-            "reason": reason,
-        });
-        let token = ExperimentToken::from_harness(
-            EmitMetadata {
-                id: output_id,
-                producer: PluginId::new("experiment.revision-ladder"),
-                algorithm: "minimal_revision_delta_w".into(),
-                version: semver::Version::new(0, 1, 0),
-                params_hash: hash_params(&params),
-                params,
-                source: None,
-                timestamp,
-                domain_version: experiment.provenance().domain_version.clone(),
-                frame_version: experiment.provenance().frame_version.clone(),
-                model: None,
-            },
-            dependencies,
-        );
-        let attempt = token.emit(RevisionAttempt {
-            step: RevisionStep::DeltaW,
-            candidate: candidate.id().clone(),
-            counterfactual: counterfactual.id().clone(),
-            experiment: experiment.id().clone(),
+        if !has_measured_null(
+            experiment.value(),
+            "null.existing-relation",
+            "existing_domain_exact_match",
+        ) {
+            return Err(invalid(
+                "Delta E requires a measured null.existing-relation result",
+            ));
+        }
+        emit_attempt(
+            candidate,
+            counterfactual,
+            experiment,
+            Some(prior),
+            RevisionStep::DeltaE,
             outcome,
-            reason: reason.into(),
-        });
-        Ok(attempt)
+            reason,
+            run_id,
+            timestamp,
+        )
     }
 }
