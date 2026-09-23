@@ -33,13 +33,16 @@ impl NullModel for Stub {
         panic!("planning must not execute a null model")
     }
 }
+#[async_trait::async_trait]
 impl Interpreter for Stub {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.0
     }
-    fn interpret(
+    async fn interpret(
         &self,
         _: &unclip_measure::EmpiricalStructure,
+        _: &unclip_plugin::Params,
+        _: &dyn unclip_plugin::InterpretationIo,
         _: unclip_epistemic::InterpretationToken,
     ) -> unclip_plugin::Result<unclip_epistemic::Interpreted<serde_json::Value>> {
         panic!("planning must not execute an interpreter")

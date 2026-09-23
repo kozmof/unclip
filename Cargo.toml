@@ -16,6 +16,7 @@ members = [
     "crates/unclip-plugin",
     "crates/unclip-sensors",
     "crates/unclip-infer",
+    "crates/unclip-interpret",
     "crates/unclip-engine",
 ]
 
@@ -46,6 +47,7 @@ unclip-measure = { path = "crates/unclip-measure", version = "0.1.0" }
 unclip-plugin = { path = "crates/unclip-plugin", version = "0.1.0" }
 unclip-sensors = { path = "crates/unclip-sensors", version = "0.1.0" }
 unclip-infer = { path = "crates/unclip-infer", version = "0.1.0" }
+unclip-interpret = { path = "crates/unclip-interpret", version = "0.1.0" }
 unclip-engine = { path = "crates/unclip-engine", version = "0.1.0" }
 
 # CLI / async

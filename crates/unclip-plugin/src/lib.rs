@@ -347,11 +347,28 @@ pub trait Comparator: Send + Sync {
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>>;
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterpretationRequest {
+    pub model: String,
+    pub instructions: String,
+    pub structure: EmpiricalStructure,
+    pub parameters: Params,
+    pub response_schema: Params,
+}
+
+#[async_trait]
+pub trait InterpretationIo: Send + Sync {
+    async fn request(&self, request: &InterpretationRequest) -> Result<serde_json::Value>;
+}
+
+#[async_trait]
 pub trait Interpreter: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
-    fn interpret(
+    async fn interpret(
         &self,
         structure: &EmpiricalStructure,
+        params: &Params,
+        io: &dyn InterpretationIo,
         token: InterpretationToken,
     ) -> Result<Interpreted<serde_json::Value>>;
 }

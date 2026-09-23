@@ -1,0 +1,22 @@
+[package]
+name = "unclip-interpret"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Built-in semantic interpreters for Unclip."
+
+[dependencies]
+async-trait.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+unclip-epistemic.workspace = true
+unclip-measure.workspace = true
+unclip-plugin.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

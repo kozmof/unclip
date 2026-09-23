@@ -98,6 +98,7 @@ use unclip_plugin::{
 pub fn builtin_registry() -> Result<Registry> {
     let mut registry = Registry::default();
     unclip_infer::register_all(&mut registry)?;
+    unclip_interpret::register_all(&mut registry)?;
     unclip_sensors::register_all(&mut registry)?;
     registry.register_comparator(std::sync::Arc::new(ScalarDifferenceComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(KendallComparator::default()))?;
@@ -569,7 +570,7 @@ mod tests {
     use unclip_plugin::PluginSelection;
 
     #[test]
-    fn builtin_registry_contains_explicit_inference_and_measurement_plugins() {
+    fn builtin_registry_contains_explicit_plugins() {
         let registry = builtin_registry().unwrap();
         let inferrers = registry
             .inferrers()
@@ -581,6 +582,10 @@ mod tests {
             .collect::<Vec<_>>();
         let comparators = registry
             .comparators()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
+        let interpreters = registry
+            .interpreters()
             .map(|plugin| plugin.descriptor().id.0.as_str())
             .collect::<Vec<_>>();
 
@@ -624,6 +629,7 @@ mod tests {
                 "compare.spectrum"
             ]
         );
+        assert_eq!(interpreters, vec!["interpret.llm-label"]);
     }
 
     #[test]

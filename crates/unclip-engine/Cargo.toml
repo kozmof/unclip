@@ -16,6 +16,7 @@ semver.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-infer.workspace = true
+unclip-interpret.workspace = true
 unclip-measure.workspace = true
 unclip-observe.workspace = true
 unclip-plugin.workspace = true
