@@ -1,5 +1,7 @@
 //! Atomic storage for anonymous proposals and completed counterfactual evidence.
 
+use std::collections::BTreeSet;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
@@ -10,17 +12,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use unclip_domain::DomainSnapshot;
 use unclip_entity::{
-    candidates, domain_revisions, domain_versions, experiment_deltas, experiment_observations,
-    experiments, measurement_profiles, observations,
+    candidate_interpretations, candidates, domain_revision_interpretations, domain_revisions,
+    domain_versions, experiment_deltas, experiment_observations, experiments, frame_versions,
+    measurement_profiles, observations, sensor_runs,
 };
-use unclip_epistemic::{Calculated, DerivedId, Experimental, Provenance};
+use unclip_epistemic::{
+    Calculated, DerivedId, Experimental, Interpreted, ParameterHash, PluginId, Provenance,
+};
 use unclip_measure::{Delta, MeasurementValue};
 
 use crate::{
     measurement_repository::{insert_profile_in_transaction, insert_sensor_run_in_transaction},
     provenance_repository::insert_provenance_in_transaction,
-    MeasurementProfileHeader, MeasurementRecord, SensorRunRecord, StoreError, StoreResult,
-    StoredProvenance,
+    MeasurementProfileHeader, MeasurementRecord, MeasurementRepository,
+    SeaOrmMeasurementRepository, SensorRunRecord, StoreError, StoreResult, StoredProvenance,
 };
 
 pub use unclip_domain::{CandidateKind, CandidateProposal};
@@ -30,6 +35,14 @@ pub struct CandidateRecord {
     pub id: DerivedId,
     pub created_at: String,
     pub proposal: CandidateProposal,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidateInterpretationRecord {
+    pub id: DerivedId,
+    pub candidate_id: DerivedId,
+    pub value: Value,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +110,8 @@ pub struct DomainRevision {
     pub to_version_id: String,
     pub reason: String,
     pub evidence: Map<String, Value>,
+    #[serde(default)]
+    pub interpretation_ids: Vec<DerivedId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +119,23 @@ pub struct DomainRevisionRecord {
     pub id: DerivedId,
     pub created_at: String,
     pub revision: DomainRevision,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionLedgerProfile {
+    pub header: MeasurementProfileHeader,
+    pub measurements: Vec<MeasurementRecord>,
+    pub sensor_runs: Vec<SensorRunRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomainRevisionLedger {
+    pub revision: DomainRevisionRecord,
+    pub candidate: CandidateRecord,
+    pub experiment: CompletedExperimentRecord,
+    pub profiles: Vec<RevisionLedgerProfile>,
+    pub interpretations: Vec<CandidateInterpretationRecord>,
+    pub provenance: Vec<StoredProvenance>,
 }
 
 #[async_trait]
@@ -120,6 +152,20 @@ pub trait CandidateRepository: Sync {
         after: Option<&DerivedId>,
         limit: u64,
     ) -> StoreResult<Vec<CandidateRecord>>;
+}
+
+#[async_trait]
+pub trait CandidateInterpretationRepository: Sync {
+    async fn insert_candidate_interpretation(
+        &self,
+        run_id: Option<String>,
+        candidate_id: &DerivedId,
+        interpretation: Interpreted<Value>,
+    ) -> StoreResult<()>;
+    async fn get_candidate_interpretation(
+        &self,
+        id: &DerivedId,
+    ) -> StoreResult<Option<CandidateInterpretationRecord>>;
 }
 
 #[async_trait]
@@ -165,6 +211,11 @@ pub trait DomainRevisionRepository: Sync {
         &self,
         id: &DerivedId,
     ) -> StoreResult<Option<DomainRevisionRecord>>;
+    /// Rehydrate every immutable record needed to explain why and how a revision occurred.
+    async fn get_domain_revision_ledger(
+        &self,
+        id: &DerivedId,
+    ) -> StoreResult<Option<DomainRevisionLedger>>;
 }
 
 pub struct SeaOrmExperimentRepository {
@@ -297,6 +348,64 @@ impl CandidateRepository for SeaOrmExperimentRepository {
                 value: parse(&row.value_json)?,
             },
         }))
+    }
+}
+
+#[async_trait]
+impl CandidateInterpretationRepository for SeaOrmExperimentRepository {
+    async fn insert_candidate_interpretation(
+        &self,
+        run_id: Option<String>,
+        candidate_id: &DerivedId,
+        interpretation: Interpreted<Value>,
+    ) -> StoreResult<()> {
+        if !interpretation.value().is_object() {
+            return Err(invalid("candidate interpretations must be JSON objects"));
+        }
+        let txn = self.db.begin().await?;
+        if candidates::Entity::find_by_id(&candidate_id.0)
+            .one(&txn)
+            .await?
+            .is_none()
+        {
+            return Err(invalid("interpretation candidate not found"));
+        }
+        provenance(
+            &txn,
+            run_id,
+            interpretation.id(),
+            interpretation.provenance(),
+        )
+        .await?;
+        candidate_interpretations::Entity::insert(candidate_interpretations::ActiveModel {
+            id: Set(interpretation.id().0.clone()),
+            candidate_id: Set(candidate_id.0.clone()),
+            value_json: Set(json(interpretation.value())?),
+            provenance_id: Set(interpretation.id().0.clone()),
+            created_at: Set(interpretation.provenance().timestamp.0.clone()),
+        })
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn get_candidate_interpretation(
+        &self,
+        id: &DerivedId,
+    ) -> StoreResult<Option<CandidateInterpretationRecord>> {
+        candidate_interpretations::Entity::find_by_id(&id.0)
+            .one(&self.db)
+            .await?
+            .map(|row| {
+                Ok(CandidateInterpretationRecord {
+                    id: DerivedId::new(row.id),
+                    candidate_id: DerivedId::new(row.candidate_id),
+                    value: parse(&row.value_json)?,
+                    created_at: row.created_at,
+                })
+            })
+            .transpose()
     }
 }
 
@@ -540,6 +649,22 @@ async fn insert_revision_in_transaction(
     if value.reason.trim().is_empty() {
         return Err(invalid("domain revisions require an explicit reason"));
     }
+    let mut seen_interpretations = BTreeSet::new();
+    for interpretation_id in &value.interpretation_ids {
+        if !seen_interpretations.insert(interpretation_id) {
+            return Err(invalid("domain revision interpretations must be unique"));
+        }
+        let interpretation = candidate_interpretations::Entity::find_by_id(&interpretation_id.0)
+            .one(txn)
+            .await?
+            .ok_or_else(|| invalid("domain revision interpretation not found"))?;
+        if interpretation.candidate_id != value.candidate_id.0 {
+            return Err(invalid(
+                "domain revision interpretation belongs to another candidate",
+            ));
+        }
+        require_input(revision.provenance(), &interpretation.provenance_id)?;
+    }
     let experiment = experiments::Entity::find_by_id(&value.experiment_id.0)
         .one(txn)
         .await?
@@ -567,6 +692,19 @@ async fn insert_revision_in_transaction(
     })
     .exec(txn)
     .await?;
+    for (position, interpretation_id) in value.interpretation_ids.iter().enumerate() {
+        domain_revision_interpretations::Entity::insert(
+            domain_revision_interpretations::ActiveModel {
+                revision_id: Set(revision.id().0.clone()),
+                candidate_id: Set(value.candidate_id.0.clone()),
+                interpretation_id: Set(interpretation_id.0.clone()),
+                position: Set(i64::try_from(position)
+                    .map_err(|_| invalid("too many domain revision interpretations"))?),
+            },
+        )
+        .exec(txn)
+        .await?;
+    }
     Ok(())
 }
 
@@ -610,6 +748,136 @@ async fn prepare_delta(
         provenance_id: Set(calculated.id().0.clone()),
         created_at: Set(calculated.provenance().timestamp.0.clone()),
     })
+}
+
+async fn revision_interpretation_ids(
+    db: &DatabaseConnection,
+    revision_id: &DerivedId,
+) -> StoreResult<Vec<DerivedId>> {
+    Ok(domain_revision_interpretations::Entity::find()
+        .filter(domain_revision_interpretations::Column::RevisionId.eq(&revision_id.0))
+        .order_by_asc(domain_revision_interpretations::Column::Position)
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| DerivedId::new(row.interpretation_id))
+        .collect())
+}
+
+fn hydrate_sensor_run(row: sensor_runs::Model) -> StoreResult<SensorRunRecord> {
+    Ok(SensorRunRecord {
+        id: row.id,
+        engine_run_id: row.engine_run_id,
+        sensor: PluginId::new(row.sensor_id),
+        sensor_version: semver::Version::parse(&row.sensor_version)
+            .context("invalid stored sensor version")?,
+        params: parse(&row.params_json)?,
+        params_hash: ParameterHash::new(row.params_hash),
+        status: row.status,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+    })
+}
+
+async fn hydrate_ledger_profile(
+    db: &DatabaseConnection,
+    id: &str,
+) -> StoreResult<RevisionLedgerProfile> {
+    let row = measurement_profiles::Entity::find_by_id(id)
+        .one(db)
+        .await?
+        .ok_or_else(|| invalid("revision ledger measurement profile not found"))?;
+    let frame = frame_versions::Entity::find_by_id(&row.frame_version_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| invalid("revision ledger frame version not found"))?;
+    let measurements = MeasurementRepository::get_profile_records(
+        &SeaOrmMeasurementRepository::new(db.clone()),
+        id,
+    )
+    .await?
+    .ok_or_else(|| invalid("revision ledger measurement profile not found"))?;
+    let sensor_ids = measurements
+        .iter()
+        .map(|record| record.sensor_run_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut hydrated_sensor_runs = Vec::with_capacity(sensor_ids.len());
+    for sensor_id in sensor_ids {
+        let row = sensor_runs::Entity::find_by_id(&sensor_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| invalid("revision ledger sensor run not found"))?;
+        hydrated_sensor_runs.push(hydrate_sensor_run(row)?);
+    }
+    Ok(RevisionLedgerProfile {
+        header: MeasurementProfileHeader {
+            id: row.id,
+            engine_run_id: row.engine_run_id,
+            observation_id: row.observation_id,
+            frame: unclip_domain::FrameId::new(frame.frame_id),
+            frame_version: unclip_epistemic::FrameVersion::new(frame.version),
+            provenance: DerivedId::new(row.provenance_id),
+            created_at: row.created_at,
+        },
+        measurements,
+        sensor_runs: hydrated_sensor_runs,
+    })
+}
+
+fn collect_json_strings(value: &Value, strings: &mut BTreeSet<String>) {
+    match value {
+        Value::String(value) => {
+            strings.insert(value.clone());
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_json_strings(value, strings);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values() {
+                collect_json_strings(value, strings);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn hydrate_ledger_provenance(
+    db: &DatabaseConnection,
+    mut required: BTreeSet<DerivedId>,
+    evidence: &[Value],
+) -> StoreResult<Vec<StoredProvenance>> {
+    let repository = crate::SeaOrmProvenanceRepository::new(db.clone());
+    let mut possible = BTreeSet::new();
+    for value in evidence {
+        collect_json_strings(value, &mut possible);
+    }
+    for id in possible {
+        let id = DerivedId::new(id);
+        if crate::ProvenanceRepository::get_provenance(&repository, &id)
+            .await?
+            .is_some()
+        {
+            required.insert(id);
+        }
+    }
+    let seeds = required.iter().cloned().collect::<Vec<_>>();
+    for id in seeds {
+        let ancestors = crate::ProvenanceRepository::ancestors(&repository, &id).await?;
+        required.extend(ancestors);
+    }
+    let mut result = Vec::with_capacity(required.len());
+    for id in required {
+        result.push(
+            crate::ProvenanceRepository::get_provenance(&repository, &id)
+                .await?
+                .ok_or_else(|| {
+                    invalid(format!("revision ledger provenance not found: {}", id.0))
+                })?,
+        );
+    }
+    Ok(result)
 }
 
 #[async_trait]
@@ -678,8 +946,10 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
         else {
             return Ok(None);
         };
+        let id = DerivedId::new(row.id);
+        let interpretation_ids = revision_interpretation_ids(&self.db, &id).await?;
         Ok(Some(DomainRevisionRecord {
-            id: DerivedId::new(row.id),
+            id,
             created_at: row.created_at,
             revision: DomainRevision {
                 candidate_id: DerivedId::new(row.candidate_id),
@@ -688,7 +958,83 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
                 to_version_id: row.to_version_id,
                 reason: row.reason,
                 evidence: parse(&row.evidence_json)?,
+                interpretation_ids,
             },
+        }))
+    }
+
+    async fn get_domain_revision_ledger(
+        &self,
+        id: &DerivedId,
+    ) -> StoreResult<Option<DomainRevisionLedger>> {
+        let Some(revision) = self.get_domain_revision(id).await? else {
+            return Ok(None);
+        };
+        let candidate = self
+            .get_candidate(&revision.revision.candidate_id)
+            .await?
+            .ok_or_else(|| invalid("revision ledger candidate not found"))?;
+        let experiment = self
+            .get_completed_experiment(&revision.revision.experiment_id)
+            .await?
+            .ok_or_else(|| invalid("revision ledger experiment not found"))?;
+
+        let mut profile_ids = BTreeSet::new();
+        for delta in &experiment.deltas {
+            profile_ids.insert(delta.before_profile_id.clone());
+            profile_ids.insert(delta.after_profile_id.clone());
+        }
+        let mut profiles = Vec::with_capacity(profile_ids.len());
+        for profile_id in profile_ids {
+            profiles.push(hydrate_ledger_profile(&self.db, &profile_id).await?);
+        }
+
+        let mut interpretations = Vec::with_capacity(revision.revision.interpretation_ids.len());
+        for interpretation_id in &revision.revision.interpretation_ids {
+            let interpretation = self
+                .get_candidate_interpretation(interpretation_id)
+                .await?
+                .ok_or_else(|| invalid("revision ledger interpretation not found"))?;
+            if interpretation.candidate_id != candidate.id {
+                return Err(invalid(
+                    "revision ledger interpretation belongs to another candidate",
+                ));
+            }
+            interpretations.push(interpretation);
+        }
+
+        let mut required_provenance = BTreeSet::from([
+            revision.id.clone(),
+            candidate.id.clone(),
+            experiment.id.clone(),
+        ]);
+        required_provenance.extend(experiment.deltas.iter().map(|delta| delta.id.clone()));
+        for profile in &profiles {
+            required_provenance.insert(profile.header.provenance.clone());
+            required_provenance.extend(
+                profile
+                    .measurements
+                    .iter()
+                    .map(|measurement| measurement.provenance.clone()),
+            );
+        }
+        required_provenance.extend(interpretations.iter().map(|value| value.id.clone()));
+        let mut evidence = vec![
+            Value::Object(revision.revision.evidence.clone()),
+            Value::Object(experiment.outcome.plan.clone()),
+            Value::Object(experiment.outcome.result.clone()),
+        ];
+        evidence.extend(interpretations.iter().map(|value| value.value.clone()));
+        let provenance =
+            hydrate_ledger_provenance(&self.db, required_provenance, &evidence).await?;
+
+        Ok(Some(DomainRevisionLedger {
+            revision,
+            candidate,
+            experiment,
+            profiles,
+            interpretations,
+            provenance,
         }))
     }
 }

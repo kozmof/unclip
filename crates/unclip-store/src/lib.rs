@@ -28,10 +28,11 @@ pub use engine_run_repository::{
 };
 pub use error::{StoreError, StoreResult};
 pub use experiment_repository::{
-    CandidateKind, CandidateProposal, CandidateRecord, CandidateRepository,
-    CompletedExperimentBundle, CompletedExperimentRecord, DomainRevision, DomainRevisionRecord,
+    CandidateInterpretationRecord, CandidateInterpretationRepository, CandidateKind,
+    CandidateProposal, CandidateRecord, CandidateRepository, CompletedExperimentBundle,
+    CompletedExperimentRecord, DomainRevision, DomainRevisionLedger, DomainRevisionRecord,
     DomainRevisionRepository, ExperimentDelta, ExperimentDeltaRecord, ExperimentMeasurementProfile,
-    ExperimentOutcome, ExperimentRepository, SeaOrmExperimentRepository,
+    ExperimentOutcome, ExperimentRepository, RevisionLedgerProfile, SeaOrmExperimentRepository,
 };
 pub use frame_repository::{FrameInfo, FrameRepository, SeaOrmFrameRepository};
 pub use history::{

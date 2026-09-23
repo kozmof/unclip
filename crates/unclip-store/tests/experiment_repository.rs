@@ -4,16 +4,16 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use serde_json::json;
 use unclip_domain::{DomainId, DomainSnapshot, PropertyValue, Unit, UnitId, UnitKind};
 use unclip_epistemic::{
-    hash_params, ops, DependencyCollector, Derived, DerivedId, EmitMetadata, EmitToken,
+    hash_params, ops, DependencyCollector, Derived, DerivedId, EmitMetadata, EmitToken, Operation,
     OperationKind, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Delta, MeasurementValue};
 use unclip_observe::ObservationId;
 use unclip_store::{
-    connect_and_migrate, CandidateKind, CandidateProposal, CandidateRepository,
-    CompletedExperimentBundle, DomainReader, DomainRevision, DomainRevisionRepository,
-    ExperimentDelta, ExperimentMeasurementProfile, ExperimentOutcome, ExperimentRepository,
-    MeasurementProfileHeader, ProvenanceRepository, SeaOrmDomainRepository,
+    connect_and_migrate, CandidateInterpretationRepository, CandidateKind, CandidateProposal,
+    CandidateRepository, CompletedExperimentBundle, DomainReader, DomainRevision,
+    DomainRevisionRepository, ExperimentDelta, ExperimentMeasurementProfile, ExperimentOutcome,
+    ExperimentRepository, MeasurementProfileHeader, ProvenanceRepository, SeaOrmDomainRepository,
     SeaOrmExperimentRepository, SeaOrmProvenanceRepository, StoredProvenance,
 };
 
@@ -117,6 +117,7 @@ fn revision() -> DomainRevision {
         to_version_id: "d2".into(),
         reason: "explicit weight revision".into(),
         evidence: json!({"constraints":"passed"}).as_object().unwrap().clone(),
+        interpretation_ids: vec![],
     }
 }
 async fn setup() -> (
@@ -636,6 +637,7 @@ fn applied_revision(id: &str, version: &str) -> unclip_epistemic::Experimental<D
                 .as_object()
                 .unwrap()
                 .clone(),
+            interpretation_ids: vec![],
         },
     )
 }
@@ -765,4 +767,130 @@ async fn failed_revision_application_rolls_back_the_successor_and_provenance() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn revision_ledger_reconstructs_evidence_profiles_sensors_and_interpretations() {
+    let (db, repo, provenance) = setup().await;
+    repo.insert_candidate(Some("run".into()), candidate("candidate"))
+        .await
+        .unwrap();
+    for id in ["null-result", "constraint-assessment"] {
+        let value = derived::<_, ops::Calculation>(id, "evidence.fixture", &["seed"], ());
+        provenance
+            .insert_provenance(StoredProvenance {
+                id: value.id().clone(),
+                run_id: Some("run".into()),
+                provenance: value.provenance().clone(),
+            })
+            .await
+            .unwrap();
+    }
+    db.execute_unprepared(
+        r#"
+        INSERT INTO sensor_runs(
+          id,engine_run_id,sensor_id,sensor_version,params_json,params_hash,
+          status,started_at,completed_at
+        ) VALUES (
+          'sensor-run','run','sensor.fixture','2.3.4','{"window":4}','fixture-hash',
+          'completed','start','done'
+        );
+        INSERT INTO measurements(
+          id,profile_id,sensor_run_id,provenance_id,kind,status,value_json,
+          confidence,sample_count,context_json
+        ) VALUES
+          ('before-value','before','sensor-run','before-p','scalar','value','{"kind":"scalar","value":1.0}',0.9,4,
+           '{"values":{},"sparse_reading":null}'),
+          ('after-value','after','sensor-run','after-p','scalar','value','{"kind":"scalar","value":2.0}',0.9,4,
+           '{"values":{},"sparse_reading":null}');
+        "#,
+    )
+    .await
+    .unwrap();
+
+    let mut completed = outcome();
+    completed.result = json!({
+        "null_results":[{"id":"null-result","model":"null.fixture","reading":{"status":"not_measured"}}],
+        "constraint_assessment":"constraint-assessment",
+        "constraints":[{"kind":"minimum_samples","status":"satisfied"}]
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    repo.insert_completed_experiment("run", experiment(completed), deltas())
+        .await
+        .unwrap();
+
+    let interpretation = derived::<_, ops::Interpretation>(
+        "interpretation",
+        "interpret.llm-label",
+        &["seed"],
+        json!({
+            "structure":{"kind":"weight_revision","value":{"weights":{"a":0.5}}},
+            "interpretation":{"label":"balanced weight","explanation":"held-out evidence supports it"}
+        }),
+    );
+    repo.insert_candidate_interpretation(
+        Some("run".into()),
+        &DerivedId::new("candidate"),
+        interpretation.clone(),
+    )
+    .await
+    .unwrap();
+
+    let mut value = revision();
+    value.interpretation_ids = vec![interpretation.id().clone()];
+    let revision = derived::<_, ops::Experiment>(
+        "revision",
+        "revision.fixture",
+        &["experiment", "interpretation"],
+        value,
+    );
+    repo.insert_domain_revision(Some("run".into()), revision.clone())
+        .await
+        .unwrap();
+
+    let ledger = repo
+        .get_domain_revision_ledger(revision.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ledger.revision.revision.reason, "explicit weight revision");
+    assert_eq!(ledger.candidate.proposal, proposal());
+    assert_eq!(
+        ledger.experiment.outcome.result["null_results"][0]["id"],
+        "null-result"
+    );
+    assert_eq!(
+        ledger.experiment.outcome.result["constraints"][0]["status"],
+        "satisfied"
+    );
+    assert_eq!(
+        ledger
+            .profiles
+            .iter()
+            .map(|profile| profile.header.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["after", "before"]
+    );
+    assert!(ledger
+        .profiles
+        .iter()
+        .all(|profile| profile.measurements.len() == 1
+            && profile.sensor_runs.len() == 1
+            && profile.sensor_runs[0].sensor_version == semver::Version::new(2, 3, 4)));
+    assert_eq!(ledger.interpretations.len(), 1);
+    assert_eq!(
+        ledger.interpretations[0].value["interpretation"]["label"],
+        "balanced weight"
+    );
+    let operations = ledger
+        .provenance
+        .iter()
+        .map(|value| (value.id.0.as_str(), value.provenance.operation))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(operations["interpretation"], Operation::Interpreted);
+    assert_eq!(operations["experiment"], Operation::Experimental);
+    assert_eq!(operations["null-result"], Operation::Calculated);
+    assert_eq!(operations["constraint-assessment"], Operation::Calculated);
 }

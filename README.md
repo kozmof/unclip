@@ -572,6 +572,8 @@ a matching completed candidate experiment, preserves the baseline rows unchanged
 and rejects a baseline that already has a successor. A partial unique database
 index enforces the single-successor rule for concurrent writers. These APIs provide storage; candidate generation and counterfactual execution are not yet exposed in the CLI.
 
+Candidate interpretations are stored as immutable interpreted JSON values with their own provenance and an explicit candidate link. A revision can reference them in a stable order, and each link must name the same candidate and appear in the revision provenance. `get_domain_revision_ledger` reconstructs the revision and reason, candidate, completed experiment, typed deltas, before/after profiles, measurement records, exact sensor runs and versions, linked interpretations, and the provenance closure. Evidence IDs embedded in plans, results, revision evidence, or interpretations are included when they name stored provenance, so null-model and constraint calculations remain traceable without duplicating their values.
+
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured
 sensors, and compares the measurements and provenance with the stored results.

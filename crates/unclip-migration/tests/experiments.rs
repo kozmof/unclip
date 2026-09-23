@@ -70,7 +70,7 @@ async fn upgrade_and_rollback_preserve_existing_measurement_data() {
     );
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('candidates','experiments','experiment_observations','experiment_deltas','domain_revisions')").await,5);
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='index' AND name LIKE 'idx_experiment%'").await,7);
-    unclip_migration::down(&db, Some(2)).await.unwrap();
+    unclip_migration::down(&db, Some(3)).await.unwrap();
     assert_eq!(
         count(&db, "SELECT count(*) AS count FROM measurement_profiles").await,
         2
@@ -155,6 +155,29 @@ async fn revisions_require_completed_evidence_and_successive_domain_versions() {
     .unwrap();
     assert!(db.execute_unprepared("INSERT INTO domain_revisions VALUES ('rev','c2','exp','d1','d2','reason','{}','revision','now')").await.is_err());
     db.execute_unprepared(revision).await.unwrap();
+    db.execute_unprepared(r#"
+        INSERT INTO provenance(derived_id,operation,producer,algorithm,version,params_json,params_hash,timestamp) VALUES
+          ('interpretation','interpreted','interpret.fixture','label','1','{}','hash','now'),
+          ('other-interpretation','interpreted','interpret.fixture','label','1','{}','hash','now');
+        INSERT INTO provenance_inputs VALUES
+          ('interpretation','candidate',0),
+          ('other-interpretation','candidate2',0);
+        INSERT INTO candidate_interpretations VALUES
+          ('interpretation','c','{"label":"weight"}','interpretation','now'),
+          ('other-interpretation','c2','{"label":"relation"}','other-interpretation','now');
+        INSERT INTO domain_revision_interpretations VALUES
+          ('rev','c','interpretation',0);
+    "#).await.unwrap();
+    for sql in [
+        "INSERT INTO domain_revision_interpretations VALUES ('rev','c','other-interpretation',1)",
+        "INSERT INTO domain_revision_interpretations VALUES ('rev','c2','other-interpretation',1)",
+        "UPDATE candidate_interpretations SET value_json='{}' WHERE id='interpretation'",
+        "DELETE FROM candidate_interpretations WHERE id='other-interpretation'",
+        "UPDATE domain_revision_interpretations SET position=1 WHERE revision_id='rev'",
+        "DELETE FROM domain_revision_interpretations WHERE revision_id='rev'",
+    ] {
+        assert!(db.execute_unprepared(sql).await.is_err(), "accepted {sql}");
+    }
     assert!(db
         .execute_unprepared("UPDATE domain_revisions SET reason='changed' WHERE id='rev'")
         .await
