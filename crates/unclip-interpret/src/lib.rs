@@ -12,7 +12,7 @@ use std::sync::Arc;
 use unclip_plugin::{Registry, Result};
 
 mod llm_label;
-pub use llm_label::{LlmLabel, LlmLabelInterpreter};
+pub use llm_label::{LabeledStructure, LlmLabel, LlmLabelInterpreter};
 
 /// Register every built-in interpreter.
 pub fn register_all(registry: &mut Registry) -> Result<()> {

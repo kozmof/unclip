@@ -121,7 +121,11 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
 
     assert_eq!(outputs.len(), 1);
     let output = &outputs[0];
-    assert_eq!(output.value()["label"], "shared ritual");
+    assert_eq!(
+        output.value()["structure"],
+        serde_json::to_value(&structure).unwrap()
+    );
+    assert_eq!(output.value()["interpretation"]["label"], "shared ritual");
     assert_eq!(output.provenance().operation, Operation::Interpreted);
     assert_eq!(
         output.provenance().producer,

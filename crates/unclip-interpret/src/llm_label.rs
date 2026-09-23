@@ -5,12 +5,13 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use unclip_epistemic::{InterpretationToken, Interpreted, ModelRef, PluginId};
+use unclip_measure::EmpiricalStructure;
 use unclip_plugin::{
     InterpretCtx, InterpretationRequest, Interpreter, Params, PluginDescriptor, PluginError, Result,
 };
 
 const PARAMS_SCHEMA: &str = r#"{"type":"object","required":["model","model_version"],"properties":{"model":{"type":"string","minLength":1},"model_version":{"type":"string","minLength":1},"context":{"type":"string"},"generation":{"type":"object"}},"additionalProperties":false}"#;
-const INSTRUCTIONS: &str = "Assign a concise provisional semantic label and explanation to the supplied validated empirical structure. Treat the structure as the primary evidence. Return only JSON matching the supplied response schema. Do not present the interpretation as measurement evidence.";
+const INSTRUCTIONS: &str = "Assign a concise provisional semantic label and explanation to the supplied validated empirical structure. Treat the structure as the primary evidence. The label is a secondary annotation and must not replace or modify that structure. Return only JSON matching the supplied response schema. Do not present the interpretation as measurement evidence.";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,12 +28,20 @@ fn empty_object() -> Value {
     json!({})
 }
 
-/// The strict structured response accepted from the language model.
+/// The strict secondary annotation accepted from the language model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LlmLabel {
     pub label: String,
     pub explanation: String,
+}
+
+/// An interpretation that retains its primary empirical structure unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LabeledStructure {
+    pub structure: EmpiricalStructure,
+    pub interpretation: LlmLabel,
 }
 
 pub struct LlmLabelInterpreter {
@@ -104,13 +113,14 @@ impl Interpreter for LlmLabelInterpreter {
         } else {
             format!("{INSTRUCTIONS}\n\nAdditional context:\n{}", params.context)
         };
+        let structure = ctx.structure().clone();
         let response = ctx
             .io()
             .request(&InterpretationRequest {
                 model: params.model.trim().to_owned(),
                 model_version: params.model_version.trim().to_owned(),
                 instructions,
-                structure: ctx.structure().clone(),
+                structure: structure.clone(),
                 parameters: params.generation,
                 response_schema: response_schema(),
             })
@@ -125,7 +135,11 @@ impl Interpreter for LlmLabelInterpreter {
                 "llm-label response requires a non-empty label and explanation".into(),
             ));
         }
-        let value = serde_json::to_value(label).map_err(|error| {
+        let value = serde_json::to_value(LabeledStructure {
+            structure,
+            interpretation: label,
+        })
+        .map_err(|error| {
             PluginError::Message(format!("could not encode llm-label response: {error}"))
         })?;
         Ok(token.emit(value))
@@ -137,7 +151,6 @@ mod tests {
     use unclip_epistemic::{
         hash_params, DependencyCollector, DerivedId, EmitMetadata, Operation, Timestamp, Tracked,
     };
-    use unclip_measure::EmpiricalStructure;
     use unclip_plugin::InterpretationIo;
 
     use super::*;
@@ -155,6 +168,7 @@ mod tests {
             assert_eq!(request.structure.value["members"], json!(["a", "b"]));
             assert_eq!(request.parameters, json!({"temperature": 0}));
             assert!(request.instructions.contains("primary evidence"));
+            assert!(request.instructions.contains("secondary annotation"));
             assert!(request.instructions.contains("coffee preferences"));
             assert_eq!(request.response_schema["additionalProperties"], false);
             Ok(self.response.clone())
@@ -195,7 +209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn requests_and_validates_a_structured_semantic_label() {
+    async fn preserves_primary_structure_while_validating_secondary_label() {
         let params = json!({
             "model": " fixture/model ",
             "model_version": " v2 ",
@@ -225,9 +239,11 @@ mod tests {
             output.provenance().inputs,
             vec![DerivedId::new("structure/1")]
         );
-        assert_eq!(output.value()["label"], "shared ritual");
+        let value: LabeledStructure = serde_json::from_value(output.value().clone()).unwrap();
+        assert_eq!(value.structure, structure());
+        assert_eq!(value.interpretation.label, "shared ritual");
         assert_eq!(
-            output.value()["explanation"],
+            value.interpretation.explanation,
             "recurring choices align around preparation"
         );
     }
@@ -272,7 +288,7 @@ mod tests {
             json!("plain text"),
             json!({"label": "", "explanation": "missing meaning"}),
             json!({"label": "name", "explanation": ""}),
-            json!({"label": "name", "explanation": "meaning", "extra": true}),
+            json!({"label": "name", "explanation": "meaning", "structure": {"kind": "invented"}}),
         ] {
             let error = invoke(&params, &ResponseIo(response)).await.unwrap_err();
             assert!(error.to_string().contains("llm-label response"));
