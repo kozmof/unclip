@@ -8,9 +8,10 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use unclip_domain::DomainSnapshot;
 use unclip_entity::{
-    candidates, domain_revisions, experiment_deltas, experiment_observations, experiments,
-    measurement_profiles, observations,
+    candidates, domain_revisions, domain_versions, experiment_deltas, experiment_observations,
+    experiments, measurement_profiles, observations,
 };
 use unclip_epistemic::{Calculated, DerivedId, Experimental, Provenance};
 use unclip_measure::{Delta, MeasurementValue};
@@ -151,6 +152,13 @@ pub trait DomainRevisionRepository: Sync {
     async fn insert_domain_revision(
         &self,
         run_id: Option<String>,
+        revision: Experimental<DomainRevision>,
+    ) -> StoreResult<()>;
+    /// Atomically create the successor domain version and its immutable revision row.
+    async fn apply_domain_revision(
+        &self,
+        run_id: Option<String>,
+        snapshot: DomainSnapshot,
         revision: Experimental<DomainRevision>,
     ) -> StoreResult<()>;
     async fn get_domain_revision(
@@ -523,6 +531,45 @@ fn kind_name(value: &MeasurementValue) -> StoreResult<String> {
         .ok_or_else(|| invalid("delta kind is not a string"))?
         .into())
 }
+async fn insert_revision_in_transaction(
+    txn: &DatabaseTransaction,
+    run_id: Option<String>,
+    revision: &Experimental<DomainRevision>,
+) -> StoreResult<()> {
+    let value = revision.value();
+    if value.reason.trim().is_empty() {
+        return Err(invalid("domain revisions require an explicit reason"));
+    }
+    let experiment = experiments::Entity::find_by_id(&value.experiment_id.0)
+        .one(txn)
+        .await?
+        .ok_or_else(|| invalid("revision experiment not found"))?;
+    if experiment.status != "completed"
+        || experiment.candidate_id != value.candidate_id.0
+        || experiment.domain_version_id != value.from_version_id
+    {
+        return Err(invalid(
+            "domain revisions require a matching completed candidate experiment",
+        ));
+    }
+    require_input(revision.provenance(), &experiment.provenance_id)?;
+    provenance(txn, run_id, revision.id(), revision.provenance()).await?;
+    domain_revisions::Entity::insert(domain_revisions::ActiveModel {
+        id: Set(revision.id().0.clone()),
+        candidate_id: Set(value.candidate_id.0.clone()),
+        experiment_id: Set(value.experiment_id.0.clone()),
+        from_version_id: Set(value.from_version_id.clone()),
+        to_version_id: Set(value.to_version_id.clone()),
+        reason: Set(value.reason.clone()),
+        evidence_json: Set(json(&value.evidence)?),
+        provenance_id: Set(revision.id().0.clone()),
+        created_at: Set(revision.provenance().timestamp.0.clone()),
+    })
+    .exec(txn)
+    .await?;
+    Ok(())
+}
+
 async fn prepare_delta(
     txn: &DatabaseTransaction,
     run_id: &str,
@@ -572,30 +619,55 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
         run_id: Option<String>,
         revision: Experimental<DomainRevision>,
     ) -> StoreResult<()> {
-        let value = revision.value();
         let txn = self.db.begin().await?;
-        let experiment = experiments::Entity::find_by_id(&value.experiment_id.0)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| invalid("revision experiment not found"))?;
-        require_input(revision.provenance(), &experiment.provenance_id)?;
-        provenance(&txn, run_id, revision.id(), revision.provenance()).await?;
-        domain_revisions::Entity::insert(domain_revisions::ActiveModel {
-            id: Set(revision.id().0.clone()),
-            candidate_id: Set(value.candidate_id.0.clone()),
-            experiment_id: Set(value.experiment_id.0.clone()),
-            from_version_id: Set(value.from_version_id.clone()),
-            to_version_id: Set(value.to_version_id.clone()),
-            reason: Set(value.reason.clone()),
-            evidence_json: Set(json(&value.evidence)?),
-            provenance_id: Set(revision.id().0.clone()),
-            created_at: Set(revision.provenance().timestamp.0.clone()),
-        })
-        .exec(&txn)
-        .await?;
+        insert_revision_in_transaction(&txn, run_id, &revision).await?;
         txn.commit().await?;
         Ok(())
     }
+
+    async fn apply_domain_revision(
+        &self,
+        run_id: Option<String>,
+        snapshot: DomainSnapshot,
+        revision: Experimental<DomainRevision>,
+    ) -> StoreResult<()> {
+        let txn = self.db.begin().await?;
+        let value = revision.value();
+        let predecessor = domain_versions::Entity::find_by_id(&value.from_version_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| invalid("revision baseline domain version not found"))?;
+        let successor_key = crate::domain_repository::version_key(&snapshot.id, &snapshot.version);
+        if snapshot.id.0 != predecessor.domain_id
+            || snapshot.version.0.trim().is_empty()
+            || value.to_version_id != successor_key
+            || value.from_version_id == value.to_version_id
+        {
+            return Err(invalid(
+                "revision snapshot must be a distinct successor of the selected baseline",
+            ));
+        }
+        if domain_versions::Entity::find()
+            .filter(domain_versions::Column::PredecessorId.eq(&value.from_version_id))
+            .one(&txn)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::Conflict {
+                path: value.from_version_id.clone(),
+            });
+        }
+        crate::domain_repository::insert_snapshot(
+            &txn,
+            snapshot,
+            Some(value.from_version_id.clone()),
+        )
+        .await?;
+        insert_revision_in_transaction(&txn, run_id, &revision).await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
     async fn get_domain_revision(
         &self,
         id: &DerivedId,

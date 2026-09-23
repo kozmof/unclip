@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use serde_json::json;
+use unclip_domain::{DomainId, DomainSnapshot, PropertyValue, Unit, UnitId, UnitKind};
 use unclip_epistemic::{
     hash_params, ops, DependencyCollector, Derived, DerivedId, EmitMetadata, EmitToken,
     OperationKind, PluginId, Timestamp, Tracked,
@@ -8,10 +11,10 @@ use unclip_measure::{Delta, MeasurementValue};
 use unclip_observe::ObservationId;
 use unclip_store::{
     connect_and_migrate, CandidateKind, CandidateProposal, CandidateRepository,
-    CompletedExperimentBundle, DomainRevision, DomainRevisionRepository, ExperimentDelta,
-    ExperimentMeasurementProfile, ExperimentOutcome, ExperimentRepository,
-    MeasurementProfileHeader, ProvenanceRepository, SeaOrmExperimentRepository,
-    SeaOrmProvenanceRepository, StoredProvenance,
+    CompletedExperimentBundle, DomainReader, DomainRevision, DomainRevisionRepository,
+    ExperimentDelta, ExperimentMeasurementProfile, ExperimentOutcome, ExperimentRepository,
+    MeasurementProfileHeader, ProvenanceRepository, SeaOrmDomainRepository,
+    SeaOrmExperimentRepository, SeaOrmProvenanceRepository, StoredProvenance,
 };
 
 fn derived<T, O: OperationKind>(
@@ -595,4 +598,171 @@ async fn completed_bundle_rolls_back_staged_profiles_and_delta_provenance() {
         .is_err());
     assert_eq!(count(&db, "measurement_profiles").await, 2);
     assert_no_experiment(&db, &provenance).await;
+}
+
+fn successor(version: &str) -> DomainSnapshot {
+    DomainSnapshot {
+        id: DomainId::new("d"),
+        version: unclip_epistemic::DomainVersion::new(version),
+        units: BTreeMap::from([(
+            UnitId::new("accepted"),
+            Unit {
+                id: UnitId::new("accepted"),
+                kind: UnitKind::AtomicMeaning,
+                label: None,
+                properties: BTreeMap::from([(
+                    "candidate_evidence".into(),
+                    PropertyValue::Structured(json!({"candidate": "candidate"})),
+                )]),
+            },
+        )]),
+        relations: BTreeMap::new(),
+    }
+}
+
+fn applied_revision(id: &str, version: &str) -> unclip_epistemic::Experimental<DomainRevision> {
+    let to_version_id = serde_json::to_string(&("d", version)).unwrap();
+    derived(
+        id,
+        "revision.apply",
+        &["experiment"],
+        DomainRevision {
+            candidate_id: DerivedId::new("candidate"),
+            experiment_id: DerivedId::new("experiment"),
+            from_version_id: "d1".into(),
+            to_version_id,
+            reason: "held-out evidence accepted the candidate".into(),
+            evidence: json!({"verdict": "sufficient"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        },
+    )
+}
+
+#[tokio::test]
+async fn accepted_revision_creates_one_immutable_successor_and_rejects_stale_baselines() {
+    let (db, repo, provenance) = setup().await;
+    db.execute_unprepared("DELETE FROM domain_versions WHERE id = 'd2'")
+        .await
+        .unwrap();
+    repo.insert_candidate(None, candidate("candidate"))
+        .await
+        .unwrap();
+    repo.insert_completed_experiment("run", experiment(outcome()), deltas())
+        .await
+        .unwrap();
+
+    let snapshot = successor("2");
+    let revision = applied_revision("applied-revision", "2");
+    repo.apply_domain_revision(Some("run".into()), snapshot.clone(), revision.clone())
+        .await
+        .unwrap();
+
+    let domains = SeaOrmDomainRepository::new(db.clone());
+    let baseline = domains
+        .get_domain_version(
+            &DomainId::new("d"),
+            &unclip_epistemic::DomainVersion::new("1"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(baseline.units.is_empty());
+    assert_eq!(
+        domains
+            .get_domain_version(
+                &DomainId::new("d"),
+                &unclip_epistemic::DomainVersion::new("2"),
+            )
+            .await
+            .unwrap(),
+        Some(snapshot)
+    );
+    let predecessor: String = db
+        .query_one(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT predecessor_id FROM domain_versions WHERE version = '2'",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "predecessor_id")
+        .unwrap();
+    assert_eq!(predecessor, "d1");
+    assert_eq!(
+        repo.get_domain_revision(revision.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        *revision.value()
+    );
+
+    let stale = applied_revision("stale-revision", "3");
+    assert!(matches!(
+        repo.apply_domain_revision(None, successor("3"), stale.clone())
+            .await
+            .unwrap_err(),
+        unclip_store::StoreError::Conflict { .. }
+    ));
+    assert!(domains
+        .get_domain_version(
+            &DomainId::new("d"),
+            &unclip_epistemic::DomainVersion::new("3"),
+        )
+        .await
+        .unwrap()
+        .is_none());
+    assert!(provenance
+        .get_provenance(stale.id())
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn failed_revision_application_rolls_back_the_successor_and_provenance() {
+    let (db, repo, provenance) = setup().await;
+    db.execute_unprepared("DELETE FROM domain_versions WHERE id = 'd2'")
+        .await
+        .unwrap();
+    repo.insert_candidate(None, candidate("candidate"))
+        .await
+        .unwrap();
+    repo.insert_completed_experiment("run", experiment(outcome()), deltas())
+        .await
+        .unwrap();
+
+    let mut invalid = applied_revision("invalid-revision", "2");
+    invalid = derived(
+        "invalid-revision",
+        "revision.apply",
+        &["experiment"],
+        DomainRevision {
+            candidate_id: DerivedId::new("other"),
+            ..invalid.value().clone()
+        },
+    );
+    assert!(repo
+        .apply_domain_revision(None, successor("2"), invalid.clone())
+        .await
+        .is_err());
+
+    let domains = SeaOrmDomainRepository::new(db.clone());
+    assert!(domains
+        .get_domain_version(
+            &DomainId::new("d"),
+            &unclip_epistemic::DomainVersion::new("2"),
+        )
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(count(&db, "domain_versions").await, 1);
+    assert_eq!(count(&db, "domain_revisions").await, 0);
+    assert!(provenance
+        .get_provenance(invalid.id())
+        .await
+        .unwrap()
+        .is_none());
 }

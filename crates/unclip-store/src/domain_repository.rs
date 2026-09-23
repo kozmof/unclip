@@ -54,7 +54,7 @@ impl SeaOrmDomainRepository {
     }
 }
 
-fn version_key(domain_id: &DomainId, version: &DomainVersion) -> String {
+pub(crate) fn version_key(domain_id: &DomainId, version: &DomainVersion) -> String {
     serde_json::to_string(&(&domain_id.0, &version.0)).expect("serializing two strings cannot fail")
 }
 
@@ -167,7 +167,11 @@ fn parse_property(
     }
 }
 
-async fn insert_snapshot(txn: &DatabaseTransaction, snapshot: DomainSnapshot) -> StoreResult<()> {
+pub(crate) async fn insert_snapshot(
+    txn: &DatabaseTransaction,
+    snapshot: DomainSnapshot,
+    predecessor_id: Option<String>,
+) -> StoreResult<()> {
     let key = version_key(&snapshot.id, &snapshot.version);
     if domain_versions::Entity::find_by_id(&key)
         .one(txn)
@@ -195,7 +199,7 @@ async fn insert_snapshot(txn: &DatabaseTransaction, snapshot: DomainSnapshot) ->
         id: Set(key.clone()),
         domain_id: Set(snapshot.id.0),
         version: Set(snapshot.version.0),
-        predecessor_id: Set(None),
+        predecessor_id: Set(predecessor_id),
         created_at: Set(now()),
     })
     .exec(txn)
@@ -264,7 +268,7 @@ async fn insert_snapshot(txn: &DatabaseTransaction, snapshot: DomainSnapshot) ->
 impl DomainWriter for SeaOrmDomainRepository {
     async fn insert_domain_version(&self, snapshot: DomainSnapshot) -> StoreResult<()> {
         let txn = self.db.begin().await?;
-        insert_snapshot(&txn, snapshot).await?;
+        insert_snapshot(&txn, snapshot, None).await?;
         txn.commit().await?;
         Ok(())
     }

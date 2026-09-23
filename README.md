@@ -548,7 +548,8 @@ require measured `null.weight-change`, `null.existing-relation`, and
 `null.coupling-zero` evidence respectively. Graph-motif attempts add one
 anonymous structural unit, retain their exact pattern and calculated candidate
 evidence, and require measured `null.existing-motif` evidence. Dynamic couplings
-remain anonymous and explicitly non-causal. A sufficient earlier attempt stops the ladder. The caller records each verdict and reason; explicit constraints must all be satisfied
+remain anonymous and explicitly non-causal. A sufficient earlier attempt stops the ladder. The caller records each verdict
+and reason; explicit constraints must all be satisfied
 for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
 candidate, counterfactual, experiment, and prior attempt without scalarizing
 evidence. Delta V accepts a complete persistent-residual candidate supported by
@@ -563,9 +564,13 @@ The storage library also exposes `CandidateRepository`, `ExperimentRepository`,
 and `DomainRevisionRepository` through `SeaOrmExperimentRepository`. Candidate
 proposals require calculated evidence; completed experiments require experimental
 evidence, disjoint observation splits with held-out data, and tracked calculated
-deltas. Each write commits its records and provenance atomically. Revision records
-reference existing domain versions. These APIs provide storage; candidate
-generation and counterfactual execution are not yet exposed in the CLI.
+deltas. Each write commits its records and provenance atomically.
+`DomainRevisionRepository::insert_domain_revision` records evidence between
+existing versions. `apply_domain_revision` instead creates the successor snapshot,
+its predecessor link, provenance, and revision row in one transaction. It requires
+a matching completed candidate experiment, preserves the baseline rows unchanged,
+and rejects a baseline that already has a successor. A partial unique database
+index enforces the single-successor rule for concurrent writers. These APIs provide storage; candidate generation and counterfactual execution are not yet exposed in the CLI.
 
 Measurement runs store the exact inferred inputs and domain/frame selectors.
 `unclip level verify <run-id>` replays those inputs, recalculates the configured

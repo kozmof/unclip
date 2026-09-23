@@ -17,6 +17,7 @@ mod m20260918_000010_create_measurement_frames;
 mod m20260918_000011_create_observations;
 mod m20260918_000012_create_measurements;
 mod m20260919_000013_create_experiments;
+mod m20260923_000014_enforce_linear_domain_versions;
 
 struct Migrator;
 
@@ -37,6 +38,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260918_000011_create_observations::Migration),
             Box::new(m20260918_000012_create_measurements::Migration),
             Box::new(m20260919_000013_create_experiments::Migration),
+            Box::new(m20260923_000014_enforce_linear_domain_versions::Migration),
         ]
     }
 }

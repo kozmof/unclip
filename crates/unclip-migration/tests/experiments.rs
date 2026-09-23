@@ -70,7 +70,7 @@ async fn upgrade_and_rollback_preserve_existing_measurement_data() {
     );
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('candidates','experiments','experiment_observations','experiment_deltas','domain_revisions')").await,5);
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='index' AND name LIKE 'idx_experiment%'").await,7);
-    unclip_migration::down(&db, Some(1)).await.unwrap();
+    unclip_migration::down(&db, Some(2)).await.unwrap();
     assert_eq!(
         count(&db, "SELECT count(*) AS count FROM measurement_profiles").await,
         2
