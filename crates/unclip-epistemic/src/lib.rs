@@ -119,6 +119,13 @@ string_id!(Timestamp);
 string_id!(ModelRef);
 string_id!(ParameterHash);
 
+impl ModelRef {
+    /// Build the stable model selector stored in provenance.
+    pub fn versioned(identity: impl AsRef<str>, version: impl AsRef<str>) -> Self {
+        Self(format!("{}@{}", identity.as_ref(), version.as_ref()))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {

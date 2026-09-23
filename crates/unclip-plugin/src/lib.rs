@@ -6,10 +6,7 @@
 //! ```compile_fail
 //! use async_trait::async_trait;
 //! use unclip_epistemic::InterpretationToken;
-//! use unclip_measure::EmpiricalStructure;
-//! use unclip_plugin::{
-//!     InterpretationIo, Interpreter, Params, PluginDescriptor, Result,
-//! };
+//! use unclip_plugin::{InterpretCtx, Interpreter, PluginDescriptor, Result};
 //!
 //! struct RawInterpreter;
 //!
@@ -19,9 +16,7 @@
 //!
 //!     async fn interpret(
 //!         &self,
-//!         _: &EmpiricalStructure,
-//!         _: &Params,
-//!         _: &dyn InterpretationIo,
+//!         _: &InterpretCtx<'_>,
 //!         _: InterpretationToken,
 //!     ) -> Result<serde_json::Value> {
 //!         todo!()
@@ -56,8 +51,8 @@ use thiserror::Error;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, EmitMetadata, ExperimentToken, Experimental,
-    FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, PluginId, SourceRef,
-    Tracked,
+    FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, ModelRef, PluginId,
+    SourceRef, Tracked,
 };
 use unclip_measure::{Delta, EmpiricalStructure, Measurement, MeasurementKind, Reading};
 use unclip_observe::{Alignment, Observation, PartialRanking};
@@ -389,6 +384,7 @@ pub trait Comparator: Send + Sync {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterpretationRequest {
     pub model: String,
+    pub model_version: String,
     pub instructions: String,
     pub structure: EmpiricalStructure,
     pub parameters: Params,
@@ -400,6 +396,49 @@ pub trait InterpretationIo: Send + Sync {
     async fn request(&self, request: &InterpretationRequest) -> Result<serde_json::Value>;
 }
 
+/// Capability-scoped access to one tracked empirical structure and model I/O.
+pub struct InterpretCtx<'a> {
+    structure: &'a Tracked<EmpiricalStructure>,
+    params: &'a Params,
+    io: &'a dyn InterpretationIo,
+    dependencies: DependencyCollector,
+}
+
+impl<'a> InterpretCtx<'a> {
+    pub fn new(
+        structure: &'a Tracked<EmpiricalStructure>,
+        params: &'a Params,
+        io: &'a dyn InterpretationIo,
+        dependencies: DependencyCollector,
+    ) -> Self {
+        // The source structure is mandatory input even if a cooperative plugin
+        // neglects to call `structure` before emitting.
+        dependencies.read(structure);
+        Self {
+            structure,
+            params,
+            io,
+            dependencies,
+        }
+    }
+
+    pub fn structure(&self) -> &EmpiricalStructure {
+        self.dependencies.read(self.structure)
+    }
+
+    pub fn params(&self) -> &Params {
+        self.params
+    }
+
+    pub fn io(&self) -> &dyn InterpretationIo {
+        self.io
+    }
+
+    pub fn interpretation_token(&self, metadata: EmitMetadata) -> InterpretationToken {
+        InterpretationToken::from_harness(metadata, self.dependencies.clone())
+    }
+}
+
 /// Assigns semantic meaning to an empirical structure.
 ///
 /// The operation-specific token is the only output constructor supplied by the
@@ -407,11 +446,15 @@ pub trait InterpretationIo: Send + Sync {
 #[async_trait]
 pub trait Interpreter: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
+
+    /// Resolve the exact model identity stored in output provenance.
+    fn model_ref(&self, _params: &Params) -> Result<Option<ModelRef>> {
+        Ok(None)
+    }
+
     async fn interpret(
         &self,
-        structure: &EmpiricalStructure,
-        params: &Params,
-        io: &dyn InterpretationIo,
+        ctx: &InterpretCtx<'_>,
         token: InterpretationToken,
     ) -> Result<Interpreted<serde_json::Value>>;
 }

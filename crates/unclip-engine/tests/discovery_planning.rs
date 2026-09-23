@@ -40,9 +40,7 @@ impl Interpreter for Stub {
     }
     async fn interpret(
         &self,
-        _: &unclip_measure::EmpiricalStructure,
-        _: &unclip_plugin::Params,
-        _: &dyn unclip_plugin::InterpretationIo,
+        _: &unclip_plugin::InterpretCtx<'_>,
         _: unclip_epistemic::InterpretationToken,
     ) -> unclip_plugin::Result<unclip_epistemic::Interpreted<serde_json::Value>> {
         panic!("planning must not execute an interpreter")

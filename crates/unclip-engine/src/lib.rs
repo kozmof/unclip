@@ -86,12 +86,13 @@ use std::collections::BTreeMap;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
     hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, InferenceToken,
-    Inferred, PluginId, SourceRef, Timestamp, Tracked,
+    Inferred, Interpreted, PluginId, SourceRef, Timestamp, Tracked,
 };
-use unclip_measure::{Measurement, MeasurementContext};
+use unclip_measure::{EmpiricalStructure, Measurement, MeasurementContext};
 use unclip_observe::{Alignment, Observation, PartialRanking};
 use unclip_plugin::{
-    classify_sensor, EngineProfile, MeasureCtx, Registry, Result, RunPlan, SensorDecision,
+    classify_sensor, EngineProfile, InterpretCtx, MeasureCtx, Registry, Result, RunPlan,
+    SensorDecision,
 };
 
 /// Construct the runtime registry using explicit first-party registration.
@@ -232,6 +233,14 @@ pub struct MeasurementRun<'a> {
     pub id: &'a str,
     pub timestamp: Timestamp,
     pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+}
+
+/// Reproducible inputs controlled by one interpretation stage.
+pub struct InterpretationRun<'a> {
+    pub id: &'a str,
+    pub timestamp: Timestamp,
+    pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+    pub io: &'a dyn unclip_plugin::InterpretationIo,
 }
 
 /// Owns the plugin registry used to resolve and execute reproducible run plans.
@@ -399,6 +408,73 @@ impl Engine {
             results.push(output);
         }
         Ok(results)
+    }
+
+    /// Interpret tracked empirical structures in canonical plugin and source order.
+    ///
+    /// Every output records the exact model selector, plugin parameters, and
+    /// source structure provenance identity supplied to the model.
+    pub async fn interpret(
+        &self,
+        plan: &RunPlan,
+        structures: &[Tracked<EmpiricalStructure>],
+        run: InterpretationRun<'_>,
+    ) -> Result<Vec<Interpreted<serde_json::Value>>> {
+        if plan.interpreters.is_empty() {
+            return Ok(Vec::new());
+        }
+        if run.id.is_empty() || structures.is_empty() {
+            return Err(unclip_plugin::PluginError::Message(
+                "interpretation requires a run ID and empirical structures".into(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for structure in structures {
+            if structure.id().0.is_empty() {
+                return Err(unclip_plugin::PluginError::Message(
+                    "interpretation source structure ID must not be empty".into(),
+                ));
+            }
+            if !seen.insert(structure.id()) {
+                return Err(unclip_plugin::PluginError::Message(
+                    "duplicate interpretation source structure".into(),
+                ));
+            }
+        }
+
+        let mut sources = structures.iter().collect::<Vec<_>>();
+        sources.sort_by_key(|structure| structure.id());
+        let mut interpreters = plan.interpreters.iter().collect::<Vec<_>>();
+        interpreters.sort_by_key(|interpreter| &interpreter.descriptor().id);
+        let empty_params = serde_json::json!({});
+        let mut outputs = Vec::with_capacity(sources.len() * interpreters.len());
+        for interpreter in interpreters {
+            let descriptor = interpreter.descriptor();
+            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            let model = interpreter.model_ref(params)?;
+            for source in &sources {
+                let ctx = InterpretCtx::new(source, params, run.io, DependencyCollector::default());
+                let metadata = EmitMetadata {
+                    id: DerivedId::new(format!("{}/{}/{}", run.id, descriptor.id, source.id())),
+                    producer: descriptor.id.clone(),
+                    algorithm: descriptor.id.0.clone(),
+                    version: descriptor.version.clone(),
+                    params: params.clone(),
+                    params_hash: hash_params(params),
+                    source: None,
+                    timestamp: run.timestamp.clone(),
+                    domain_version: None,
+                    frame_version: None,
+                    model: model.clone(),
+                };
+                outputs.push(
+                    interpreter
+                        .interpret(&ctx, ctx.interpretation_token(metadata))
+                        .await?,
+                );
+            }
+        }
+        Ok(outputs)
     }
 
     /// Replay persisted inference products and re-execute calculation stages only.
