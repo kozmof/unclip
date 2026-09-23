@@ -1203,6 +1203,7 @@ fn level_help_lists_plugins_command() {
     let out = unclip(&db.path(), &["level", "--help"]);
     assert!(out.status.success(), "help failed: {}", stderr(&out));
     assert!(stdout(&out).contains("plugins"));
+    assert!(stdout(&out).contains("interpret"));
     assert!(stdout(&out).contains("candidates"));
     assert!(stdout(&out).contains("experiment"));
     assert!(stdout(&out).contains("verify"));
@@ -1871,16 +1872,16 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
         DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, Unit, UnitId, UnitKind,
     };
     use unclip_epistemic::{
-        hash_params, DerivedId, DomainVersion, FrameVersion, Operation, PluginId, Provenance,
-        SourceRef, Timestamp,
+        hash_params, CalculationToken, DependencyCollector, DerivedId, DomainVersion, EmitMetadata,
+        FrameVersion, Operation, PluginId, Provenance, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{
         Alignment, AlignmentCandidate, Observation, ObservationId, ObservedUnit, ObservedUnitId,
         PartialRanking, RankTier,
     };
     use unclip_store::{
-        DomainWriter, EngineRunRepository, MeasurementRepository, ObservationRepository,
-        ProvenanceRepository,
+        CandidateInterpretationRepository, CandidateRepository, DomainWriter, EngineRunRepository,
+        MeasurementRepository, ObservationRepository, ProvenanceRepository,
     };
 
     let temp = TempDb::new();
@@ -2190,6 +2191,8 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
         assert!(!stdout(&rejected).contains("CALCULATED"));
     }
     let mut community_run = String::new();
+    let mut community_structure = String::new();
+    let mut unrelated_structure = String::new();
     let mut spectral_run = String::new();
     for method in ["communities", "spectral", "sparse"] {
         let config = match method {
@@ -2237,6 +2240,10 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
                 })
                 .collect::<Vec<_>>();
             assert_eq!(ids.len(), 4);
+            if method == "communities" {
+                community_structure = ids[0].0.to_owned();
+                unrelated_structure = ids[1].0.to_owned();
+            }
             for (id, source) in ids {
                 let shown = unclip(&path, &["level", "structure", id, "--format", "json"]);
                 assert!(shown.status.success(), "{}", stderr(&shown));
@@ -2256,6 +2263,160 @@ async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() 
             spectral_run = empirical_run.into();
         }
     }
+    let candidate_id = DerivedId::new("interpret-candidate");
+    let dependencies = DependencyCollector::default();
+    dependencies.read(&Tracked::from_recorded(
+        DerivedId::new(&community_structure),
+        (),
+    ));
+    let candidate_params = serde_json::json!({"fixture":"interpretation"});
+    let candidate = CalculationToken::from_harness(
+        EmitMetadata {
+            id: candidate_id.clone(),
+            producer: PluginId::new("generate.fixture"),
+            algorithm: "generate.fixture".into(),
+            version: "0.1.0".parse().unwrap(),
+            params_hash: hash_params(&candidate_params),
+            params: candidate_params,
+            source: None,
+            timestamp: Timestamp::new("2026-09-23T00:00:00Z"),
+            domain_version: Some(domain.version.clone()),
+            frame_version: None,
+            model: None,
+        },
+        dependencies,
+    )
+    .emit(unclip_store::CandidateProposal {
+        domain_version_id: serde_json::to_string(&("batch", "1")).unwrap(),
+        kind: unclip_store::CandidateKind::CompositeMeaning,
+        value: serde_json::json!({"source_structure":community_structure})
+            .as_object()
+            .unwrap()
+            .clone(),
+    });
+    let experiments = unclip_store::SeaOrmExperimentRepository::new(db.clone());
+    experiments.insert_candidate(None, candidate).await.unwrap();
+    let interpretation_profile = temp.write(
+        "interpretation-profile.json",
+        &serde_json::json!({
+            "domain":"batch@1",
+            "interpreters":[{
+                "id":"interpret.llm-label",
+                "params":{
+                    "model":"fixture/semantic-labeler",
+                    "model_version":"2026-09-23",
+                    "generation":{"temperature":0}
+                }
+            }]
+        })
+        .to_string(),
+    );
+    let interpretation_response = temp.write(
+        "interpretation-response.json",
+        &serde_json::json!({
+            "candidate":candidate_id,
+            "structure":community_structure,
+            "model":"fixture/semantic-labeler",
+            "model_version":"2026-09-23",
+            "response":{
+                "label":"alternating pair",
+                "explanation":"the anonymous community retains the two measured units"
+            }
+        })
+        .to_string(),
+    );
+    let unrelated_response = temp.write(
+        "unrelated-interpretation-response.json",
+        &serde_json::json!({
+            "candidate":candidate_id,
+            "structure":unrelated_structure,
+            "model":"fixture/semantic-labeler",
+            "model_version":"2026-09-23",
+            "response":{"label":"wrong source","explanation":"must be rejected"}
+        })
+        .to_string(),
+    );
+    let unrelated = unclip(
+        &path,
+        &[
+            "level",
+            "interpret",
+            &candidate_id.0,
+            "--structure",
+            &unrelated_structure,
+            "--profile",
+            interpretation_profile.to_str().unwrap(),
+            "--response",
+            unrelated_response.to_str().unwrap(),
+        ],
+    );
+    assert!(!unrelated.status.success());
+    assert!(stderr(&unrelated).contains("is not provenance evidence for candidate"));
+    let interpreted = unclip(
+        &path,
+        &[
+            "level",
+            "interpret",
+            &candidate_id.0,
+            "--structure",
+            &community_structure,
+            "--profile",
+            interpretation_profile.to_str().unwrap(),
+            "--response",
+            interpretation_response.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        interpreted.status.success(),
+        "interpretation failed: {}",
+        stderr(&interpreted)
+    );
+    let interpretation_output = stdout(&interpreted);
+    let interpretation_run = interpretation_output
+        .lines()
+        .find_map(|line| line.strip_prefix("INTERPRETED\tLABEL\trun="))
+        .expect("interpretation output should identify its run");
+    let (interpretation_id, value) = interpretation_output
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("INTERPRETATION\t")
+                .and_then(|line| line.split_once('\t'))
+        })
+        .expect("interpretation output should include its stored value");
+    let value: serde_json::Value = serde_json::from_str(value).unwrap();
+    assert_eq!(value["interpretation"]["label"], "alternating pair");
+    assert_eq!(value["structure"]["kind"], "communities");
+    let stored = experiments
+        .get_candidate_interpretation(&DerivedId::new(interpretation_id))
+        .await
+        .unwrap()
+        .expect("candidate interpretation should be persisted");
+    assert_eq!(stored.candidate_id, candidate_id);
+    assert_eq!(stored.value, value);
+    let interpreted_provenance = provenance
+        .get_provenance(&stored.id)
+        .await
+        .unwrap()
+        .expect("interpretation provenance should be persisted");
+    assert_eq!(
+        interpreted_provenance.provenance.operation,
+        Operation::Interpreted
+    );
+    assert_eq!(
+        interpreted_provenance.provenance.model,
+        Some(unclip_epistemic::ModelRef::versioned(
+            "fixture/semantic-labeler",
+            "2026-09-23"
+        ))
+    );
+    assert_eq!(
+        runs.get_run(interpretation_run)
+            .await
+            .unwrap()
+            .expect("interpretation run should be persisted")
+            .status,
+        unclip_store::EngineRunStatus::Completed
+    );
     db.execute_unprepared(
         "UPDATE empirical_structures SET value_json = '{}' WHERE kind = 'communities'",
     )

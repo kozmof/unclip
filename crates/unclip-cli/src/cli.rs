@@ -246,6 +246,17 @@ pub(crate) enum LevelAction {
         #[arg(long)]
         request: PathBuf,
     },
+    /// Interpret one stored candidate through an explicit empirical source.
+    Interpret {
+        candidate_id: String,
+        #[arg(long)]
+        structure: String,
+        #[arg(long)]
+        profile: PathBuf,
+        /// JSON or YAML model response bound to the candidate, structure, and model.
+        #[arg(long)]
+        response: PathBuf,
+    },
     /// Generate candidates from explicitly selected stored evidence.
     Discover {
         #[arg(long)]

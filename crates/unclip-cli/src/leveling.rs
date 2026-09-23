@@ -3,6 +3,7 @@
 pub(crate) mod discovery;
 pub(crate) mod empirical;
 pub(crate) mod experiment;
+pub(crate) mod interpretation;
 
 pub(crate) fn plugins() -> anyhow::Result<()> {
     let registry = unclip_engine::builtin_registry()?;

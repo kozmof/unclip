@@ -216,6 +216,21 @@ pub async fn run() -> anyhow::Result<()> {
             LevelAction::Experiment { profile, request } => {
                 crate::leveling::experiment::run(&repos, &profile, &request).await?
             }
+            LevelAction::Interpret {
+                candidate_id,
+                structure,
+                profile,
+                response,
+            } => {
+                crate::leveling::interpretation::run(
+                    &repos,
+                    &candidate_id,
+                    &structure,
+                    &profile,
+                    &response,
+                )
+                .await?
+            }
             LevelAction::Discover {
                 profile,
                 measurement_profiles,

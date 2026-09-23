@@ -194,6 +194,47 @@ fabricated. Empirical runs snapshot their selected measurements and method,
 and verification recalculates both values and provenance against stored results.
 Results remain anonymous: this command assigns no semantic labels.
 
+Apply an explicit semantic label to a candidate from one of its stored empirical
+structures with a version-pinned interpreter profile and a captured model response:
+
+```sh
+unclip level interpret '<candidate-id>' \
+  --structure '<structure-id>' \
+  --profile interpretation.yaml \
+  --response interpretation-response.yaml
+```
+
+```yaml
+# interpretation.yaml
+domain: example@1
+interpreters:
+  - id: interpret.llm-label
+    params:
+      model: provider/model-name
+      model_version: model-version
+      generation:
+        temperature: 0
+```
+
+```yaml
+# interpretation-response.yaml
+candidate: candidate/example
+structure: structure/communities/example
+model: provider/model-name
+model_version: model-version
+response:
+  label: shared pattern
+  explanation: the anonymous community preserves the measured grouping
+```
+
+The response file is the reproducible boundary to model-provider execution. Its
+candidate, structure, model, and model version must match the command and resolved
+profile. The selected structure must occur in the candidate's provenance ancestry.
+The command stores the complete labeled structure as interpreted evidence, links it
+to the candidate, and records the exact profile and response in the engine run.
+Calculated structure remains the primary payload and the label remains a secondary
+annotation; interpretation cannot be consumed as measurement evidence.
+
 Engine-profile YAML and JSON accept optional `candidate_generators` and
 `null_models` lists, using the same `id`, `version`, and object-valued `params`
 fields as sensors. Selections are explicit and version-checked; recorded plans
