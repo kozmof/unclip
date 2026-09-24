@@ -1,5 +1,6 @@
 //! Commands for the semantic leveling engine.
 
+pub(crate) mod application;
 pub(crate) mod discovery;
 pub(crate) mod empirical;
 pub(crate) mod experiment;

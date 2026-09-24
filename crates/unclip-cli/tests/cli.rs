@@ -1156,6 +1156,100 @@ async fn level_domain_frame_and_observe_workflow() {
         "the ranking experiment must not require a scalar comparator"
     );
 
+    let applied = unclip(
+        &path,
+        &[
+            "level",
+            "apply",
+            &candidate_id.0,
+            "--experiment",
+            "experiment-cli/experiment/completed",
+            "--target-domain",
+            "coffee@8",
+            "--reason",
+            "held-out coverage and the explicit complexity budget support promotion",
+        ],
+    );
+    assert!(
+        applied.status.success(),
+        "level apply failed: {}",
+        stderr(&applied)
+    );
+    let applied_output = stdout(&applied);
+    let revision_id = applied_output
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("APPLIED\tEXPERIMENTAL\t")
+                .and_then(|line| line.strip_suffix("\tdomain=coffee@8"))
+        })
+        .expect("apply output should identify its revision");
+    let successor = unclip_store::DomainReader::get_domain_version(
+        &domains,
+        &active_domain_id,
+        &unclip_epistemic::DomainVersion::new("8"),
+    )
+    .await
+    .unwrap()
+    .expect("apply should create the explicit successor version");
+    assert!(successor.units.contains_key(&unclip_domain::UnitId::new(
+        "candidate:experiment-candidate"
+    )));
+    let ledger = unclip_store::DomainRevisionRepository::get_domain_revision_ledger(
+        &experiments,
+        &unclip_epistemic::DerivedId::new(revision_id),
+    )
+    .await
+    .unwrap()
+    .expect("apply should persist a reconstructable revision ledger");
+    assert_eq!(ledger.candidate.id, candidate_id);
+    assert_eq!(
+        ledger.experiment.id,
+        unclip_epistemic::DerivedId::new("experiment-cli/experiment/completed")
+    );
+    assert_eq!(ledger.revision.revision.to_version_id, r#"["coffee","8"]"#);
+    assert_eq!(
+        ledger.revision.revision.reason,
+        "held-out coverage and the explicit complexity budget support promotion"
+    );
+    assert_eq!(
+        ledger
+            .provenance
+            .iter()
+            .find(|value| value.id == ledger.revision.id)
+            .expect("revision provenance should be in the ledger")
+            .provenance
+            .operation,
+        unclip_epistemic::Operation::Experimental
+    );
+
+    let stale = unclip(
+        &path,
+        &[
+            "level",
+            "apply",
+            &candidate_id.0,
+            "--experiment",
+            "experiment-cli/experiment/completed",
+            "--target-domain",
+            "coffee@9",
+            "--reason",
+            "stale retry must fail",
+        ],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("reload and retry"));
+    assert!(
+        unclip_store::DomainReader::get_domain_version(
+            &domains,
+            &active_domain_id,
+            &unclip_epistemic::DomainVersion::new("9"),
+        )
+        .await
+        .unwrap()
+        .is_none(),
+        "stale application must not create another successor"
+    );
+
     let active_domain_after = unclip_store::DomainReader::get_domain_version(
         &domains,
         &active_domain_id,
@@ -1203,6 +1297,7 @@ fn level_help_lists_plugins_command() {
     let out = unclip(&db.path(), &["level", "--help"]);
     assert!(out.status.success(), "help failed: {}", stderr(&out));
     assert!(stdout(&out).contains("plugins"));
+    assert!(stdout(&out).contains("apply"));
     assert!(stdout(&out).contains("interpret"));
     assert!(stdout(&out).contains("candidates"));
     assert!(stdout(&out).contains("experiment"));

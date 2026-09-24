@@ -235,6 +235,25 @@ to the candidate, and records the exact profile and response in the engine run.
 Calculated structure remains the primary payload and the label remains a secondary
 annotation; interpretation cannot be consumed as measurement evidence.
 
+Promote a candidate only through the completed held-out experiment that tested it,
+and name the immutable successor version explicitly:
+
+```sh
+unclip level apply '<candidate-id>' \
+  --experiment '<completed-experiment-id>' \
+  --target-domain example@2 \
+  --reason 'held-out evidence and explicit constraints support promotion' \
+  --interpretation '<interpretation-id>'
+```
+
+`--interpretation` is optional and repeatable. The candidate, experiment, and each
+interpretation must agree. Every explicit experiment constraint must be satisfied.
+The command reloads the exact counterfactual application and relation bindings used
+by the experiment, reconstructs the candidate change against its stored baseline,
+and rejects any mismatch. Applying creates the requested successor snapshot and its
+revision ledger entry atomically. The baseline remains unchanged, and a baseline
+that already has a successor is stale and cannot be applied again.
+
 Engine-profile YAML and JSON accept optional `candidate_generators` and
 `null_models` lists, using the same `id`, `version`, and object-valued `params`
 fields as sensors. Selections are explicit and version-checked; recorded plans
@@ -598,8 +617,8 @@ at least two ordered distinct observations, adds one anonymous atomic unit, and
 requires measured `null.existing-unit` evidence. Semantic-role and transformation candidates remain unavailable until
 they have explicit calculated evidence and application schemas.
 
-Observation and measurement CLI commands reject comparison and discovery selections; a dedicated
-discovery command and experiment execution are still pending.
+Observation and measurement CLI commands reject comparison and discovery selections;
+`unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 
 The storage library also exposes `CandidateRepository`, `ExperimentRepository`,
 and `DomainRevisionRepository` through `SeaOrmExperimentRepository`. Candidate
@@ -611,7 +630,9 @@ existing versions. `apply_domain_revision` instead creates the successor snapsho
 its predecessor link, provenance, and revision row in one transaction. It requires
 a matching completed candidate experiment, preserves the baseline rows unchanged,
 and rejects a baseline that already has a successor. A partial unique database
-index enforces the single-successor rule for concurrent writers. These APIs provide storage; candidate generation and counterfactual execution are not yet exposed in the CLI.
+index enforces the single-successor rule for concurrent writers. `unclip level apply`
+uses this transaction after validating the selected candidate against its completed
+experiment and tested counterfactual.
 
 Candidate interpretations are stored as immutable interpreted JSON values with their own provenance and an explicit candidate link. A revision can reference them in a stable order, and each link must name the same candidate and appear in the revision provenance. `get_domain_revision_ledger` reconstructs the revision and reason, candidate, completed experiment, typed deltas, before/after profiles, measurement records, exact sensor runs and versions, linked interpretations, and the provenance closure. Evidence IDs embedded in plans, results, revision evidence, or interpretations are included when they name stored provenance, so null-model and constraint calculations remain traceable without duplicating their values.
 

@@ -231,6 +231,23 @@ pub async fn run() -> anyhow::Result<()> {
                 )
                 .await?
             }
+            LevelAction::Apply {
+                candidate_id,
+                experiment,
+                target_domain,
+                reason,
+                interpretations,
+            } => {
+                crate::leveling::application::run(
+                    &repos,
+                    &candidate_id,
+                    &experiment,
+                    &target_domain,
+                    &reason,
+                    &interpretations,
+                )
+                .await?
+            }
             LevelAction::Discover {
                 profile,
                 measurement_profiles,

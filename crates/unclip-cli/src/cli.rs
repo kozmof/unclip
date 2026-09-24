@@ -257,6 +257,22 @@ pub(crate) enum LevelAction {
         #[arg(long)]
         response: PathBuf,
     },
+    /// Promote a tested candidate into one explicit immutable domain version.
+    Apply {
+        candidate_id: String,
+        /// Completed held-out experiment that tested this candidate.
+        #[arg(long)]
+        experiment: String,
+        /// Successor domain selector, including its new version.
+        #[arg(long = "target-domain")]
+        target_domain: String,
+        /// Human-readable reason recorded in the revision ledger.
+        #[arg(long)]
+        reason: String,
+        /// Stored candidate interpretation to link, in ledger order.
+        #[arg(long = "interpretation")]
+        interpretations: Vec<String>,
+    },
     /// Generate candidates from explicitly selected stored evidence.
     Discover {
         #[arg(long)]
