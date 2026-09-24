@@ -616,6 +616,10 @@ evidence. Delta V accepts a complete persistent-residual candidate supported by
 at least two ordered distinct observations, adds one anonymous atomic unit, and
 requires measured `null.existing-unit` evidence. Semantic-role and transformation candidates remain unavailable until
 they have explicit calculated evidence and application schemas.
+`Engine::apply_delta_v_candidate` checks that the matching structural attempt was
+insufficient before constructing the atomic counterfactual. A sufficient structural
+revision therefore stops the ladder before a new unit exists, and
+`record_delta_v_test` rejects counterfactuals created outside that ordered gate.
 
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.

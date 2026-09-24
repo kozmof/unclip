@@ -370,6 +370,59 @@ fn emit_attempt(
 }
 
 impl crate::Engine {
+    /// Create the Delta V counterfactual only after the structural rung failed.
+    ///
+    /// This gate runs before candidate application, so a sufficient structural
+    /// revision cannot create an unnecessary atomic unit, even temporarily.
+    pub fn apply_delta_v_candidate(
+        &self,
+        prior: &Experimental<RevisionAttempt>,
+        baseline: &Tracked<unclip_domain::DomainSnapshot>,
+        candidate: &Tracked<CandidateProposal>,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<CounterfactualSnapshot>> {
+        let value = prior.value();
+        let inputs = DependencyCollector::default();
+        let domain = inputs.read(baseline);
+        let proposal = inputs.read(candidate);
+        if value.step != RevisionStep::Structural
+            || value.outcome != RevisionTestOutcome::Insufficient
+        {
+            return Err(invalid(
+                "Delta V application requires an insufficient structural attempt",
+            ));
+        }
+        if value.reason.trim().is_empty()
+            || !prior.provenance().inputs.contains(&value.candidate)
+            || !prior.provenance().inputs.contains(&value.counterfactual)
+            || !prior.provenance().inputs.contains(&value.experiment)
+        {
+            return Err(invalid(
+                "the structural attempt must retain its reason and evidence dependencies",
+            ));
+        }
+        if value.baseline != *baseline.id()
+            || prior.provenance().domain_version.as_ref() != Some(&domain.version)
+        {
+            return Err(invalid(
+                "Delta V application must use the structural attempt baseline",
+            ));
+        }
+        if proposal.kind != CandidateKind::AtomicMeaning {
+            return Err(invalid(
+                "Delta V application requires an atomic-meaning candidate",
+            ));
+        }
+        self.apply_candidate_for_revision(
+            baseline,
+            candidate,
+            RevisionStep::DeltaV,
+            run_id,
+            timestamp,
+        )
+    }
+
     /// Record the first minimal-revision step after a held-out counterfactual test.
     ///
     /// The caller supplies the explicit sufficiency verdict and reason. Typed
@@ -718,6 +771,17 @@ impl crate::Engine {
             run_id,
         )?;
         validate_prior(prior, RevisionStep::Structural, experiment)?;
+        if counterfactual
+            .provenance()
+            .params
+            .get("revision_step")
+            .and_then(serde_json::Value::as_str)
+            != Some("delta_v")
+        {
+            return Err(invalid(
+                "Delta V counterfactual must be created through the ordered application gate",
+            ));
+        }
         if proposal.kind != CandidateKind::AtomicMeaning {
             return Err(invalid(
                 "Delta V currently supports only calculated atomic-meaning residual evidence",

@@ -128,6 +128,36 @@ impl super::Engine {
         run_id: &str,
         timestamp: Timestamp,
     ) -> Result<Calculated<CounterfactualSnapshot>> {
+        self.apply_candidate_internal(baseline, candidate, bindings, None, run_id, timestamp)
+    }
+
+    pub(crate) fn apply_candidate_for_revision(
+        &self,
+        baseline: &Tracked<DomainSnapshot>,
+        candidate: &Tracked<CandidateProposal>,
+        revision_step: super::RevisionStep,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<CounterfactualSnapshot>> {
+        self.apply_candidate_internal(
+            baseline,
+            candidate,
+            None,
+            Some(revision_step),
+            run_id,
+            timestamp,
+        )
+    }
+
+    fn apply_candidate_internal(
+        &self,
+        baseline: &Tracked<DomainSnapshot>,
+        candidate: &Tracked<CandidateProposal>,
+        bindings: Option<&RelationBindings>,
+        revision_step: Option<super::RevisionStep>,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<CounterfactualSnapshot>> {
         if run_id.trim().is_empty()
             || baseline.id().0.is_empty()
             || candidate.id().0.is_empty()
@@ -304,7 +334,10 @@ impl super::Engine {
             }
             _ => return Err(invalid("candidate application supports atomic, recurring-motif, empirical-community, latent-axis, pairwise or temporal coupling, explicitly bound relation, and numeric-property weight proposals only")),
         }
-        let params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});
+        let mut params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});
+        if let Some(step) = revision_step {
+            params["revision_step"] = serde_json::to_value(step).map_err(invalid)?;
+        }
         let token = CalculationToken::from_harness(
             EmitMetadata {
                 id: output_id,

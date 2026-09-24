@@ -156,6 +156,7 @@ fn comparison() -> DeltaProfile {
 }
 
 fn fixture(
+    prior: &Experimental<RevisionAttempt>,
     include_null: bool,
     constraint_status: Option<ConstraintStatus>,
 ) -> (
@@ -168,7 +169,13 @@ fn fixture(
     let candidate = Tracked::from_recorded(DerivedId::new("atomic-candidate"), proposal());
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), domain());
     let counterfactual = engine
-        .apply_candidate(&baseline, &candidate, "atomic-trial", Timestamp::new("now"))
+        .apply_delta_v_candidate(
+            prior,
+            &baseline,
+            &candidate,
+            "atomic-trial",
+            Timestamp::new("now"),
+        )
         .unwrap();
 
     let dependencies = DependencyCollector::default();
@@ -232,7 +239,7 @@ fn fixture(
 fn delta_v_records_the_ordered_atomic_membership_attempt() {
     let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
     let (engine, candidate, counterfactual, experiment) =
-        fixture(true, Some(ConstraintStatus::Satisfied));
+        fixture(&prior, true, Some(ConstraintStatus::Satisfied));
 
     let record = || {
         engine
@@ -250,6 +257,10 @@ fn delta_v_records_the_ordered_atomic_membership_attempt() {
     };
     let attempt = record();
     assert_eq!(attempt, record());
+    assert_eq!(
+        counterfactual.provenance().params["revision_step"],
+        "delta_v"
+    );
     assert_eq!(attempt.provenance().operation, Operation::Experimental);
     assert_eq!(attempt.value().step, RevisionStep::DeltaV);
     assert_eq!(attempt.value().prior, Some(prior.id().clone()));
@@ -265,34 +276,76 @@ fn delta_v_records_the_ordered_atomic_membership_attempt() {
 }
 
 #[test]
-fn delta_v_requires_an_insufficient_structural_attempt() {
-    let (engine, candidate, counterfactual, experiment) = fixture(true, None);
-    for prior in [
-        prior(RevisionTestOutcome::Sufficient, RevisionStep::Structural),
-        prior(
+fn sufficient_or_out_of_order_structural_attempt_stops_delta_v_before_application() {
+    let engine = Engine::with_builtins().unwrap();
+    let candidate = Tracked::from_recorded(DerivedId::new("atomic-candidate"), proposal());
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), domain());
+    let sufficient = prior(RevisionTestOutcome::Sufficient, RevisionStep::Structural);
+    let error = engine
+        .apply_delta_v_candidate(
+            &sufficient,
+            &baseline,
+            &candidate,
+            "atomic-ladder",
+            Timestamp::new("now"),
+        )
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("insufficient structural attempt"));
+    let out_of_order = prior(
+        RevisionTestOutcome::Insufficient,
+        RevisionStep::DynamicCoupling,
+    );
+    assert!(engine
+        .apply_delta_v_candidate(
+            &out_of_order,
+            &baseline,
+            &candidate,
+            "atomic-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+    let mut non_atomic = proposal();
+    non_atomic.kind = CandidateKind::CompositeMeaning;
+    assert!(engine
+        .apply_delta_v_candidate(
+            &prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural),
+            &baseline,
+            &Tracked::from_recorded(DerivedId::new("atomic-candidate"), non_atomic),
+            "atomic-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
+
+    let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
+    let (engine, candidate, _, experiment) = fixture(&prior, true, None);
+    let unauthorized = engine
+        .apply_candidate(
+            &Tracked::from_recorded(DerivedId::new("baseline"), domain()),
+            &candidate,
+            "atomic-trial",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+    assert!(engine
+        .record_delta_v_test(
+            &prior,
+            &candidate,
+            &unauthorized,
+            &experiment,
             RevisionTestOutcome::Insufficient,
-            RevisionStep::DynamicCoupling,
-        ),
-    ] {
-        assert!(engine
-            .record_delta_v_test(
-                &prior,
-                &candidate,
-                &counterfactual,
-                &experiment,
-                RevisionTestOutcome::Insufficient,
-                "reviewed",
-                "atomic-ladder",
-                Timestamp::new("now"),
-            )
-            .is_err());
-    }
+            "reviewed",
+            "atomic-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
 }
 
 #[test]
 fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
     let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
-    let (engine, candidate, counterfactual, experiment) = fixture(false, None);
+    let (engine, candidate, counterfactual, experiment) = fixture(&prior, false, None);
     assert!(engine
         .record_delta_v_test(
             &prior,
@@ -307,7 +360,7 @@ fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
         .is_err());
 
     let (engine, candidate, counterfactual, experiment) =
-        fixture(true, Some(ConstraintStatus::Violated));
+        fixture(&prior, true, Some(ConstraintStatus::Violated));
     assert!(engine
         .record_delta_v_test(
             &prior,
