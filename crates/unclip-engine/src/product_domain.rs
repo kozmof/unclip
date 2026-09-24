@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 
 use unclip_domain::{
     DomainSnapshot, ProductDomainId, ProductDomainInput, ProductDomainSnapshot,
-    ProductDomainVersion, ProductInteraction,
+    ProductDomainVersion, ProductFrameAxis, ProductFrameId, ProductFrameVersion,
+    ProductInteraction, ProductMeasurementFrame,
 };
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
@@ -163,6 +164,139 @@ impl crate::Engine {
             left: left_input,
             right: right_input,
             interactions: materialized,
+        }))
+    }
+}
+
+fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Result<()> {
+    if product.id.0.trim().is_empty()
+        || product.version.0.trim().is_empty()
+        || product.left.domain.0.trim().is_empty()
+        || product.right.domain.0.trim().is_empty()
+        || product.left.version.0.trim().is_empty()
+        || product.right.version.0.trim().is_empty()
+        || product.left.domain == product.right.domain
+    {
+        return Err(invalid(
+            "product frame requires a valid product with two explicit immutable inputs",
+        ));
+    }
+
+    let mut previous = None;
+    for interaction in &product.interactions {
+        let support_count = interaction.observations.len() + interaction.requirements.len();
+        let unique_support = interaction
+            .observations
+            .iter()
+            .chain(&interaction.requirements)
+            .collect::<BTreeSet<_>>();
+        let coordinate = (interaction.left.clone(), interaction.right.clone());
+        if interaction.left.0.trim().is_empty()
+            || interaction.right.0.trim().is_empty()
+            || interaction.observations.is_empty() && interaction.requirements.is_empty()
+            || !ordered_unique(&interaction.observations)
+            || !ordered_unique(&interaction.requirements)
+            || unique_support.len() != support_count
+            || interaction
+                .observations
+                .iter()
+                .chain(&interaction.requirements)
+                .any(|evidence| evidence.0.trim().is_empty())
+            || previous.as_ref().is_some_and(|prior| prior >= &coordinate)
+        {
+            return Err(invalid(
+                "product frame requires canonical materialized interaction evidence",
+            ));
+        }
+        previous = Some(coordinate);
+    }
+    Ok(())
+}
+
+impl crate::Engine {
+    /// Define an explicitly versioned coordinate frame over materialized product interactions.
+    pub fn create_product_frame(
+        &self,
+        product: &Tracked<ProductDomainSnapshot>,
+        axes: &[ProductFrameAxis],
+        id: ProductFrameId,
+        version: ProductFrameVersion,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<ProductMeasurementFrame>> {
+        if run_id.trim().is_empty() || id.0.trim().is_empty() || version.0.trim().is_empty() {
+            return Err(invalid(
+                "product frame requires nonempty frame, version, and run identities",
+            ));
+        }
+        let output_id = DerivedId::new(format!("{run_id}/product-frame"));
+        if product.id().0.trim().is_empty() || product.id() == &output_id {
+            return Err(invalid(
+                "product frame requires a distinct nonempty product input identity",
+            ));
+        }
+        super::require_calculated_evidence(product, "product domain")?;
+
+        let dependencies = DependencyCollector::default();
+        let product_snapshot = dependencies.read(product);
+        validate_product_snapshot(product_snapshot)?;
+        let materialized = product_snapshot
+            .interactions
+            .iter()
+            .map(|interaction| (interaction.left.clone(), interaction.right.clone()))
+            .collect::<BTreeSet<_>>();
+        let mut selected = BTreeSet::new();
+        for axis in axes {
+            let coordinate = (axis.left.clone(), axis.right.clone());
+            if axis.left.0.trim().is_empty()
+                || axis.right.0.trim().is_empty()
+                || axis
+                    .label
+                    .as_ref()
+                    .is_some_and(|label| label.trim().is_empty())
+                || !materialized.contains(&coordinate)
+                || !selected.insert(coordinate)
+            {
+                return Err(invalid(
+                    "product frame axes must uniquely reference materialized interactions",
+                ));
+            }
+        }
+
+        let params = serde_json::json!({
+            "product": product.id(),
+            "product_domain": &product_snapshot.id,
+            "product_version": &product_snapshot.version,
+            "left": &product_snapshot.left,
+            "right": &product_snapshot.right,
+            "product_frame": &id,
+            "product_frame_version": &version,
+            "axes": axes,
+        });
+        let token = CalculationToken::from_harness(
+            EmitMetadata {
+                id: output_id,
+                producer: PluginId::new("calculate.product-frame"),
+                algorithm: "explicit_product_interaction_frame".into(),
+                version: semver::Version::new(0, 1, 0),
+                params_hash: hash_params(&params),
+                params,
+                source: None,
+                timestamp,
+                domain_version: None,
+                frame_version: None,
+                model: None,
+            },
+            dependencies,
+        );
+        Ok(token.emit(ProductMeasurementFrame {
+            id,
+            version,
+            product: product_snapshot.id.clone(),
+            product_version: product_snapshot.version.clone(),
+            left: product_snapshot.left.clone(),
+            right: product_snapshot.right.clone(),
+            axes: axes.to_vec(),
         }))
     }
 }

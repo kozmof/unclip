@@ -7,7 +7,8 @@ mod product;
 pub use candidate::{CandidateKind, CandidateProposal};
 pub use product::{
     ProductDomainId, ProductDomainInput, ProductDomainSnapshot, ProductDomainVersion,
-    ProductInteraction,
+    ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
+    ProductMeasurementFrame,
 };
 
 use std::collections::BTreeMap;

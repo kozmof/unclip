@@ -659,7 +659,14 @@ version and contains no copied units or relations. It materializes only explicit
 left/right unit pairs backed by ordered observation IDs or requirement IDs; an empty
 product remains empty rather than expanding to a Cartesian union. Interaction order
 is canonical, every evidence record appears in provenance, and the product has its
-own ID and version. Product measurement frames remain pending.
+own ID and version.
+
+`Engine::create_product_frame` creates a calculated `ProductMeasurementFrame` with
+separate product-frame ID and version types. The frame binds the exact product ID
+and version, repeats both source-domain IDs and versions, and retains explicit axis
+order over materialized interaction pairs. Duplicate or unmaterialized axes and
+blank labels are rejected. The product calculation is its provenance dependency;
+inferred product values cannot cross this calculated boundary.
 
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.

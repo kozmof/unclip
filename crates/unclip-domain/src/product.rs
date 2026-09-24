@@ -1,8 +1,8 @@
 //! Lazy cross-domain composition types.
 //!
-//! A product domain records interactions between two immutable domains. It does
-//! not copy either domain's units or relations and cannot be confused with an
-//! ordinary `DomainSnapshot` union.
+//! Product domains and their measurement frames are separate from ordinary
+//! `DomainSnapshot` and `MeasurementFrame` values. They retain interaction
+//! coordinates without copying either input domain's units or relations.
 
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{DerivedId, DomainVersion};
@@ -25,6 +25,8 @@ macro_rules! string_id {
 
 string_id!(ProductDomainId);
 string_id!(ProductDomainVersion);
+string_id!(ProductFrameId);
+string_id!(ProductFrameVersion);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,4 +54,24 @@ pub struct ProductDomainSnapshot {
     pub left: ProductDomainInput,
     pub right: ProductDomainInput,
     pub interactions: Vec<ProductInteraction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProductFrameAxis {
+    pub left: UnitId,
+    pub right: UnitId,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProductMeasurementFrame {
+    pub id: ProductFrameId,
+    pub version: ProductFrameVersion,
+    pub product: ProductDomainId,
+    pub product_version: ProductDomainVersion,
+    pub left: ProductDomainInput,
+    pub right: ProductDomainInput,
+    pub axes: Vec<ProductFrameAxis>,
 }
