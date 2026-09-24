@@ -8,14 +8,16 @@ use unclip_epistemic::{
     Timestamp, Tracked,
 };
 use unclip_measure::{
-    CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainMutualInformation,
-    CrossDomainMutualInformationConfig, CrossDomainSample, Measurement,
+    CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainInteractionMovementConfig,
+    CrossDomainMutualInformation, CrossDomainMutualInformationConfig, CrossDomainSample,
+    Measurement,
 };
 use unclip_plugin::{PluginError, ProductMeasureCtx, Result};
 
 const CCA_SENSOR_ID: &str = "sensor.canonical-correlation";
 const MI_SENSOR_ID: &str = "sensor.cross-domain-mutual-information";
 const COMMUNITY_SENSOR_ID: &str = "sensor.cross-domain-communities";
+const INTERACTION_MOVEMENT_SENSOR_ID: &str = "sensor.cross-domain-interaction-movement";
 
 fn invalid(message: impl std::fmt::Display) -> PluginError {
     PluginError::Message(message.to_string())
@@ -329,6 +331,91 @@ impl crate::Engine {
             &sensor_params,
             dependencies,
         );
+        sensor.measure(&ctx, ctx.calculation_token(metadata))
+    }
+}
+
+impl crate::Engine {
+    /// Measure scale-free movement agreement on product-frame interaction axes.
+    ///
+    /// Consecutive transitions come only from the explicit observation sequence.
+    /// Sparse endpoints exclude that exact transition without closing the gap.
+    #[allow(clippy::too_many_arguments)]
+    pub fn measure_cross_domain_interaction_movement(
+        &self,
+        product: &Tracked<ProductDomainSnapshot>,
+        frame: &Tracked<ProductMeasurementFrame>,
+        samples: &[Tracked<CrossDomainSample>],
+        config: CrossDomainInteractionMovementConfig,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<Measurement>> {
+        if run_id.trim().is_empty() {
+            return Err(invalid(
+                "cross-domain interaction movement requires a nonempty run ID",
+            ));
+        }
+        crate::require_calculated_evidence(product, "interaction-movement product domain")?;
+        crate::require_calculated_evidence(frame, "interaction-movement product frame")?;
+        if samples.iter().any(|sample| {
+            matches!(
+                sample.operation(),
+                Some(Operation::Experimental | Operation::Interpreted)
+            )
+        }) {
+            return Err(invalid(
+                "interaction-movement samples must be inferred, calculated, or restored evidence",
+            ));
+        }
+
+        let sensor_id = PluginId::new(INTERACTION_MOVEMENT_SENSOR_ID);
+        let sensor = self
+            .registry()
+            .product_sensor(&sensor_id)
+            .ok_or_else(|| PluginError::MissingPlugin(sensor_id.clone()))?;
+        let descriptor = sensor.descriptor();
+        let output_id = DerivedId::new(format!("{run_id}/{}", descriptor.id));
+        if product.id() == &output_id
+            || frame.id() == &output_id
+            || samples.iter().any(|sample| sample.id() == &output_id)
+        {
+            return Err(invalid(
+                "interaction-movement output identity collides with an input",
+            ));
+        }
+
+        let dependencies = DependencyCollector::default();
+        let product_value = dependencies.read(product);
+        super::product_domain::validate_product_snapshot(product_value)?;
+        let frame_value = dependencies.read(frame);
+        validate_frame(product_value, frame_value)?;
+        let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        let params = serde_json::json!({
+            "product": product.id(),
+            "product_domain": &product_value.id,
+            "product_version": &product_value.version,
+            "product_frame": &frame_value.id,
+            "product_frame_version": &frame_value.version,
+            "left": &product_value.left,
+            "right": &product_value.right,
+            "axes": &frame_value.axes,
+            "minimum_transitions": config.minimum_transitions,
+            "sequence": &config.sequence,
+        });
+        let metadata = EmitMetadata {
+            id: output_id,
+            producer: descriptor.id.clone(),
+            algorithm: "signed_consecutive_cross_domain_movement".into(),
+            version: descriptor.version.clone(),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp,
+            domain_version: None,
+            frame_version: None,
+            model: None,
+        };
+        let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
 }

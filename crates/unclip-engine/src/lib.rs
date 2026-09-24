@@ -730,6 +730,7 @@ mod tests {
             vec![
                 "sensor.canonical-correlation",
                 "sensor.cross-domain-communities",
+                "sensor.cross-domain-interaction-movement",
                 "sensor.cross-domain-mutual-information"
             ]
         );

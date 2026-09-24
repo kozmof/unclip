@@ -701,6 +701,17 @@ unassessed, and absent Cartesian pairs are never synthesized. The structured res
 and provenance retain the exact product, frame, source-domain versions, MI evidence,
 threshold, sample floor, and all immediate calculated dependencies.
 
+`Engine::measure_cross_domain_interaction_movement` executes the registered
+`sensor.cross-domain-interaction-movement` with an explicit validated observation
+sequence. For each materialized product-frame axis it computes the bounded,
+scale-free mean of `sign(delta_left) * sign(delta_right)` across consecutive complete
+transitions. The structured result retains concordant, discordant, one-sided,
+stationary, and excluded transition counts together with the exact sequence and
+product/frame binding. Missing endpoints exclude that exact transition without
+closing the gap; measured zero and an evidence shortfall remain distinct. Provenance
+pins the source domains, product and frame versions, sequence, transition floor, and
+every tracked sample.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

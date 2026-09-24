@@ -30,7 +30,15 @@ pub use canonical_correlation::{
     CanonicalCorrelationUndefined, CrossDomainSample,
 };
 
+mod cross_domain_interaction_movement;
 mod cross_domain_mutual_information;
+pub use cross_domain_interaction_movement::{
+    cross_domain_interaction_movement, CrossDomainAxisMovement, CrossDomainInteractionMovement,
+    CrossDomainInteractionMovementConfig, CrossDomainInteractionMovementError,
+    CrossDomainInteractionMovementOutcome, CrossDomainTransition,
+    UnassessedCrossDomainAxisMovement,
+};
+
 pub use cross_domain_mutual_information::{
     cross_domain_mutual_information, CrossDomainAxisMutualInformation,
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig,
