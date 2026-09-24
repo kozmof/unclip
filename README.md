@@ -691,6 +691,16 @@ zero, while an entirely sparse profile is `InsufficientEvidence`. The structured
 result keeps per-axis sample and exclusion details; provenance pins the discretization,
 product/frame versions, source domains, and every supplied sample.
 
+`Engine::measure_cross_domain_communities` executes the registered
+`sensor.cross-domain-communities` over a calculated, frame-bound mutual-information
+profile. An explicit MI threshold and sample floor produce deterministic connected
+components of the materialized bipartite interactions. Members retain their left or
+right side, so equal unit IDs in the two source domains remain distinct. Measured zero
+qualifies only at an explicit zero threshold; sparse interactions stay typed as
+unassessed, and absent Cartesian pairs are never synthesized. The structured result
+and provenance retain the exact product, frame, source-domain versions, MI evidence,
+threshold, sample floor, and all immediate calculated dependencies.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

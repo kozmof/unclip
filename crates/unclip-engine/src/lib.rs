@@ -729,6 +729,7 @@ mod tests {
             product_sensors,
             vec![
                 "sensor.canonical-correlation",
+                "sensor.cross-domain-communities",
                 "sensor.cross-domain-mutual-information"
             ]
         );

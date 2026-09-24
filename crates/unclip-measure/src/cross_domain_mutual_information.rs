@@ -4,12 +4,27 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
-use unclip_domain::{ProductFrameAxis, UnitId};
+use unclip_domain::{
+    ProductDomainId, ProductDomainInput, ProductDomainVersion, ProductFrameAxis, ProductFrameId,
+    ProductFrameVersion, UnitId,
+};
 use unclip_observe::ObservationId;
 
 use crate::CrossDomainSample;
 
 const MAXIMUM_BINS: usize = 1_024;
+
+/// Exact product and frame identity attached to reusable interaction measurements.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProductMeasurementBinding {
+    pub product: ProductDomainId,
+    pub product_version: ProductDomainVersion,
+    pub frame: ProductFrameId,
+    pub frame_version: ProductFrameVersion,
+    pub left: ProductDomainInput,
+    pub right: ProductDomainInput,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +69,7 @@ pub struct UnassessedCrossDomainAxis {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrossDomainMutualInformation {
+    pub binding: ProductMeasurementBinding,
     pub axes: Vec<CrossDomainAxisMutualInformation>,
     pub unassessed_axes: Vec<UnassessedCrossDomainAxis>,
     pub observation_count: usize,
@@ -65,7 +81,7 @@ pub struct CrossDomainMutualInformation {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CrossDomainMutualInformationOutcome {
     Value {
-        analysis: CrossDomainMutualInformation,
+        analysis: Box<CrossDomainMutualInformation>,
     },
     InsufficientEvidence {
         have: usize,
@@ -147,11 +163,24 @@ impl std::error::Error for CrossDomainMutualInformationError {}
 /// its retained pairs, stored in the result, and applied with half-open intervals
 /// whose boundary values enter the upper bin. No missing value is filled with zero.
 pub fn cross_domain_mutual_information(
+    binding: ProductMeasurementBinding,
     axes: &[ProductFrameAxis],
     samples: &[CrossDomainSample],
     config: CrossDomainMutualInformationConfig,
 ) -> Result<CrossDomainMutualInformationOutcome, CrossDomainMutualInformationError> {
     if config.minimum_samples.get() < 2 || config.bins.get() > MAXIMUM_BINS {
+        return Err(CrossDomainMutualInformationError::InvalidConfiguration);
+    }
+    if binding.product.0.trim().is_empty()
+        || binding.product_version.0.trim().is_empty()
+        || binding.frame.0.trim().is_empty()
+        || binding.frame_version.0.trim().is_empty()
+        || binding.left.domain.0.trim().is_empty()
+        || binding.left.version.0.trim().is_empty()
+        || binding.right.domain.0.trim().is_empty()
+        || binding.right.version.0.trim().is_empty()
+        || binding.left.domain == binding.right.domain
+    {
         return Err(CrossDomainMutualInformationError::InvalidConfiguration);
     }
     let mut coordinates = BTreeSet::new();
@@ -274,13 +303,14 @@ pub fn cross_domain_mutual_information(
         });
     }
     Ok(CrossDomainMutualInformationOutcome::Value {
-        analysis: CrossDomainMutualInformation {
+        analysis: Box::new(CrossDomainMutualInformation {
+            binding,
             axes: measured,
             unassessed_axes: unassessed,
             observation_count: ordered.len(),
             requested_bins: config.bins.get(),
             minimum_samples: config.minimum_samples.get(),
-        },
+        }),
     })
 }
 
@@ -335,6 +365,23 @@ fn empirical_mutual_information(
 mod tests {
     use super::*;
 
+    fn binding() -> ProductMeasurementBinding {
+        ProductMeasurementBinding {
+            product: ProductDomainId::new("left-x-right"),
+            product_version: ProductDomainVersion::new("1"),
+            frame: ProductFrameId::new("frame"),
+            frame_version: ProductFrameVersion::new("1"),
+            left: ProductDomainInput {
+                domain: unclip_domain::DomainId::new("left-domain"),
+                version: unclip_epistemic::DomainVersion::new("1"),
+            },
+            right: ProductDomainInput {
+                domain: unclip_domain::DomainId::new("right-domain"),
+                version: unclip_epistemic::DomainVersion::new("1"),
+            },
+        }
+    }
+
     fn axis(left: &str, right: &str) -> ProductFrameAxis {
         ProductFrameAxis {
             left: UnitId::new(left),
@@ -373,7 +420,8 @@ mod tests {
             sample("d", &[("left", 1.0)], &[("right", 1.0)]),
         ];
         let calculate = |samples: &[CrossDomainSample]| {
-            cross_domain_mutual_information(&[axis("left", "right")], samples, config(2)).unwrap()
+            cross_domain_mutual_information(binding(), &[axis("left", "right")], samples, config(2))
+                .unwrap()
         };
         let result = calculate(&dependent);
         assert_eq!(calculate(&dependent), result);
@@ -412,6 +460,7 @@ mod tests {
         ];
         let CrossDomainMutualInformationOutcome::Value { analysis } =
             cross_domain_mutual_information(
+                binding(),
                 &[axis("left-a", "right-a"), axis("left-b", "right-b")],
                 &samples,
                 config(2),
@@ -434,7 +483,13 @@ mod tests {
     fn all_sparse_axes_and_no_axes_are_distinct() {
         let sparse = [sample("only", &[("left", 0.0)], &[("right", 0.0)])];
         assert!(matches!(
-            cross_domain_mutual_information(&[axis("left", "right")], &sparse, config(2)).unwrap(),
+            cross_domain_mutual_information(
+                binding(),
+                &[axis("left", "right")],
+                &sparse,
+                config(2)
+            )
+            .unwrap(),
             CrossDomainMutualInformationOutcome::InsufficientEvidence {
                 have: 1,
                 need: 2,
@@ -443,6 +498,7 @@ mod tests {
         ));
         assert_eq!(
             cross_domain_mutual_information(
+                binding(),
                 &[],
                 &[sample(
                     "ignored",
@@ -462,6 +518,7 @@ mod tests {
     fn rejects_an_unbounded_bin_request() {
         assert_eq!(
             cross_domain_mutual_information(
+                binding(),
                 &[axis("left", "right")],
                 &[],
                 CrossDomainMutualInformationConfig {
@@ -479,6 +536,7 @@ mod tests {
         let duplicate = sample("same", &[("left", 0.0)], &[("right", 0.0)]);
         assert!(matches!(
             cross_domain_mutual_information(
+                binding(),
                 &[axis("left", "right")],
                 &[duplicate.clone(), duplicate],
                 config(2),
@@ -487,6 +545,7 @@ mod tests {
         ));
         assert!(matches!(
             cross_domain_mutual_information(
+                binding(),
                 &[axis("left", "right")],
                 &[sample("extra", &[("other", 0.0)], &[("right", 0.0)])],
                 config(2),
@@ -495,6 +554,7 @@ mod tests {
         ));
         assert!(matches!(
             cross_domain_mutual_information(
+                binding(),
                 &[axis("left", "right")],
                 &[sample("nan", &[("left", f64::NAN)], &[("right", 0.0)])],
                 config(2),

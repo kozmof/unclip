@@ -35,7 +35,14 @@ pub use cross_domain_mutual_information::{
     cross_domain_mutual_information, CrossDomainAxisMutualInformation,
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig,
     CrossDomainMutualInformationError, CrossDomainMutualInformationOutcome,
-    UnassessedCrossDomainAxis,
+    ProductMeasurementBinding, UnassessedCrossDomainAxis,
+};
+
+mod cross_domain_community;
+pub use cross_domain_community::{
+    detect_cross_domain_communities, CrossDomainCommunityConfig, CrossDomainCommunityDetection,
+    CrossDomainCommunityError, CrossDomainCommunityMember, CrossDomainCommunityOutcome,
+    ProductSide, UnassessedCrossDomainInteraction,
 };
 
 mod pairwise;

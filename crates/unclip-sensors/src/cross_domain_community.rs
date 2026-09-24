@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use semver::Version;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{
-    cross_domain_mutual_information, CrossDomainMutualInformationConfig,
-    CrossDomainMutualInformationOutcome, Measurement, MeasurementContext, MeasurementKind,
-    MeasurementValue, ProductMeasurementBinding, Reading,
+    detect_cross_domain_communities, CrossDomainCommunityConfig, CrossDomainCommunityOutcome,
+    Measurement, MeasurementContext, MeasurementKind, MeasurementValue, ProductMeasurementBinding,
+    Reading,
 };
 use unclip_plugin::{
     Capability, EvidenceRequirement, PluginError, ProductMeasureCtx, ProductSensor, Result,
@@ -15,17 +15,17 @@ use unclip_plugin::{
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain];
 const EVIDENCE: &[EvidenceRequirement] = &[EvidenceRequirement::MinSamples(2)];
 const PRODUCES: &[MeasurementKind] = &[MeasurementKind::Structured];
-const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["minimum_samples","bins"],"properties":{"minimum_samples":{"type":"integer","minimum":2},"bins":{"type":"integer","minimum":1,"maximum":1024}}}"#;
+const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["minimum_mutual_information_bits","minimum_samples"],"properties":{"minimum_mutual_information_bits":{"type":"number","minimum":0},"minimum_samples":{"type":"integer","minimum":2}}}"#;
 
-pub struct CrossDomainMutualInformationSensor {
+pub struct CrossDomainCommunitySensor {
     descriptor: SensorDescriptor,
 }
 
-impl Default for CrossDomainMutualInformationSensor {
+impl Default for CrossDomainCommunitySensor {
     fn default() -> Self {
         Self {
             descriptor: SensorDescriptor {
-                id: PluginId::new("sensor.cross-domain-mutual-information"),
+                id: PluginId::new("sensor.cross-domain-communities"),
                 version: Version::new(0, 1, 0),
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
@@ -40,7 +40,7 @@ fn invalid(error: impl std::fmt::Display) -> PluginError {
     PluginError::Message(error.to_string())
 }
 
-impl ProductSensor for CrossDomainMutualInformationSensor {
+impl ProductSensor for CrossDomainCommunitySensor {
     fn descriptor(&self) -> &SensorDescriptor {
         &self.descriptor
     }
@@ -50,46 +50,59 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
         ctx: &ProductMeasureCtx<'_>,
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
-        let config: CrossDomainMutualInformationConfig =
+        let config: CrossDomainCommunityConfig =
             serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
         let product = ctx.product();
         let frame = ctx.frame();
-        if frame.product != product.id
-            || frame.product_version != product.version
-            || frame.left != product.left
-            || frame.right != product.right
-        {
+        let profile = ctx.mutual_information().ok_or_else(|| {
+            invalid("cross-domain communities require calculated mutual-information evidence")
+        })?;
+        let expected_binding = ProductMeasurementBinding {
+            product: product.id.clone(),
+            product_version: product.version.clone(),
+            frame: frame.id.clone(),
+            frame_version: frame.version.clone(),
+            left: product.left.clone(),
+            right: product.right.clone(),
+        };
+        if profile.binding != expected_binding {
             return Err(invalid(
-                "cross-domain mutual information requires a frame bound to the exact product inputs",
+                "cross-domain communities require mutual information bound to the exact product and frame versions",
             ));
         }
-        let samples = ctx
-            .samples()
+        let frame_coordinates = frame
+            .axes
             .iter()
-            .map(|sample| ctx.read(sample).clone())
-            .collect::<Vec<_>>();
-        let outcome = cross_domain_mutual_information(
-            ProductMeasurementBinding {
-                product: product.id.clone(),
-                product_version: product.version.clone(),
-                frame: frame.id.clone(),
-                frame_version: frame.version.clone(),
-                left: product.left.clone(),
-                right: product.right.clone(),
-            },
-            &frame.axes,
-            &samples,
-            config,
-        )
-        .map_err(invalid)?;
+            .map(|axis| (&axis.left, &axis.right))
+            .collect::<BTreeSet<_>>();
+        let profile_coordinates = profile
+            .axes
+            .iter()
+            .map(|axis| (&axis.left, &axis.right))
+            .chain(
+                profile
+                    .unassessed_axes
+                    .iter()
+                    .map(|axis| (&axis.left, &axis.right)),
+            )
+            .collect::<BTreeSet<_>>();
+        if frame_coordinates.len() != frame.axes.len()
+            || profile_coordinates.len() != profile.axes.len() + profile.unassessed_axes.len()
+            || profile_coordinates != frame_coordinates
+        {
+            return Err(invalid(
+                "cross-domain communities require mutual information for every and only product-frame axis",
+            ));
+        }
 
+        let outcome = detect_cross_domain_communities(profile, config).map_err(invalid)?;
         let (reading, sample_count, status, unassessed) = match outcome {
-            CrossDomainMutualInformationOutcome::Value { analysis } => {
-                let unassessed = analysis.unassessed_axes.clone();
+            CrossDomainCommunityOutcome::Value { detection } => {
+                let unassessed = detection.unassessed_interactions.clone();
                 (
                     Reading::Value {
                         value: MeasurementValue::Structured(
-                            serde_json::to_value(analysis).map_err(invalid)?,
+                            serde_json::to_value(detection).map_err(invalid)?,
                         ),
                     },
                     None,
@@ -97,23 +110,15 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
                     unassessed,
                 )
             }
-            CrossDomainMutualInformationOutcome::InsufficientEvidence {
+            CrossDomainCommunityOutcome::InsufficientEvidence {
                 have,
                 need,
-                unassessed_axes,
+                unassessed_interactions,
             } => (
                 Reading::InsufficientEvidence { have, need },
                 Some(have),
                 "insufficient_evidence",
-                unassessed_axes,
-            ),
-            CrossDomainMutualInformationOutcome::NoAxes { observation_count } => (
-                Reading::NotApplicable {
-                    reason: "product frame has no interaction axes".into(),
-                },
-                Some(observation_count),
-                "not_applicable",
-                vec![],
+                unassessed_interactions,
             ),
         };
         let context = BTreeMap::from([
@@ -142,7 +147,7 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
                 serde_json::to_value(&product.right).map_err(invalid)?,
             ),
             (
-                "unassessed_axes".into(),
+                "unassessed_interactions".into(),
                 serde_json::to_value(unassessed).map_err(invalid)?,
             ),
             ("status".into(), serde_json::json!(status)),

@@ -8,12 +8,14 @@ use unclip_epistemic::{
     Timestamp, Tracked,
 };
 use unclip_measure::{
-    CanonicalCorrelationConfig, CrossDomainMutualInformationConfig, CrossDomainSample, Measurement,
+    CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainMutualInformation,
+    CrossDomainMutualInformationConfig, CrossDomainSample, Measurement,
 };
 use unclip_plugin::{PluginError, ProductMeasureCtx, Result};
 
 const CCA_SENSOR_ID: &str = "sensor.canonical-correlation";
 const MI_SENSOR_ID: &str = "sensor.cross-domain-mutual-information";
+const COMMUNITY_SENSOR_ID: &str = "sensor.cross-domain-communities";
 
 fn invalid(message: impl std::fmt::Display) -> PluginError {
     PluginError::Message(message.to_string())
@@ -241,6 +243,92 @@ impl crate::Engine {
             model: None,
         };
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
+        sensor.measure(&ctx, ctx.calculation_token(metadata))
+    }
+}
+
+impl crate::Engine {
+    /// Detect anonymous bipartite communities from calculated interaction evidence.
+    ///
+    /// Only product-frame coordinates represented by the bound mutual-information
+    /// profile participate. Thresholding is explicit, and connected components keep
+    /// left and right identities separate even when their unit IDs are equal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn measure_cross_domain_communities(
+        &self,
+        product: &Tracked<ProductDomainSnapshot>,
+        frame: &Tracked<ProductMeasurementFrame>,
+        mutual_information: &Tracked<CrossDomainMutualInformation>,
+        config: CrossDomainCommunityConfig,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<Measurement>> {
+        if run_id.trim().is_empty() {
+            return Err(invalid(
+                "cross-domain communities require a nonempty run ID",
+            ));
+        }
+        crate::require_calculated_evidence(product, "community product domain")?;
+        crate::require_calculated_evidence(frame, "community product frame")?;
+        crate::require_calculated_evidence(
+            mutual_information,
+            "community mutual-information profile",
+        )?;
+
+        let sensor_id = PluginId::new(COMMUNITY_SENSOR_ID);
+        let sensor = self
+            .registry()
+            .product_sensor(&sensor_id)
+            .ok_or_else(|| PluginError::MissingPlugin(sensor_id.clone()))?;
+        let descriptor = sensor.descriptor();
+        let output_id = DerivedId::new(format!("{run_id}/{}", descriptor.id));
+        if product.id() == &output_id
+            || frame.id() == &output_id
+            || mutual_information.id() == &output_id
+        {
+            return Err(invalid(
+                "cross-domain community output identity collides with an input",
+            ));
+        }
+
+        let dependencies = DependencyCollector::default();
+        let product_value = dependencies.read(product);
+        super::product_domain::validate_product_snapshot(product_value)?;
+        let frame_value = dependencies.read(frame);
+        validate_frame(product_value, frame_value)?;
+        let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        let params = serde_json::json!({
+            "product": product.id(),
+            "product_domain": &product_value.id,
+            "product_version": &product_value.version,
+            "product_frame": &frame_value.id,
+            "product_frame_version": &frame_value.version,
+            "left": &product_value.left,
+            "right": &product_value.right,
+            "mutual_information": mutual_information.id(),
+            "minimum_mutual_information_bits": config.minimum_mutual_information_bits,
+            "minimum_samples": config.minimum_samples,
+        });
+        let metadata = EmitMetadata {
+            id: output_id,
+            producer: descriptor.id.clone(),
+            algorithm: "thresholded_bipartite_mutual_information_communities".into(),
+            version: descriptor.version.clone(),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp,
+            domain_version: None,
+            frame_version: None,
+            model: None,
+        };
+        let ctx = ProductMeasureCtx::with_mutual_information(
+            product,
+            frame,
+            mutual_information,
+            &sensor_params,
+            dependencies,
+        );
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
 }

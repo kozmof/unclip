@@ -57,7 +57,8 @@ use unclip_epistemic::{
     SourceRef, Tracked,
 };
 use unclip_measure::{
-    CrossDomainSample, Delta, EmpiricalStructure, Measurement, MeasurementKind, Reading,
+    CrossDomainMutualInformation, CrossDomainSample, Delta, EmpiricalStructure, Measurement,
+    MeasurementKind, Reading,
 };
 use unclip_observe::{Alignment, Observation, PartialRanking};
 
@@ -376,6 +377,7 @@ pub struct ProductMeasureCtx<'a> {
     product: &'a Tracked<ProductDomainSnapshot>,
     frame: &'a Tracked<ProductMeasurementFrame>,
     samples: &'a [Tracked<CrossDomainSample>],
+    mutual_information: Option<&'a Tracked<CrossDomainMutualInformation>>,
     params: &'a Params,
     dependencies: DependencyCollector,
 }
@@ -392,6 +394,24 @@ impl<'a> ProductMeasureCtx<'a> {
             product,
             frame,
             samples,
+            mutual_information: None,
+            params,
+            dependencies,
+        }
+    }
+
+    pub fn with_mutual_information(
+        product: &'a Tracked<ProductDomainSnapshot>,
+        frame: &'a Tracked<ProductMeasurementFrame>,
+        mutual_information: &'a Tracked<CrossDomainMutualInformation>,
+        params: &'a Params,
+        dependencies: DependencyCollector,
+    ) -> Self {
+        Self {
+            product,
+            frame,
+            samples: &[],
+            mutual_information: Some(mutual_information),
             params,
             dependencies,
         }
@@ -411,6 +431,11 @@ impl<'a> ProductMeasureCtx<'a> {
 
     pub fn read<'b>(&self, sample: &'b Tracked<CrossDomainSample>) -> &'b CrossDomainSample {
         self.dependencies.read(sample)
+    }
+
+    pub fn mutual_information(&self) -> Option<&CrossDomainMutualInformation> {
+        self.mutual_information
+            .map(|profile| self.dependencies.read(profile))
     }
 
     pub fn params(&self) -> &Params {

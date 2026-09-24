@@ -254,6 +254,7 @@ fn level_plugins_does_not_require_a_database() {
     let plugins = stdout(&out);
     assert!(plugins.contains("sensor.coverage"));
     assert!(plugins.contains("sensor.canonical-correlation"));
+    assert!(plugins.contains("sensor.cross-domain-communities"));
     assert!(plugins.contains("sensor.cross-domain-mutual-information"));
     assert!(plugins.contains("compare.scalar-difference"));
     assert!(plugins.contains("compare.kendall"));
