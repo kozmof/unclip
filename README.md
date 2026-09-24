@@ -712,6 +712,16 @@ closing the gap; measured zero and an evidence shortfall remain distinct. Proven
 pins the source domains, product and frame versions, sequence, transition floor, and
 every tracked sample.
 
+`CrossProductSensor` and `CrossProductMeasureCtx` preserve two product domains, two
+frames, and two calculated movement profiles as separate inputs. The registered
+`sensor.cross-product-transfer` compares directional concordance only through
+explicit one-to-one axis mappings. Each result retains source and target values,
+signed and absolute change, transition counts, excluded transitions, bindings, and
+observation sequences. Exact zero change remains measured; sparse mappings retain
+their inherited evidence floors and cannot be promoted by a lower transfer setting.
+The calculation rejects inferred mappings, stale bindings, and incomplete frame-axis
+coverage, and makes no causal or automatic acceptance claim.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

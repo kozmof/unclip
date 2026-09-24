@@ -257,6 +257,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(plugins.contains("sensor.cross-domain-communities"));
     assert!(plugins.contains("sensor.cross-domain-interaction-movement"));
     assert!(plugins.contains("sensor.cross-domain-mutual-information"));
+    assert!(plugins.contains("sensor.cross-product-transfer"));
     assert!(plugins.contains("compare.scalar-difference"));
     assert!(plugins.contains("compare.kendall"));
     assert!(plugins.contains("compare.rbo"));

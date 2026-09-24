@@ -10,14 +10,15 @@ use unclip_epistemic::{
 use unclip_measure::{
     CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainInteractionMovementConfig,
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig, CrossDomainSample,
-    Measurement,
+    CrossProductTransferConfig, Measurement,
 };
-use unclip_plugin::{PluginError, ProductMeasureCtx, Result};
+use unclip_plugin::{CrossProductMeasureCtx, PluginError, ProductMeasureCtx, Result};
 
 const CCA_SENSOR_ID: &str = "sensor.canonical-correlation";
 const MI_SENSOR_ID: &str = "sensor.cross-domain-mutual-information";
 const COMMUNITY_SENSOR_ID: &str = "sensor.cross-domain-communities";
 const INTERACTION_MOVEMENT_SENSOR_ID: &str = "sensor.cross-domain-interaction-movement";
+const CROSS_PRODUCT_TRANSFER_SENSOR_ID: &str = "sensor.cross-product-transfer";
 
 fn invalid(message: impl std::fmt::Display) -> PluginError {
     PluginError::Message(message.to_string())
@@ -416,6 +417,127 @@ impl crate::Engine {
             model: None,
         };
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
+        sensor.measure(&ctx, ctx.calculation_token(metadata))
+    }
+}
+
+impl crate::Engine {
+    /// Measure movement-signature transfer across explicitly mapped product axes.
+    ///
+    /// Source and target products, frames, and movement profiles remain separate
+    /// calculated dependencies. Axis mappings are caller-supplied and one-to-one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn measure_cross_product_transfer(
+        &self,
+        source_product: &Tracked<ProductDomainSnapshot>,
+        source_frame: &Tracked<ProductMeasurementFrame>,
+        source_movement: &Tracked<unclip_measure::CrossDomainInteractionMovement>,
+        target_product: &Tracked<ProductDomainSnapshot>,
+        target_frame: &Tracked<ProductMeasurementFrame>,
+        target_movement: &Tracked<unclip_measure::CrossDomainInteractionMovement>,
+        config: CrossProductTransferConfig,
+        run_id: &str,
+        timestamp: Timestamp,
+    ) -> Result<Calculated<Measurement>> {
+        if run_id.trim().is_empty() {
+            return Err(invalid("cross-product transfer requires a nonempty run ID"));
+        }
+        for (input, kind) in [
+            (source_product, "transfer source product domain"),
+            (target_product, "transfer target product domain"),
+        ] {
+            crate::require_calculated_evidence(input, kind)?;
+        }
+        for (input, kind) in [
+            (source_frame, "transfer source product frame"),
+            (target_frame, "transfer target product frame"),
+        ] {
+            crate::require_calculated_evidence(input, kind)?;
+        }
+        for (input, kind) in [
+            (source_movement, "transfer source movement"),
+            (target_movement, "transfer target movement"),
+        ] {
+            crate::require_calculated_evidence(input, kind)?;
+        }
+
+        let sensor_id = PluginId::new(CROSS_PRODUCT_TRANSFER_SENSOR_ID);
+        let sensor = self
+            .registry()
+            .cross_product_sensor(&sensor_id)
+            .ok_or_else(|| PluginError::MissingPlugin(sensor_id.clone()))?;
+        let descriptor = sensor.descriptor();
+        let output_id = DerivedId::new(format!("{run_id}/{}", descriptor.id));
+        let input_ids = [
+            source_product.id(),
+            source_frame.id(),
+            source_movement.id(),
+            target_product.id(),
+            target_frame.id(),
+            target_movement.id(),
+        ];
+        if input_ids.iter().any(|id| id.0.trim().is_empty())
+            || input_ids.contains(&&output_id)
+            || input_ids.iter().copied().collect::<BTreeSet<_>>().len() != input_ids.len()
+        {
+            return Err(invalid(
+                "cross-product transfer requires six unique nonempty input identities distinct from the output",
+            ));
+        }
+
+        let dependencies = DependencyCollector::default();
+        let source_product_value = dependencies.read(source_product);
+        super::product_domain::validate_product_snapshot(source_product_value)?;
+        let source_frame_value = dependencies.read(source_frame);
+        validate_frame(source_product_value, source_frame_value)?;
+        let target_product_value = dependencies.read(target_product);
+        super::product_domain::validate_product_snapshot(target_product_value)?;
+        let target_frame_value = dependencies.read(target_frame);
+        validate_frame(target_product_value, target_frame_value)?;
+        let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        let params = serde_json::json!({
+            "source_product": source_product.id(),
+            "source_product_domain": &source_product_value.id,
+            "source_product_version": &source_product_value.version,
+            "source_frame": &source_frame_value.id,
+            "source_frame_version": &source_frame_value.version,
+            "source_movement": source_movement.id(),
+            "source_left": &source_product_value.left,
+            "source_right": &source_product_value.right,
+            "target_product": target_product.id(),
+            "target_product_domain": &target_product_value.id,
+            "target_product_version": &target_product_value.version,
+            "target_frame": &target_frame_value.id,
+            "target_frame_version": &target_frame_value.version,
+            "target_movement": target_movement.id(),
+            "target_left": &target_product_value.left,
+            "target_right": &target_product_value.right,
+            "mappings": &config.mappings,
+            "minimum_transitions": config.minimum_transitions,
+        });
+        let metadata = EmitMetadata {
+            id: output_id,
+            producer: descriptor.id.clone(),
+            algorithm: "mapped_cross_product_movement_transfer".into(),
+            version: descriptor.version.clone(),
+            params_hash: hash_params(&params),
+            params,
+            source: None,
+            timestamp,
+            domain_version: None,
+            frame_version: None,
+            model: None,
+        };
+        let ctx = CrossProductMeasureCtx::new(
+            source_product,
+            source_frame,
+            source_movement,
+            target_product,
+            target_frame,
+            target_movement,
+            &sensor_params,
+            dependencies,
+        );
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
 }

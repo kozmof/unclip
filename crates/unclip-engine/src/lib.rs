@@ -690,6 +690,10 @@ mod tests {
             .product_sensors()
             .map(|plugin| plugin.descriptor().id.0.as_str())
             .collect::<Vec<_>>();
+        let cross_product_sensors = registry
+            .cross_product_sensors()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
         let comparators = registry
             .comparators()
             .map(|plugin| plugin.descriptor().id.0.as_str())
@@ -735,6 +739,7 @@ mod tests {
             ]
         );
 
+        assert_eq!(cross_product_sensors, vec!["sensor.cross-product-transfer"]);
         assert_eq!(
             comparators,
             vec![

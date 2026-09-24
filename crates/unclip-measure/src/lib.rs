@@ -32,11 +32,18 @@ pub use canonical_correlation::{
 
 mod cross_domain_interaction_movement;
 mod cross_domain_mutual_information;
+mod cross_product_transfer;
 pub use cross_domain_interaction_movement::{
     cross_domain_interaction_movement, CrossDomainAxisMovement, CrossDomainInteractionMovement,
     CrossDomainInteractionMovementConfig, CrossDomainInteractionMovementError,
     CrossDomainInteractionMovementOutcome, CrossDomainTransition,
     UnassessedCrossDomainAxisMovement,
+};
+
+pub use cross_product_transfer::{
+    cross_product_transfer, CrossProductAxisMapping, CrossProductAxisTransfer,
+    CrossProductTransfer, CrossProductTransferConfig, CrossProductTransferError,
+    CrossProductTransferOutcome, UnassessedCrossProductAxisTransfer,
 };
 
 pub use cross_domain_mutual_information::{

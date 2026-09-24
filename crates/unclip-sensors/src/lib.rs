@@ -16,6 +16,7 @@ mod coverage;
 mod cross_domain_community;
 mod cross_domain_interaction_movement;
 mod cross_domain_mutual_information;
+mod cross_product_transfer;
 mod kendall;
 mod lehmer;
 mod multi_observation;
@@ -31,6 +32,7 @@ pub use coverage::CoverageSensor;
 pub use cross_domain_community::CrossDomainCommunitySensor;
 pub use cross_domain_interaction_movement::CrossDomainInteractionMovementSensor;
 pub use cross_domain_mutual_information::CrossDomainMutualInformationSensor;
+pub use cross_product_transfer::CrossProductTransferSensor;
 pub use kendall::KendallSensor;
 pub use lehmer::LehmerSensor;
 pub use multi_observation::MultiObservationSensor;
@@ -41,6 +43,7 @@ pub use temporal::{TemporalSensor, TemporalStatistic};
 
 /// Register every built-in calculation sensor.
 pub fn register_all(registry: &mut Registry) -> Result<()> {
+    registry.register_cross_product_sensor(Arc::new(CrossProductTransferSensor::default()))?;
     registry.register_product_sensor(Arc::new(CanonicalCorrelationSensor::default()))?;
     registry.register_product_sensor(Arc::new(CrossDomainCommunitySensor::default()))?;
     registry.register_product_sensor(Arc::new(CrossDomainInteractionMovementSensor::default()))?;
@@ -101,5 +104,6 @@ mod tests {
         register_all(&mut registry).unwrap();
         assert_eq!(registry.sensors().count(), 17);
         assert_eq!(registry.product_sensors().count(), 4);
+        assert_eq!(registry.cross_product_sensors().count(), 1);
     }
 }

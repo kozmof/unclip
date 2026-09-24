@@ -57,8 +57,8 @@ use unclip_epistemic::{
     SourceRef, Tracked,
 };
 use unclip_measure::{
-    CrossDomainMutualInformation, CrossDomainSample, Delta, EmpiricalStructure, Measurement,
-    MeasurementKind, Reading,
+    CrossDomainInteractionMovement, CrossDomainMutualInformation, CrossDomainSample, Delta,
+    EmpiricalStructure, Measurement, MeasurementKind, Reading,
 };
 use unclip_observe::{Alignment, Observation, PartialRanking};
 
@@ -457,6 +457,85 @@ pub trait ProductSensor: Send + Sync {
     ) -> Result<Calculated<Measurement>>;
 }
 
+/// Inputs for a sensor comparing explicitly mapped interactions across two products.
+pub struct CrossProductMeasureCtx<'a> {
+    source_product: &'a Tracked<ProductDomainSnapshot>,
+    source_frame: &'a Tracked<ProductMeasurementFrame>,
+    source_movement: &'a Tracked<CrossDomainInteractionMovement>,
+    target_product: &'a Tracked<ProductDomainSnapshot>,
+    target_frame: &'a Tracked<ProductMeasurementFrame>,
+    target_movement: &'a Tracked<CrossDomainInteractionMovement>,
+    params: &'a Params,
+    dependencies: DependencyCollector,
+}
+
+impl<'a> CrossProductMeasureCtx<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        source_product: &'a Tracked<ProductDomainSnapshot>,
+        source_frame: &'a Tracked<ProductMeasurementFrame>,
+        source_movement: &'a Tracked<CrossDomainInteractionMovement>,
+        target_product: &'a Tracked<ProductDomainSnapshot>,
+        target_frame: &'a Tracked<ProductMeasurementFrame>,
+        target_movement: &'a Tracked<CrossDomainInteractionMovement>,
+        params: &'a Params,
+        dependencies: DependencyCollector,
+    ) -> Self {
+        Self {
+            source_product,
+            source_frame,
+            source_movement,
+            target_product,
+            target_frame,
+            target_movement,
+            params,
+            dependencies,
+        }
+    }
+
+    pub fn source_product(&self) -> &ProductDomainSnapshot {
+        self.dependencies.read(self.source_product)
+    }
+
+    pub fn source_frame(&self) -> &ProductMeasurementFrame {
+        self.dependencies.read(self.source_frame)
+    }
+
+    pub fn source_movement(&self) -> &CrossDomainInteractionMovement {
+        self.dependencies.read(self.source_movement)
+    }
+
+    pub fn target_product(&self) -> &ProductDomainSnapshot {
+        self.dependencies.read(self.target_product)
+    }
+
+    pub fn target_frame(&self) -> &ProductMeasurementFrame {
+        self.dependencies.read(self.target_frame)
+    }
+
+    pub fn target_movement(&self) -> &CrossDomainInteractionMovement {
+        self.dependencies.read(self.target_movement)
+    }
+
+    pub fn params(&self) -> &Params {
+        self.params
+    }
+
+    pub fn calculation_token(&self, metadata: EmitMetadata) -> CalculationToken {
+        CalculationToken::from_harness(metadata, self.dependencies.clone())
+    }
+}
+
+/// A calculation sensor whose inputs retain two distinct product identities.
+pub trait CrossProductSensor: Send + Sync {
+    fn descriptor(&self) -> &SensorDescriptor;
+    fn measure(
+        &self,
+        ctx: &CrossProductMeasureCtx<'_>,
+        token: CalculationToken,
+    ) -> Result<Calculated<Measurement>>;
+}
+
 #[async_trait]
 pub trait Inferrer: Send + Sync {
     fn descriptor(&self) -> &InferrerDescriptor;
@@ -625,6 +704,7 @@ pub mod conformance {
 pub struct Registry {
     sensors: BTreeMap<PluginId, Arc<dyn Sensor>>,
     product_sensors: BTreeMap<PluginId, Arc<dyn ProductSensor>>,
+    cross_product_sensors: BTreeMap<PluginId, Arc<dyn CrossProductSensor>>,
     inferrers: BTreeMap<PluginId, Arc<dyn Inferrer>>,
     comparators: BTreeMap<PluginId, Arc<dyn Comparator>>,
     interpreters: BTreeMap<PluginId, Arc<dyn Interpreter>>,
@@ -635,7 +715,7 @@ pub struct Registry {
 impl Registry {
     pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        if self.product_sensors.contains_key(&id) {
+        if self.product_sensors.contains_key(&id) || self.cross_product_sensors.contains_key(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
         insert_unique(&mut self.sensors, id, plugin)
@@ -643,10 +723,21 @@ impl Registry {
 
     pub fn register_product_sensor(&mut self, plugin: Arc<dyn ProductSensor>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        if self.sensors.contains_key(&id) {
+        if self.sensors.contains_key(&id) || self.cross_product_sensors.contains_key(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
         insert_unique(&mut self.product_sensors, id, plugin)
+    }
+
+    pub fn register_cross_product_sensor(
+        &mut self,
+        plugin: Arc<dyn CrossProductSensor>,
+    ) -> Result<()> {
+        let id = plugin.descriptor().id.clone();
+        if self.sensors.contains_key(&id) || self.product_sensors.contains_key(&id) {
+            return Err(PluginError::DuplicatePlugin(id));
+        }
+        insert_unique(&mut self.cross_product_sensors, id, plugin)
     }
 
     pub fn register_inferrer(&mut self, plugin: Arc<dyn Inferrer>) -> Result<()> {
@@ -684,6 +775,14 @@ impl Registry {
 
     pub fn product_sensor(&self, id: &PluginId) -> Option<&Arc<dyn ProductSensor>> {
         self.product_sensors.get(id)
+    }
+
+    pub fn cross_product_sensors(&self) -> impl Iterator<Item = &Arc<dyn CrossProductSensor>> {
+        self.cross_product_sensors.values()
+    }
+
+    pub fn cross_product_sensor(&self, id: &PluginId) -> Option<&Arc<dyn CrossProductSensor>> {
+        self.cross_product_sensors.get(id)
     }
 
     pub fn inferrers(&self) -> impl Iterator<Item = &Arc<dyn Inferrer>> {
@@ -887,6 +986,37 @@ mod tests {
 
     fn product_sensor() -> Arc<dyn ProductSensor> {
         Arc::new(StubProductSensor {
+            descriptor: SensorDescriptor {
+                id: PluginId::new("sensor.stub"),
+                version: Version::new(0, 1, 0),
+                applicability: &[Capability::ProductDomain],
+                evidence: &[],
+                produces: &[MeasurementKind::Structured],
+                params_schema: "{}",
+            },
+        })
+    }
+
+    struct StubCrossProductSensor {
+        descriptor: SensorDescriptor,
+    }
+
+    impl CrossProductSensor for StubCrossProductSensor {
+        fn descriptor(&self) -> &SensorDescriptor {
+            &self.descriptor
+        }
+
+        fn measure(
+            &self,
+            _ctx: &CrossProductMeasureCtx<'_>,
+            _token: CalculationToken,
+        ) -> Result<Calculated<Measurement>> {
+            unreachable!("registration fixture is never executed")
+        }
+    }
+
+    fn cross_product_sensor() -> Arc<dyn CrossProductSensor> {
+        Arc::new(StubCrossProductSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.stub"),
                 version: Version::new(0, 1, 0),
@@ -1172,6 +1302,39 @@ mod tests {
             .unwrap();
         assert_eq!(
             product_first.register_sensor(sensor()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            ordinary_first
+                .register_cross_product_sensor(cross_product_sensor())
+                .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            product_first
+                .register_cross_product_sensor(cross_product_sensor())
+                .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+
+        let mut cross_product_first = Registry::default();
+        cross_product_first
+            .register_cross_product_sensor(cross_product_sensor())
+            .unwrap();
+        assert_eq!(
+            cross_product_first.register_sensor(sensor()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            cross_product_first
+                .register_product_sensor(product_sensor())
+                .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            cross_product_first
+                .register_cross_product_sensor(cross_product_sensor())
+                .unwrap_err(),
             PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
         );
     }
