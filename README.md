@@ -668,6 +668,19 @@ order over materialized interaction pairs. Duplicate or unmaterialized axes and
 blank labels are rejected. The product calculation is its provenance dependency;
 inferred product values cannot cross this calculated boundary.
 
+`ProductSensor` and `ProductMeasureCtx` provide a separate plugin contract for
+calculations that must retain two domain identities. The built-in registry exposes
+`sensor.canonical-correlation`, and `Engine::measure_canonical_correlation` executes
+it against an exact calculated product and product frame. `CrossDomainSample` stores
+numeric left and right values by stable unit ID; absent values exclude the complete
+row and never become zero. The deterministic regularized covariance-whitening solver
+returns typed canonical correlations and loadings in the frame's left/right unit
+orders, together with the complete sample count, excluded observation IDs, tolerance,
+regularization, and Jacobi sweep count. Exact zero association is a measured structured
+value with no positive modes, too few complete rows is `InsufficientEvidence`, and a
+constant side is `NotApplicable`. Provenance records the product, frame, both source
+domain versions, solver parameters, and every supplied sample dependency.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

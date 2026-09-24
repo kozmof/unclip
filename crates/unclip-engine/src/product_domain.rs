@@ -168,7 +168,7 @@ impl crate::Engine {
     }
 }
 
-fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Result<()> {
+pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Result<()> {
     if product.id.0.trim().is_empty()
         || product.version.0.trim().is_empty()
         || product.left.domain.0.trim().is_empty()

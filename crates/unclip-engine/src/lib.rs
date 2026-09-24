@@ -44,6 +44,7 @@ pub use held_out::{
     CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
     HeldOutInputs,
 };
+mod cross_domain;
 mod product_domain;
 mod profile_comparison;
 pub use candidate_application::{
@@ -685,6 +686,10 @@ mod tests {
             .sensors()
             .map(|plugin| plugin.descriptor().id.0.as_str())
             .collect::<Vec<_>>();
+        let product_sensors = registry
+            .product_sensors()
+            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .collect::<Vec<_>>();
         let comparators = registry
             .comparators()
             .map(|plugin| plugin.descriptor().id.0.as_str())
@@ -720,6 +725,7 @@ mod tests {
                 "sensor.trajectories",
             ]
         );
+        assert_eq!(product_sensors, vec!["sensor.canonical-correlation"]);
         assert_eq!(
             comparators,
             vec![

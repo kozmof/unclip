@@ -48,13 +48,17 @@ use std::{collections::BTreeMap, sync::Arc};
 use async_trait::async_trait;
 use semver::{Version, VersionReq};
 use thiserror::Error;
-use unclip_domain::{DomainSnapshot, MeasurementFrame};
+use unclip_domain::{
+    DomainSnapshot, MeasurementFrame, ProductDomainSnapshot, ProductMeasurementFrame,
+};
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, EmitMetadata, ExperimentToken, Experimental,
     FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, ModelRef, PluginId,
     SourceRef, Tracked,
 };
-use unclip_measure::{Delta, EmpiricalStructure, Measurement, MeasurementKind, Reading};
+use unclip_measure::{
+    CrossDomainSample, Delta, EmpiricalStructure, Measurement, MeasurementKind, Reading,
+};
 use unclip_observe::{Alignment, Observation, PartialRanking};
 
 pub type Params = serde_json::Value;
@@ -90,6 +94,7 @@ pub enum Capability {
     GraphValue,
     MultiObservation,
     Ordered,
+    ProductDomain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,6 +371,67 @@ pub trait Sensor: Send + Sync {
     ) -> Result<Vec<Calculated<Measurement>>>;
 }
 
+/// Capability-scoped inputs for one product-domain sensor invocation.
+pub struct ProductMeasureCtx<'a> {
+    product: &'a Tracked<ProductDomainSnapshot>,
+    frame: &'a Tracked<ProductMeasurementFrame>,
+    samples: &'a [Tracked<CrossDomainSample>],
+    params: &'a Params,
+    dependencies: DependencyCollector,
+}
+
+impl<'a> ProductMeasureCtx<'a> {
+    pub fn new(
+        product: &'a Tracked<ProductDomainSnapshot>,
+        frame: &'a Tracked<ProductMeasurementFrame>,
+        samples: &'a [Tracked<CrossDomainSample>],
+        params: &'a Params,
+        dependencies: DependencyCollector,
+    ) -> Self {
+        Self {
+            product,
+            frame,
+            samples,
+            params,
+            dependencies,
+        }
+    }
+
+    pub fn product(&self) -> &ProductDomainSnapshot {
+        self.dependencies.read(self.product)
+    }
+
+    pub fn frame(&self) -> &ProductMeasurementFrame {
+        self.dependencies.read(self.frame)
+    }
+
+    pub fn samples(&self) -> &[Tracked<CrossDomainSample>] {
+        self.samples
+    }
+
+    pub fn read<'b>(&self, sample: &'b Tracked<CrossDomainSample>) -> &'b CrossDomainSample {
+        self.dependencies.read(sample)
+    }
+
+    pub fn params(&self) -> &Params {
+        self.params
+    }
+
+    pub fn calculation_token(&self, metadata: EmitMetadata) -> CalculationToken {
+        CalculationToken::from_harness(metadata, self.dependencies.clone())
+    }
+}
+
+/// A calculation sensor whose input retains two domain identities.
+pub trait ProductSensor: Send + Sync {
+    fn descriptor(&self) -> &SensorDescriptor;
+    fn measure(
+        &self,
+        ctx: &ProductMeasureCtx<'_>,
+        token: CalculationToken,
+    ) -> Result<Calculated<Measurement>>;
+}
+
 #[async_trait]
 pub trait Inferrer: Send + Sync {
     fn descriptor(&self) -> &InferrerDescriptor;
@@ -533,6 +599,7 @@ pub mod conformance {
 #[derive(Default)]
 pub struct Registry {
     sensors: BTreeMap<PluginId, Arc<dyn Sensor>>,
+    product_sensors: BTreeMap<PluginId, Arc<dyn ProductSensor>>,
     inferrers: BTreeMap<PluginId, Arc<dyn Inferrer>>,
     comparators: BTreeMap<PluginId, Arc<dyn Comparator>>,
     interpreters: BTreeMap<PluginId, Arc<dyn Interpreter>>,
@@ -543,7 +610,18 @@ pub struct Registry {
 impl Registry {
     pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
+        if self.product_sensors.contains_key(&id) {
+            return Err(PluginError::DuplicatePlugin(id));
+        }
         insert_unique(&mut self.sensors, id, plugin)
+    }
+
+    pub fn register_product_sensor(&mut self, plugin: Arc<dyn ProductSensor>) -> Result<()> {
+        let id = plugin.descriptor().id.clone();
+        if self.sensors.contains_key(&id) {
+            return Err(PluginError::DuplicatePlugin(id));
+        }
+        insert_unique(&mut self.product_sensors, id, plugin)
     }
 
     pub fn register_inferrer(&mut self, plugin: Arc<dyn Inferrer>) -> Result<()> {
@@ -573,6 +651,14 @@ impl Registry {
 
     pub fn sensors(&self) -> impl Iterator<Item = &Arc<dyn Sensor>> {
         self.sensors.values()
+    }
+
+    pub fn product_sensors(&self) -> impl Iterator<Item = &Arc<dyn ProductSensor>> {
+        self.product_sensors.values()
+    }
+
+    pub fn product_sensor(&self, id: &PluginId) -> Option<&Arc<dyn ProductSensor>> {
+        self.product_sensors.get(id)
     }
 
     pub fn inferrers(&self) -> impl Iterator<Item = &Arc<dyn Inferrer>> {
@@ -753,6 +839,37 @@ mod tests {
                 params_schema: "{}",
             },
             applicable,
+        })
+    }
+
+    struct StubProductSensor {
+        descriptor: SensorDescriptor,
+    }
+
+    impl ProductSensor for StubProductSensor {
+        fn descriptor(&self) -> &SensorDescriptor {
+            &self.descriptor
+        }
+
+        fn measure(
+            &self,
+            _ctx: &ProductMeasureCtx<'_>,
+            _token: CalculationToken,
+        ) -> Result<Calculated<Measurement>> {
+            unreachable!("registration fixture is never executed")
+        }
+    }
+
+    fn product_sensor() -> Arc<dyn ProductSensor> {
+        Arc::new(StubProductSensor {
+            descriptor: SensorDescriptor {
+                id: PluginId::new("sensor.stub"),
+                version: Version::new(0, 1, 0),
+                applicability: &[Capability::ProductDomain],
+                evidence: &[],
+                produces: &[MeasurementKind::Structured],
+                params_schema: "{}",
+            },
         })
     }
 
@@ -1009,6 +1126,27 @@ mod tests {
         registry.register_sensor(sensor()).unwrap();
         assert_eq!(
             registry.register_sensor(sensor()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+    }
+
+    #[test]
+    fn registration_rejects_sensor_ids_across_product_contexts() {
+        let mut ordinary_first = Registry::default();
+        ordinary_first.register_sensor(sensor()).unwrap();
+        assert_eq!(
+            ordinary_first
+                .register_product_sensor(product_sensor())
+                .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+
+        let mut product_first = Registry::default();
+        product_first
+            .register_product_sensor(product_sensor())
+            .unwrap();
+        assert_eq!(
+            product_first.register_sensor(sensor()).unwrap_err(),
             PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
         );
     }

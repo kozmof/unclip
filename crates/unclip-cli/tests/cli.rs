@@ -253,6 +253,7 @@ fn level_plugins_does_not_require_a_database() {
     assert!(out.status.success(), "plugins failed: {}", stderr(&out));
     let plugins = stdout(&out);
     assert!(plugins.contains("sensor.coverage"));
+    assert!(plugins.contains("sensor.canonical-correlation"));
     assert!(plugins.contains("compare.scalar-difference"));
     assert!(plugins.contains("compare.kendall"));
     assert!(plugins.contains("compare.rbo"));

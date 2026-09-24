@@ -23,6 +23,13 @@ pub use community::{
     detect_communities, CommunityDetection, InvalidCommunityThreshold, UnassessedPair,
 };
 
+mod canonical_correlation;
+pub use canonical_correlation::{
+    canonical_correlation, CanonicalCorrelationAnalysis, CanonicalCorrelationConfig,
+    CanonicalCorrelationError, CanonicalCorrelationMode, CanonicalCorrelationOutcome,
+    CanonicalCorrelationUndefined, CrossDomainSample,
+};
+
 mod pairwise;
 pub use pairwise::{
     pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,

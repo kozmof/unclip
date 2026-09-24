@@ -31,6 +31,18 @@ pub(crate) fn plugins() -> anyhow::Result<()> {
             descriptor.produces
         );
     }
+    for plugin in registry.product_sensors() {
+        found = true;
+        let descriptor = plugin.descriptor();
+        crate::output::outln!(
+            "{}\tCALCULATED\t{}\t{:?}/{:?}\t{:?}",
+            descriptor.id,
+            descriptor.version,
+            descriptor.applicability,
+            descriptor.evidence,
+            descriptor.produces
+        );
+    }
     for plugin in registry.comparators() {
         found = true;
         let descriptor = plugin.descriptor();
