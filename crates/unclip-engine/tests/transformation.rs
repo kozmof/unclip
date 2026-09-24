@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 use unclip_domain::{
-    CandidateKind, CandidateProposal, DomainId, DomainSnapshot, PropertyValue, Relation,
-    RelationId, Unit, UnitId, UnitKind,
+    CandidateKind, CandidateProposal, DomainId, DomainSnapshot, PropertyValue, Unit, UnitId,
+    UnitKind,
 };
 use unclip_engine::{
     ComparisonPair, CounterfactualEvidence, DeltaProfile, Engine, MeasurementRun, NullEvidence,
@@ -16,7 +16,7 @@ use unclip_epistemic::{
 use unclip_measure::{Delta, MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
 
-fn unit(id: &str) -> Unit {
+fn atomic(id: &str) -> Unit {
     Unit {
         id: UnitId::new(id),
         kind: UnitKind::AtomicMeaning,
@@ -25,30 +25,20 @@ fn unit(id: &str) -> Unit {
     }
 }
 
-fn relation(id: &str, source: &str, target: &str, kind: &str) -> Relation {
-    Relation {
-        id: RelationId::new(id),
-        source: UnitId::new(source),
-        target: UnitId::new(target),
-        kind: kind.into(),
-        properties: BTreeMap::new(),
-    }
-}
-
-fn domain(existing_role: bool) -> DomainSnapshot {
-    let mut units = ["a", "b", "source", "sink"]
+fn domain(existing_transformation: bool) -> DomainSnapshot {
+    let mut units = ["a", "b", "c"]
         .into_iter()
-        .map(|id| (UnitId::new(id), unit(id)))
+        .map(|id| (UnitId::new(id), atomic(id)))
         .collect::<BTreeMap<_, _>>();
-    if existing_role {
+    if existing_transformation {
         units.insert(
-            UnitId::new("existing-role"),
+            UnitId::new("existing-transformation"),
             Unit {
-                id: UnitId::new("existing-role"),
-                kind: UnitKind::SemanticRole,
+                id: UnitId::new("existing-transformation"),
+                kind: UnitKind::Transformation,
                 label: Some("prior interpretation is ignored".into()),
                 properties: BTreeMap::from([(
-                    "role_pattern".into(),
+                    "transformation_pattern".into(),
                     PropertyValue::Structured(proposal().value["pattern"].clone()),
                 )]),
             },
@@ -58,31 +48,25 @@ fn domain(existing_role: bool) -> DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
         units,
-        relations: [
-            relation("in-a", "source", "a", "supports"),
-            relation("in-b", "source", "b", "supports"),
-            relation("out-a", "a", "sink", "enables"),
-            relation("out-b", "b", "sink", "enables"),
-        ]
-        .into_iter()
-        .map(|relation| (relation.id.clone(), relation))
-        .collect(),
+        relations: BTreeMap::new(),
     }
 }
 
 fn proposal() -> CandidateProposal {
     CandidateProposal {
         domain_version_id: serde_json::to_string(&("d", "1")).unwrap(),
-        kind: CandidateKind::SemanticRole,
+        kind: CandidateKind::Transformation,
         value: json!({
             "pattern":{
-                "matching":"exact_relation_kind_signature",
-                "members":["a","b"],
-                "incoming":["supports"],
-                "outgoing":["enables"]
+                "matching":"exact_unit_state_transition",
+                "before":["a","b"],
+                "after":["b","c"]
             },
-            "structures":["structure-1","structure-2"],
-            "measurements":["measurement-1","measurement-2"]
+            "transitions":[
+                {"before":"state-1","after":"state-2"},
+                {"before":"state-3","after":"state-4"}
+            ],
+            "measurements":["change-1","change-2"]
         })
         .as_object()
         .unwrap()
@@ -96,8 +80,8 @@ fn apply(
 ) -> unclip_plugin::Result<Calculated<unclip_engine::CounterfactualSnapshot>> {
     Engine::with_builtins().unwrap().apply_candidate(
         &Tracked::from_recorded(DerivedId::new("baseline"), baseline),
-        &Tracked::from_recorded(DerivedId::new("role-candidate"), candidate),
-        "role-trial",
+        &Tracked::from_recorded(DerivedId::new("transformation-candidate"), candidate),
+        "transformation-trial",
         Timestamp::new("now"),
     )
 }
@@ -109,21 +93,21 @@ fn evaluate_null(
 ) -> unclip_plugin::Result<Calculated<Reading>> {
     let engine = Engine::with_builtins().unwrap();
     let plan = engine.plan(&EngineProfile {
-        null_models: vec![PluginSelection::any("null.existing-role")],
+        null_models: vec![PluginSelection::any("null.existing-transformation")],
         ..Default::default()
     })?;
     let baseline = baseline.map(|value| Tracked::from_recorded(DerivedId::new("baseline"), value));
     let mut results = engine.evaluate_null_models_with_inputs(
         &plan,
-        &Tracked::from_recorded(DerivedId::new("role-candidate"), candidate),
+        &Tracked::from_recorded(DerivedId::new("transformation-candidate"), candidate),
         NullInputs {
             domain: baseline.as_ref(),
             ..Default::default()
         },
         MeasurementRun {
-            id: "role-null",
+            id: "transformation-null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.existing-role"), params)]),
+            params: &BTreeMap::from([(PluginId::new("null.existing-transformation"), params)]),
         },
     )?;
     Ok(results.remove(0))
@@ -134,52 +118,79 @@ fn null_value(result: &Calculated<Reading>) -> &Value {
         value: MeasurementValue::Structured(value),
     } = result.value()
     else {
-        panic!("expected measured semantic-role null")
+        panic!("expected measured transformation null")
     };
     value
 }
 
 #[test]
-fn semantic_role_application_is_anonymous_exact_and_replayable() {
+fn transformation_application_is_anonymous_directional_and_replayable() {
     let result = apply(proposal(), domain(false)).unwrap();
     assert_eq!(result, apply(proposal(), domain(false)).unwrap());
     assert_eq!(
         result.value().added_units,
-        vec![UnitId::new("candidate:role-candidate")]
+        vec![UnitId::new("candidate:transformation-candidate")]
     );
     assert!(result.value().added_relations.is_empty());
     assert!(result.value().property_changes.is_empty());
-    let role = &result.value().domain.units[&UnitId::new("candidate:role-candidate")];
-    assert_eq!(role.kind, UnitKind::SemanticRole);
-    assert_eq!(role.label, None);
+
+    let transformation =
+        &result.value().domain.units[&UnitId::new("candidate:transformation-candidate")];
+    assert_eq!(transformation.kind, UnitKind::Transformation);
+    assert_eq!(transformation.label, None);
     assert_eq!(
-        role.properties["role_pattern"],
+        transformation.properties["transformation_pattern"],
         PropertyValue::Structured(proposal().value["pattern"].clone())
     );
     assert_eq!(
-        role.properties["candidate_evidence"],
+        transformation.properties["before_units"],
+        PropertyValue::Structured(json!(["a", "b"]))
+    );
+    assert_eq!(
+        transformation.properties["after_units"],
+        PropertyValue::Structured(json!(["b", "c"]))
+    );
+    assert_eq!(
+        transformation.properties["causal_claim"],
+        PropertyValue::Boolean(false)
+    );
+    assert_eq!(
+        transformation.properties["candidate_evidence"],
         PropertyValue::Structured(Value::Object(proposal().value))
     );
     assert_eq!(
         result.provenance().inputs,
-        vec![DerivedId::new("baseline"), DerivedId::new("role-candidate")]
+        vec![
+            DerivedId::new("baseline"),
+            DerivedId::new("transformation-candidate")
+        ]
     );
 }
 
 #[test]
-fn exact_role_null_ignores_labels_and_keeps_missing_or_unsupported_explicit() {
+fn exact_transformation_null_preserves_direction_and_ignores_labels() {
     for (existing, count) in [(false, 0), (true, 1)] {
         let result = evaluate_null(proposal(), Some(domain(existing)), json!({})).unwrap();
-        assert_eq!(null_value(&result)["model"], "existing_role_exact_pattern");
+        assert_eq!(
+            null_value(&result)["model"],
+            "existing_transformation_exact_pattern"
+        );
         assert_eq!(null_value(&result)["match_count"], count);
         assert_eq!(null_value(&result)["has_existing_alternative"], existing);
     }
+
+    let mut reversed = proposal();
+    reversed.value["pattern"]["before"] = json!(["b", "c"]);
+    reversed.value["pattern"]["after"] = json!(["a", "b"]);
+    let result = evaluate_null(reversed, Some(domain(true)), json!({})).unwrap();
+    assert_eq!(null_value(&result)["match_count"], 0);
+
     assert_eq!(
         *evaluate_null(proposal(), None, json!({})).unwrap().value(),
         Reading::InsufficientEvidence { have: 0, need: 1 }
     );
     let mut unsupported = proposal();
-    unsupported.kind = CandidateKind::CrossDomainStructure;
+    unsupported.kind = CandidateKind::SemanticRole;
     assert!(matches!(
         evaluate_null(unsupported, Some(domain(false)), json!({}))
             .unwrap()
@@ -189,18 +200,25 @@ fn exact_role_null_ignores_labels_and_keeps_missing_or_unsupported_explicit() {
 }
 
 #[test]
-fn semantic_role_rejects_false_or_malformed_evidence() {
-    let mut wrong_signature = proposal();
-    wrong_signature.value["pattern"]["outgoing"] = json!(["other"]);
-    assert!(apply(wrong_signature, domain(false)).is_err());
+fn transformation_rejects_false_or_malformed_evidence() {
+    let mut unchanged = proposal();
+    unchanged.value["pattern"]["after"] = json!(["a", "b"]);
+    assert!(apply(unchanged, domain(false)).is_err());
 
-    let mut unsorted_members = proposal();
-    unsorted_members.value["pattern"]["members"] = json!(["b", "a"]);
-    assert!(apply(unsorted_members, domain(false)).is_err());
+    let mut missing_unit = proposal();
+    missing_unit.value["pattern"]["after"] = json!(["b", "missing"]);
+    assert!(apply(missing_unit, domain(false)).is_err());
 
     let mut sparse = proposal();
-    sparse.value["structures"] = json!(["structure-1"]);
+    sparse.value["transitions"] = json!([{"before":"state-1","after":"state-2"}]);
     assert!(apply(sparse, domain(false)).is_err());
+
+    let mut unsorted = proposal();
+    unsorted.value["transitions"] = json!([
+        {"before":"state-3","after":"state-4"},
+        {"before":"state-1","after":"state-2"}
+    ]);
+    assert!(apply(unsorted, domain(false)).is_err());
 
     let mut invented = proposal();
     invented
@@ -219,7 +237,7 @@ fn prior() -> Experimental<RevisionAttempt> {
     ] {
         dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
     }
-    let params = json!({"fixture":"semantic-role-prior"});
+    let params = json!({"fixture":"transformation-prior"});
     ExperimentToken::from_harness(
         EmitMetadata {
             id: DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
@@ -252,14 +270,14 @@ fn prior() -> Experimental<RevisionAttempt> {
 
 fn comparison() -> DeltaProfile {
     let pair = ComparisonPair {
-        before: DerivedId::new("role-before"),
-        after: DerivedId::new("role-after"),
+        before: DerivedId::new("transformation-before"),
+        after: DerivedId::new("transformation-after"),
     };
     DeltaProfile {
         pairs: vec![pair.clone()],
         deltas: vec![ProfileDelta {
             pair,
-            id: DerivedId::new("role-delta"),
+            id: DerivedId::new("transformation-delta"),
             delta: Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
@@ -271,7 +289,7 @@ fn comparison() -> DeltaProfile {
 }
 
 fn structural_fixture(
-    include_role_null: bool,
+    include_transformation_null: bool,
 ) -> (
     Engine,
     Tracked<CandidateProposal>,
@@ -279,12 +297,12 @@ fn structural_fixture(
     Experimental<CounterfactualEvidence>,
 ) {
     let engine = Engine::with_builtins().unwrap();
-    let candidate = Tracked::from_recorded(DerivedId::new("role-candidate"), proposal());
+    let candidate = Tracked::from_recorded(DerivedId::new("transformation-candidate"), proposal());
     let counterfactual = engine
         .apply_candidate(
             &Tracked::from_recorded(DerivedId::new("baseline"), domain(false)),
             &candidate,
-            "role-trial",
+            "transformation-trial",
             Timestamp::new("now"),
         )
         .unwrap();
@@ -295,20 +313,23 @@ fn structural_fixture(
         "baseline",
         "frame",
         "split",
-        "role-before",
-        "role-after",
-        "role-comparison",
-        "role-delta",
+        "transformation-before",
+        "transformation-after",
+        "transformation-comparison",
+        "transformation-delta",
     ] {
         dependencies.read(&Tracked::from_recorded(DerivedId::new(id), ()));
     }
-    if include_role_null {
-        dependencies.read(&Tracked::from_recorded(DerivedId::new("role-null"), ()));
+    if include_transformation_null {
+        dependencies.read(&Tracked::from_recorded(
+            DerivedId::new("transformation-null"),
+            (),
+        ));
     }
-    let params = json!({"fixture":"semantic-role"});
+    let params = json!({"fixture":"transformation"});
     let experiment = ExperimentToken::from_harness(
         EmitMetadata {
-            id: DerivedId::new("role-experiment"),
+            id: DerivedId::new("transformation-experiment"),
             producer: PluginId::new("experiment.counterfactual"),
             algorithm: "held_out_counterfactual_comparison".into(),
             version: "0.5.0".parse().unwrap(),
@@ -328,17 +349,17 @@ fn structural_fixture(
         split: DerivedId::new("split"),
         counterfactual: counterfactual.id().clone(),
         candidate: candidate.id().clone(),
-        before: vec![DerivedId::new("role-before")],
-        after: vec![DerivedId::new("role-after")],
-        comparison: DerivedId::new("role-comparison"),
+        before: vec![DerivedId::new("transformation-before")],
+        after: vec![DerivedId::new("transformation-after")],
+        comparison: DerivedId::new("transformation-comparison"),
         delta_profile: comparison(),
-        null_results: include_role_null
+        null_results: include_transformation_null
             .then(|| NullEvidence {
-                id: DerivedId::new("role-null"),
-                model: PluginId::new("null.existing-role"),
+                id: DerivedId::new("transformation-null"),
+                model: PluginId::new("null.existing-transformation"),
                 reading: Reading::Value {
                     value: MeasurementValue::Structured(json!({
-                        "model":"existing_role_exact_pattern",
+                        "model":"existing_transformation_exact_pattern",
                         "match_count":0,
                         "has_existing_alternative":false
                     })),
@@ -356,7 +377,7 @@ fn structural_fixture(
 }
 
 #[test]
-fn semantic_role_records_only_with_exact_structural_null_evidence() {
+fn transformation_records_only_with_exact_structural_null_evidence() {
     let prior = prior();
     let (engine, candidate, counterfactual, experiment) = structural_fixture(true);
     let attempt = engine
@@ -366,8 +387,8 @@ fn semantic_role_records_only_with_exact_structural_null_evidence() {
             &counterfactual,
             &experiment,
             RevisionTestOutcome::Sufficient,
-            "the exact role signature explains held-out evidence after coupling failed",
-            "role-ladder",
+            "the repeated state transition explains held-out evidence after coupling failed",
+            "transformation-ladder",
             Timestamp::new("now"),
         )
         .unwrap();
@@ -397,7 +418,7 @@ fn semantic_role_records_only_with_exact_structural_null_evidence() {
             &experiment,
             RevisionTestOutcome::Insufficient,
             "reviewed",
-            "role-ladder",
+            "transformation-ladder",
             Timestamp::new("now"),
         )
         .is_err());

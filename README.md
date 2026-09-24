@@ -264,8 +264,8 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.community`, and `generate.latent-axis`;
 null models are `null.random-cooccurrence`, `null.ranking-constraints`,
 `null.existing-unit`, `null.existing-relation`, `null.weight-change`,
-`null.contextual-cooccurrence`, `null.coupling-zero`, `null.existing-motif`, and
-`null.existing-role`.
+`null.contextual-cooccurrence`, `null.coupling-zero`, `null.existing-motif`,
+`null.existing-role`, and `null.existing-transformation`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -400,6 +400,14 @@ It reports all matching unit identities and retains the candidate and baseline d
 as inputs. Labels do not participate in matching. An empty result records that no
 exact role pattern exists; it does not establish semantic novelty or explanatory
 adequacy, and the diagnostic makes no acceptance decision.
+
+`null.existing-transformation` checks a validated transformation proposal against
+existing `Transformation` units with the exact same directed unit-state pattern.
+It reports all matching unit identities and retains the candidate and baseline domain
+as inputs. Labels and causal equivalence do not participate in matching. An empty
+result records that no exact transformation pattern exists; it does not establish
+semantic novelty or explanatory adequacy, and the diagnostic makes no acceptance
+decision.
 
 `null.contextual-cooccurrence` repeats the fixed-margin endpoint co-presence null
 within explicit metadata groups. For example:
@@ -605,17 +613,22 @@ units share the same exact incoming and outgoing relation-kind signature. Ordere
 calculated structures and measurements support the proposal, and the resulting unit
 retains the member identities, exact signature, and complete candidate evidence.
 
+Transformation proposals apply as anonymous, explicitly non-causal units. Their
+patterns identify distinct exact before and after sets of existing units, supported
+by at least two ordered unique directed state pairs and explicit measurements. The
+result retains the direction, source evidence, and full candidate pattern.
+
 The caller supplies a unique run ID. Application covers the current built-in
-generator families, semantic-role proposals, and explicit numeric weight
-revisions. Transformation and cross-domain proposals remain unsupported. Frame extension,
-alignment or inference integration, and held-out measurement remain pending;
+generator families, semantic-role and transformation proposals, and explicit
+numeric weight revisions. Cross-domain proposals remain unsupported. Frame
+extension, alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 
 `Engine::record_delta_w_test`, `Engine::record_delta_e_test`,
 `Engine::record_dynamic_coupling_test`, `Engine::record_structural_test`, and
 `Engine::record_delta_v_test` implement the ordered minimal-revision path through
-evidence-backed graph-motif and semantic-role structures, followed by an atomic
-membership revision. Each larger step
+evidence-backed graph-motif, semantic-role, and transformation structures,
+followed by an atomic membership revision. Each larger step
 requires the immediately preceding step to be insufficient for the same baseline, frame, and observation split. Weight,
 relation, and coupling attempts validate their specific counterfactual shape and
 require measured `null.weight-change`, `null.existing-relation`, and
@@ -624,15 +637,16 @@ anonymous structural unit, retain their exact pattern and calculated candidate
 evidence, and require measured `null.existing-motif` evidence. Semantic-role attempts add one
 anonymous role unit, validate an exact relation-kind signature over existing members,
 retain their calculated structures and measurements, and require measured
-`null.existing-role` evidence. Dynamic couplings
-remain anonymous and explicitly non-causal. A sufficient earlier attempt stops the ladder. The caller records each verdict
-and reason; explicit constraints must all be satisfied
+`null.existing-role` evidence. Transformation attempts add one anonymous,
+non-causal unit, retain exact before/after unit sets and repeated directed state-pair
+evidence, and require measured `null.existing-transformation` evidence. Dynamic
+couplings remain anonymous and explicitly non-causal. A sufficient earlier attempt
+stops the ladder. The caller records each verdict and reason; explicit constraints must all be satisfied
 for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
 candidate, counterfactual, experiment, and prior attempt without scalarizing
 evidence. Delta V accepts a complete persistent-residual candidate supported by
 at least two ordered distinct observations, adds one anonymous atomic unit, and
-requires measured `null.existing-unit` evidence. Transformation candidates remain
-unavailable until they have explicit calculated evidence and application schemas.
+requires measured `null.existing-unit` evidence.
 `Engine::apply_delta_v_candidate` checks that the matching structural attempt was
 insufficient before constructing the atomic counterfactual. A sufficient structural
 revision therefore stops the ladder before a new unit exists, and

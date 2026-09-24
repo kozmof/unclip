@@ -349,7 +349,7 @@ fn structural_step_requires_motif_null_constraints_and_supported_kind() {
         .is_ok());
 
     let mut unsupported = proposal();
-    unsupported.kind = CandidateKind::Transformation;
+    unsupported.kind = CandidateKind::CrossDomainStructure;
     assert!(engine
         .record_structural_test(
             &prior,

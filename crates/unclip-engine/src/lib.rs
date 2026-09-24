@@ -64,6 +64,8 @@ mod ranking_comparison;
 mod revision;
 mod role_application;
 mod role_null;
+mod transformation_application;
+mod transformation_null;
 pub use distribution_comparison::{
     DistributionComparison, DistributionNormalization, JensenShannonComparator,
 };
@@ -86,6 +88,7 @@ pub use motif_null::ExistingMotifNull;
 pub use null_models::{NullInputs, RandomCooccurrenceNull};
 pub use ranking_null::RankingConstraintNull;
 pub use role_null::ExistingRoleNull;
+pub use transformation_null::ExistingTransformationNull;
 
 mod empirical;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
@@ -137,6 +140,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(CouplingZeroNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingMotifNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingRoleNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(ExistingTransformationNull::default()))?;
     Ok(registry)
 }
 

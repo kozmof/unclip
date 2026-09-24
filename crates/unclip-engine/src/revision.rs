@@ -659,10 +659,7 @@ impl crate::Engine {
         )
     }
 
-    /// Record a motif or semantic-role structural test after coupling was insufficient.
-    ///
-    /// Transformation candidates remain unavailable until they have explicit
-    /// calculated evidence and an application schema.
+    /// Record a motif, semantic-role, or transformation test after coupling was insufficient.
     #[allow(clippy::too_many_arguments)]
     pub fn record_structural_test(
         &self,
@@ -752,9 +749,33 @@ impl crate::Engine {
                     ));
                 }
             }
+            CandidateKind::Transformation => {
+                crate::transformation_application::validate(proposal, &snapshot.domain)?;
+                if unit.kind != unclip_domain::UnitKind::Transformation
+                    || unit.label.is_some()
+                    || unit.properties.get("transformation_pattern")
+                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    || unit.properties.get("causal_claim")
+                        != Some(&unclip_domain::PropertyValue::Boolean(false))
+                    || !common_evidence
+                {
+                    return Err(invalid(
+                        "transformation must remain anonymous and non-causal and retain its exact pattern and candidate evidence",
+                    ));
+                }
+                if !has_measured_null(
+                    experiment.value(),
+                    "null.existing-transformation",
+                    "existing_transformation_exact_pattern",
+                ) {
+                    return Err(invalid(
+                        "transformation revision requires a measured null.existing-transformation result",
+                    ));
+                }
+            }
             _ => {
                 return Err(invalid(
-                    "structural revision supports calculated graph-motif or semantic-role evidence",
+                    "structural revision supports calculated graph-motif, semantic-role, or transformation evidence",
                 ));
             }
         }
