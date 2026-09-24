@@ -44,6 +44,7 @@ pub use held_out::{
     CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
     HeldOutInputs,
 };
+mod product_domain;
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,

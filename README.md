@@ -652,6 +652,15 @@ insufficient before constructing the atomic counterfactual. A sufficient structu
 revision therefore stops the ladder before a new unit exists, and
 `record_delta_v_test` rejects counterfactuals created outside that ordered gate.
 
+`Engine::materialize_product_domain` creates a calculated `ProductDomainSnapshot`
+from two tracked, immutable domain snapshots and tracked interaction evidence. The
+product type is separate from `DomainSnapshot`: it retains each input domain ID and
+version and contains no copied units or relations. It materializes only explicit
+left/right unit pairs backed by ordered observation IDs or requirement IDs; an empty
+product remains empty rather than expanding to a Cartesian union. Interaction order
+is canonical, every evidence record appears in provenance, and the product has its
+own ID and version. Product measurement frames remain pending.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

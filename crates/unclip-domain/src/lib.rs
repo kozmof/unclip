@@ -3,7 +3,12 @@
 #![forbid(unsafe_code)]
 
 mod candidate;
+mod product;
 pub use candidate::{CandidateKind, CandidateProposal};
+pub use product::{
+    ProductDomainId, ProductDomainInput, ProductDomainSnapshot, ProductDomainVersion,
+    ProductInteraction,
+};
 
 use std::collections::BTreeMap;
 
