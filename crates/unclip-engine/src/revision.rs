@@ -659,10 +659,10 @@ impl crate::Engine {
         )
     }
 
-    /// Record a graph-motif structural test after dynamic coupling was insufficient.
+    /// Record a motif or semantic-role structural test after coupling was insufficient.
     ///
-    /// Semantic-role and transformation candidates remain unavailable until they
-    /// have explicit calculated evidence and application schemas.
+    /// Transformation candidates remain unavailable until they have explicit
+    /// calculated evidence and an application schema.
     #[allow(clippy::too_many_arguments)]
     pub fn record_structural_test(
         &self,
@@ -686,50 +686,77 @@ impl crate::Engine {
             run_id,
         )?;
         validate_prior(prior, RevisionStep::DynamicCoupling, experiment)?;
-        if proposal.kind != CandidateKind::GraphMotif {
-            return Err(invalid(
-                "structural revision currently supports only calculated graph-motif evidence",
-            ));
-        }
         let snapshot = counterfactual.value();
         if snapshot.added_units.len() != 1
             || !snapshot.added_relations.is_empty()
             || !snapshot.property_changes.is_empty()
         {
             return Err(invalid(
-                "graph-motif revision must add exactly one unit without changing relations or properties",
+                "structural revision must add exactly one unit without changing relations or properties",
             ));
         }
         let unit = snapshot
             .domain
             .units
             .get(&snapshot.added_units[0])
-            .ok_or_else(|| invalid("graph-motif unit is absent from the counterfactual"))?;
+            .ok_or_else(|| invalid("structural unit is absent from the counterfactual"))?;
         let pattern = proposal
             .value
             .get("pattern")
-            .ok_or_else(|| invalid("graph-motif candidate requires a pattern"))?;
-        if unit.kind != unclip_domain::UnitKind::GraphMotif
-            || unit.label.is_some()
-            || unit.properties.get("graph_pattern")
-                != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
-            || unit.properties.get("candidate_evidence")
-                != Some(&unclip_domain::PropertyValue::Structured(
-                    serde_json::Value::Object(proposal.value.clone()),
-                ))
-        {
-            return Err(invalid(
-                "graph motif must remain anonymous and retain its exact pattern and candidate evidence",
+            .ok_or_else(|| invalid("structural candidate requires a pattern"))?;
+        let common_evidence = unit.properties.get("candidate_evidence")
+            == Some(&unclip_domain::PropertyValue::Structured(
+                serde_json::Value::Object(proposal.value.clone()),
             ));
-        }
-        if !has_measured_null(
-            experiment.value(),
-            "null.existing-motif",
-            "existing_motif_exact_pattern",
-        ) {
-            return Err(invalid(
-                "graph-motif revision requires a measured null.existing-motif result",
-            ));
+        match proposal.kind {
+            CandidateKind::GraphMotif => {
+                if unit.kind != unclip_domain::UnitKind::GraphMotif
+                    || unit.label.is_some()
+                    || unit.properties.get("graph_pattern")
+                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    || !common_evidence
+                {
+                    return Err(invalid(
+                        "graph motif must remain anonymous and retain its exact pattern and candidate evidence",
+                    ));
+                }
+                if !has_measured_null(
+                    experiment.value(),
+                    "null.existing-motif",
+                    "existing_motif_exact_pattern",
+                ) {
+                    return Err(invalid(
+                        "graph-motif revision requires a measured null.existing-motif result",
+                    ));
+                }
+            }
+            CandidateKind::SemanticRole => {
+                crate::role_application::validate(proposal, &snapshot.domain)?;
+                if unit.kind != unclip_domain::UnitKind::SemanticRole
+                    || unit.label.is_some()
+                    || unit.properties.get("role_pattern")
+                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    || !common_evidence
+                {
+                    return Err(invalid(
+                        "semantic role must remain anonymous and retain its exact pattern and candidate evidence",
+                    ));
+                }
+                if !has_measured_null(
+                    experiment.value(),
+                    "null.existing-role",
+                    "existing_role_exact_pattern",
+                ) {
+                    return Err(invalid(
+                        "semantic-role revision requires a measured null.existing-role result",
+                    ));
+                }
+            }
+            _ => {
+                return Err(invalid(
+                    "structural revision supports calculated graph-motif or semantic-role evidence",
+                ));
+            }
         }
         emit_attempt(
             candidate,

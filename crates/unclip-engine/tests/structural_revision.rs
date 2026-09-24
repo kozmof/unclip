@@ -349,7 +349,7 @@ fn structural_step_requires_motif_null_constraints_and_supported_kind() {
         .is_ok());
 
     let mut unsupported = proposal();
-    unsupported.kind = CandidateKind::SemanticRole;
+    unsupported.kind = CandidateKind::Transformation;
     assert!(engine
         .record_structural_test(
             &prior,

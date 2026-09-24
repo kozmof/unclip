@@ -62,6 +62,8 @@ pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
 pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
 mod ranking_comparison;
 mod revision;
+mod role_application;
+mod role_null;
 pub use distribution_comparison::{
     DistributionComparison, DistributionNormalization, JensenShannonComparator,
 };
@@ -83,6 +85,7 @@ pub use discovery::{CandidateInputs, PersistentResidualGenerator};
 pub use motif_null::ExistingMotifNull;
 pub use null_models::{NullInputs, RandomCooccurrenceNull};
 pub use ranking_null::RankingConstraintNull;
+pub use role_null::ExistingRoleNull;
 
 mod empirical;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
@@ -133,6 +136,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_null_model(std::sync::Arc::new(ContextualCooccurrenceNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(CouplingZeroNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingMotifNull::default()))?;
+    registry.register_null_model(std::sync::Arc::new(ExistingRoleNull::default()))?;
     Ok(registry)
 }
 

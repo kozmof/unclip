@@ -264,7 +264,8 @@ lists to empty. Built-in generators are `generate.persistent-residual`,
 `generate.community`, and `generate.latent-axis`;
 null models are `null.random-cooccurrence`, `null.ranking-constraints`,
 `null.existing-unit`, `null.existing-relation`, `null.weight-change`,
-`null.contextual-cooccurrence`, `null.coupling-zero`, and `null.existing-motif`.
+`null.contextual-cooccurrence`, `null.coupling-zero`, `null.existing-motif`, and
+`null.existing-role`.
 
 The engine library runs candidate generators through `Engine::generate_candidates`
 with tracked residual measurements and source observations from one baseline
@@ -391,6 +392,13 @@ existing `GraphMotif` units with the exact same `graph_pattern`. It reports all
 matching unit identities and retains the candidate and baseline domain as inputs.
 Labels do not participate in matching. An empty result is an explicit absence of an
 exact stored pattern; it does not establish semantic novelty or explanatory
+adequacy, and the diagnostic makes no acceptance decision.
+
+`null.existing-role` checks a validated semantic-role proposal against existing
+`SemanticRole` units with the exact same relation-kind signature and member pattern.
+It reports all matching unit identities and retains the candidate and baseline domain
+as inputs. Labels do not participate in matching. An empty result records that no
+exact role pattern exists; it does not establish semantic novelty or explanatory
 adequacy, and the diagnostic makes no acceptance decision.
 
 `null.contextual-cooccurrence` repeats the fixed-margin endpoint co-presence null
@@ -592,30 +600,39 @@ distinct-observation support, example unit/edge identities, uncertainty, and
 measurement references are validated. Complete pattern and evidence properties
 are retained; observed nodes and edges are not inserted into the baseline.
 
+Semantic-role proposals apply as anonymous role units when at least two existing
+units share the same exact incoming and outgoing relation-kind signature. Ordered
+calculated structures and measurements support the proposal, and the resulting unit
+retains the member identities, exact signature, and complete candidate evidence.
+
 The caller supplies a unique run ID. Application covers the current built-in
-generator families and explicit numeric weight revisions. Semantic-role,
-transformation, and cross-domain proposals remain unsupported. Frame extension,
+generator families, semantic-role proposals, and explicit numeric weight
+revisions. Transformation and cross-domain proposals remain unsupported. Frame extension,
 alignment or inference integration, and held-out measurement remain pending;
 creating this snapshot alone does not establish that a candidate explains data.
 
 `Engine::record_delta_w_test`, `Engine::record_delta_e_test`,
 `Engine::record_dynamic_coupling_test`, `Engine::record_structural_test`, and
 `Engine::record_delta_v_test` implement the ordered minimal-revision path through
-an evidence-backed graph motif and an atomic membership revision. Each larger step
+evidence-backed graph-motif and semantic-role structures, followed by an atomic
+membership revision. Each larger step
 requires the immediately preceding step to be insufficient for the same baseline, frame, and observation split. Weight,
 relation, and coupling attempts validate their specific counterfactual shape and
 require measured `null.weight-change`, `null.existing-relation`, and
 `null.coupling-zero` evidence respectively. Graph-motif attempts add one
 anonymous structural unit, retain their exact pattern and calculated candidate
-evidence, and require measured `null.existing-motif` evidence. Dynamic couplings
+evidence, and require measured `null.existing-motif` evidence. Semantic-role attempts add one
+anonymous role unit, validate an exact relation-kind signature over existing members,
+retain their calculated structures and measurements, and require measured
+`null.existing-role` evidence. Dynamic couplings
 remain anonymous and explicitly non-causal. A sufficient earlier attempt stops the ladder. The caller records each verdict
 and reason; explicit constraints must all be satisfied
 for a sufficient verdict. Each `RevisionAttempt` is experimental and tracks its
 candidate, counterfactual, experiment, and prior attempt without scalarizing
 evidence. Delta V accepts a complete persistent-residual candidate supported by
 at least two ordered distinct observations, adds one anonymous atomic unit, and
-requires measured `null.existing-unit` evidence. Semantic-role and transformation candidates remain unavailable until
-they have explicit calculated evidence and application schemas.
+requires measured `null.existing-unit` evidence. Transformation candidates remain
+unavailable until they have explicit calculated evidence and application schemas.
 `Engine::apply_delta_v_candidate` checks that the matching structural attempt was
 insufficient before constructing the atomic counterfactual. A sufficient structural
 revision therefore stops the ladder before a new unit exists, and
