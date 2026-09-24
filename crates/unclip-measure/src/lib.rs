@@ -30,6 +30,14 @@ pub use canonical_correlation::{
     CanonicalCorrelationUndefined, CrossDomainSample,
 };
 
+mod cross_domain_mutual_information;
+pub use cross_domain_mutual_information::{
+    cross_domain_mutual_information, CrossDomainAxisMutualInformation,
+    CrossDomainMutualInformation, CrossDomainMutualInformationConfig,
+    CrossDomainMutualInformationError, CrossDomainMutualInformationOutcome,
+    UnassessedCrossDomainAxis,
+};
+
 mod pairwise;
 pub use pairwise::{
     pairwise_matrix, MatrixCell, PairwiseMatrix, PairwiseMatrixError, PairwiseMetric,

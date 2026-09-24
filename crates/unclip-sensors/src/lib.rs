@@ -13,6 +13,7 @@ use unclip_plugin::{Registry, Result};
 mod canonical_correlation;
 mod conditioned;
 mod coverage;
+mod cross_domain_mutual_information;
 mod kendall;
 mod lehmer;
 mod multi_observation;
@@ -25,6 +26,7 @@ mod temporal;
 pub use canonical_correlation::CanonicalCorrelationSensor;
 pub use conditioned::{SelectedPairSensor, SelectedPairStatistic};
 pub use coverage::CoverageSensor;
+pub use cross_domain_mutual_information::CrossDomainMutualInformationSensor;
 pub use kendall::KendallSensor;
 pub use lehmer::LehmerSensor;
 pub use multi_observation::MultiObservationSensor;
@@ -36,6 +38,7 @@ pub use temporal::{TemporalSensor, TemporalStatistic};
 /// Register every built-in calculation sensor.
 pub fn register_all(registry: &mut Registry) -> Result<()> {
     registry.register_product_sensor(Arc::new(CanonicalCorrelationSensor::default()))?;
+    registry.register_product_sensor(Arc::new(CrossDomainMutualInformationSensor::default()))?;
     registry.register_sensor(Arc::new(CoverageSensor::default()))?;
     registry.register_sensor(Arc::new(ResidualSensor::default()))?;
     registry.register_sensor(Arc::new(PermutationSensor::default()))?;
@@ -91,6 +94,6 @@ mod tests {
         let mut registry = Registry::default();
         register_all(&mut registry).unwrap();
         assert_eq!(registry.sensors().count(), 17);
-        assert_eq!(registry.product_sensors().count(), 1);
+        assert_eq!(registry.product_sensors().count(), 2);
     }
 }

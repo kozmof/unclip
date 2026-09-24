@@ -725,7 +725,14 @@ mod tests {
                 "sensor.trajectories",
             ]
         );
-        assert_eq!(product_sensors, vec!["sensor.canonical-correlation"]);
+        assert_eq!(
+            product_sensors,
+            vec![
+                "sensor.canonical-correlation",
+                "sensor.cross-domain-mutual-information"
+            ]
+        );
+
         assert_eq!(
             comparators,
             vec![

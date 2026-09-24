@@ -681,6 +681,16 @@ value with no positive modes, too few complete rows is `InsufficientEvidence`, a
 constant side is `NotApplicable`. Provenance records the product, frame, both source
 domain versions, solver parameters, and every supplied sample dependency.
 
+`Engine::measure_cross_domain_mutual_information` executes the registered
+`sensor.cross-domain-mutual-information` over each product-frame interaction axis.
+Its plug-in estimator uses an explicit bounded equal-width bin count, reports bits,
+and stores the exact bin boundaries used for both sides. Axes use pairwise-complete
+samples, so a sparse interaction remains unassessed without discarding measured
+results on other axes. Constant inputs and empirical independence retain measured
+zero, while an entirely sparse profile is `InsufficientEvidence`. The structured
+result keeps per-axis sample and exclusion details; provenance pins the discretization,
+product/frame versions, source domains, and every supplied sample.
+
 Observation and measurement CLI commands reject comparison and discovery selections;
 `unclip level discover` and `unclip level experiment` provide the dedicated workflows.
 

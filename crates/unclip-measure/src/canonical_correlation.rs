@@ -163,6 +163,14 @@ pub fn canonical_correlation(
     validate_units("left", left_units)?;
     validate_units("right", right_units)?;
 
+    if left_units.is_empty() || right_units.is_empty() {
+        return Ok(CanonicalCorrelationOutcome::Undefined {
+            sample_count: 0,
+            excluded_observations: vec![],
+            reason: CanonicalCorrelationUndefined::NoVariables,
+        });
+    }
+
     let left_set = left_units.iter().collect::<BTreeSet<_>>();
     let right_set = right_units.iter().collect::<BTreeSet<_>>();
     let mut ordered = samples.iter().collect::<Vec<_>>();
@@ -224,13 +232,6 @@ pub fn canonical_correlation(
     }
 
     let sample_count = retained.len();
-    if left_units.is_empty() || right_units.is_empty() {
-        return Ok(CanonicalCorrelationOutcome::Undefined {
-            sample_count,
-            excluded_observations,
-            reason: CanonicalCorrelationUndefined::NoVariables,
-        });
-    }
     if sample_count < config.minimum_samples.get() {
         return Ok(CanonicalCorrelationOutcome::InsufficientEvidence {
             have: sample_count,
