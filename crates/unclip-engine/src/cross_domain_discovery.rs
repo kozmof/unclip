@@ -273,3 +273,77 @@ impl CandidateGenerator for CrossDomainCandidateGenerator {
         Ok(candidates)
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CrossDomainPattern {
+    matching: String,
+    product_measurement: DerivedId,
+    comparator: PluginId,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CrossDomainEvidence {
+    structure: DerivedId,
+    comparison_profile: DerivedId,
+    binding: ProductMeasurementBinding,
+    expectation_measurement: DerivedId,
+    delta: DerivedId,
+    expected: Reading,
+    observed: Reading,
+    typed_delta: unclip_measure::Delta,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CrossDomainProposalValue {
+    pattern: CrossDomainPattern,
+    evidence: CrossDomainEvidence,
+}
+
+pub(super) fn validate_candidate(
+    proposal: &CandidateProposal,
+) -> Result<ProductMeasurementBinding> {
+    if proposal.kind != CandidateKind::CrossDomainStructure {
+        return Err(invalid(
+            "cross-domain application requires a cross-domain structure candidate",
+        ));
+    }
+    let value: CrossDomainProposalValue =
+        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
+            .map_err(|error| invalid(error.to_string()))?;
+    if value.pattern.matching != "typed_product_deviation_from_independence"
+        || value.evidence.structure.0.trim().is_empty()
+        || value.pattern.product_measurement.0.trim().is_empty()
+        || value.pattern.comparator.0.trim().is_empty()
+    {
+        return Err(invalid(
+            "cross-domain application requires anonymous typed deviation evidence",
+        ));
+    }
+    let comparison = IndependenceComparisonEntry {
+        product_measurement: value.pattern.product_measurement,
+        expectation_measurement: value.evidence.expectation_measurement,
+        comparator: value.pattern.comparator,
+        delta_id: value.evidence.delta,
+        expected: value.evidence.expected,
+        observed: value.evidence.observed,
+        delta: value.evidence.typed_delta,
+    };
+    validate_evidence(&CrossDomainDeviationEvidence {
+        comparison_profile: value.evidence.comparison_profile,
+        binding: value.evidence.binding.clone(),
+        comparison,
+    })?;
+    let left =
+        domain_key(&value.evidence.binding.left).map_err(|error| invalid(error.to_string()))?;
+    let right =
+        domain_key(&value.evidence.binding.right).map_err(|error| invalid(error.to_string()))?;
+    if proposal.domain_version_id != left && proposal.domain_version_id != right {
+        return Err(invalid(
+            "cross-domain candidate target must be one of the product source-domain versions",
+        ));
+    }
+    Ok(value.evidence.binding)
+}

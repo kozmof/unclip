@@ -204,6 +204,46 @@ impl super::Engine {
         let mut added_units = Vec::new();
         let mut added_relations = Vec::new();
         let mut property_changes = Vec::new();
+        if proposal.kind == CandidateKind::CrossDomainStructure {
+            let product_binding = super::cross_domain_discovery::validate_candidate(proposal)?;
+            let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+            if domain.units.contains_key(&unit_id) {
+                return Err(invalid(
+                    "candidate unit identity already exists in the baseline",
+                ));
+            }
+            temporary.units.insert(
+                unit_id.clone(),
+                Unit {
+                    id: unit_id.clone(),
+                    kind: UnitKind::CrossDomainStructure,
+                    label: None,
+                    properties: BTreeMap::from([
+                        (
+                            "candidate_id".into(),
+                            PropertyValue::Text(candidate.id().0.clone()),
+                        ),
+                        (
+                            "candidate_pattern".into(),
+                            PropertyValue::Structured(pattern_value.clone()),
+                        ),
+                        (
+                            "candidate_evidence".into(),
+                            PropertyValue::Structured(serde_json::Value::Object(
+                                proposal.value.clone(),
+                            )),
+                        ),
+                        (
+                            "product_binding".into(),
+                            PropertyValue::Structured(
+                                serde_json::to_value(product_binding).map_err(invalid)?,
+                            ),
+                        ),
+                    ]),
+                },
+            );
+            added_units.push(unit_id);
+        }
         match proposal.kind {
             CandidateKind::AtomicMeaning => {
                 let pattern: AtomicPattern = serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
@@ -368,6 +408,7 @@ impl super::Engine {
                 properties.insert(pattern.property.clone(), proposed.clone());
                 property_changes.push(PropertyChange { target: pattern.target, property: pattern.property, before: previous, after: proposed });
             }
+            _ if proposal.kind == CandidateKind::CrossDomainStructure => {}
             _ => return Err(invalid("candidate application supports atomic, recurring-motif, semantic-role, transformation, empirical-community, latent-axis, pairwise or temporal coupling, explicitly bound relation, and numeric-property weight proposals only")),
         }
         let mut params = serde_json::json!({"baseline_domain_version_id":baseline_key,"candidate":candidate.id(),"temporary_version":version,"added_units":added_units,"added_relations":added_relations,"relation_bindings":bindings,"property_changes":property_changes,"application_kind":proposal.kind});

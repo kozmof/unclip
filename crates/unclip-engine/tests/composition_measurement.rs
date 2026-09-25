@@ -6,15 +6,20 @@ use unclip_domain::{
     ProductFrameVersion, ProductInteraction, ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
-    CandidateInputs, CompositionMeasurementInputs, Engine, IndependenceDefinition,
-    MeasurementInputs, MeasurementRun,
+    CandidateInputs, CompositionMeasurementInputs, CounterfactualMeasurementInputs, Engine,
+    ExperimentConstraints, HeldOutInputs, IndependenceDefinition, MeasurementInputs,
+    MeasurementRun,
 };
-use unclip_epistemic::{Calculated, DerivedId, DomainVersion, FrameVersion, Timestamp, Tracked};
+use unclip_epistemic::{
+    Calculated, DerivedId, DomainVersion, FrameVersion, Operation, SourceRef, Timestamp, Tracked,
+};
 use unclip_measure::{
     CrossDomainMutualInformationConfig, CrossDomainSample, ExpectedIndependentBehavior,
     Measurement, MeasurementKind, MeasurementValue, Reading,
 };
-use unclip_observe::ObservationId;
+use unclip_observe::{
+    Alignment, AlignmentCandidate, Observation, ObservationId, ObservedUnit, ObservedUnitId,
+};
 use unclip_plugin::{EngineProfile, PluginSelection};
 
 fn domain(id: &str, version: &str, unit: &str) -> DomainSnapshot {
@@ -912,4 +917,207 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
         .registry()
         .candidate_generators()
         .any(|generator| generator.descriptor().id.0 == "generate.cross-domain-structure"));
+}
+
+#[test]
+fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
+    let fixture = fixture("cross-domain-pipeline");
+    let composition = compose(&fixture, "cross-domain-pipeline-composition").unwrap();
+    let comparison = compare_for_candidates(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Structured {
+            value: serde_json::json!({"status":"independent","rule":"pipeline-fixture"}),
+        },
+        "cross-domain-pipeline",
+    );
+    let structures = fixture
+        .engine
+        .derive_cross_domain_deviations(
+            &comparison.profile,
+            "cross-domain-pipeline-derive",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap();
+    let tracked_structures = structures.iter().map(Tracked::from).collect::<Vec<_>>();
+    let discovery_plan = fixture
+        .engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.cross-domain-structure")],
+            ..EngineProfile::default()
+        })
+        .unwrap();
+    let target = serde_json::to_string(&(
+        &composition.value().product.binding.left.domain.0,
+        &composition.value().product.binding.left.version.0,
+    ))
+    .unwrap();
+    let candidates = fixture
+        .engine
+        .generate_candidates(
+            &discovery_plan,
+            CandidateInputs {
+                domain_version_id: &target,
+                measurements: &[],
+                observations: &[],
+                structures: &tracked_structures,
+            },
+            MeasurementRun {
+                id: "cross-domain-pipeline-generate",
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    let candidate = Tracked::from(&candidates[0]);
+    assert_eq!(
+        candidates[0].provenance().inputs,
+        vec![structures[0].id().clone()]
+    );
+
+    let application = fixture
+        .engine
+        .apply_candidate(
+            &fixture.left,
+            &candidate,
+            "cross-domain-pipeline-application",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap();
+    assert_eq!(application.value().added_units.len(), 1);
+    assert!(application.value().added_relations.is_empty());
+    let added = &application.value().domain.units[&application.value().added_units[0]];
+    assert_eq!(added.kind, UnitKind::CrossDomainStructure);
+    assert_eq!(added.label, None);
+    assert_eq!(
+        added.properties["product_binding"],
+        unclip_domain::PropertyValue::Structured(
+            serde_json::to_value(&composition.value().product.binding).unwrap()
+        )
+    );
+    assert_eq!(application.value().domain.units.len(), 2);
+    assert!(!application
+        .value()
+        .domain
+        .units
+        .contains_key(&UnitId::new("b")));
+    assert_eq!(
+        unclip_epistemic::DependencyCollector::default().read(&fixture.left),
+        &domain("cross-domain-pipeline-left", "left-v2", "a")
+    );
+    let mut labeled = candidates[0].value().clone();
+    labeled.value["pattern"]["semantic_label"] = serde_json::json!("invented");
+    assert!(fixture
+        .engine
+        .apply_candidate(
+            &fixture.left,
+            &Tracked::from_recorded(DerivedId::new("labeled-cross-domain-candidate"), labeled),
+            "labeled-cross-domain-application",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .is_err());
+    let mut inconsistent = candidates[0].value().clone();
+    inconsistent.value["evidence"]["typed_delta"]["comparator"] =
+        serde_json::json!("compare.other");
+    assert!(fixture
+        .engine
+        .apply_candidate(
+            &fixture.left,
+            &Tracked::from_recorded(
+                DerivedId::new("inconsistent-cross-domain-candidate"),
+                inconsistent,
+            ),
+            "inconsistent-cross-domain-application",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .is_err());
+
+    let observation_id = ObservationId::new("cross-domain-pipeline-held-out");
+    let observation = Tracked::from_recorded(
+        DerivedId::new("cross-domain-pipeline-observation"),
+        Observation {
+            id: observation_id.clone(),
+            source: SourceRef::new("fixture"),
+            observed_at: None,
+            units: vec![ObservedUnit {
+                id: ObservedUnitId::new("observed-a"),
+                label: "observed-a".into(),
+                salience: None,
+                uncertainty: None,
+                context: BTreeMap::new(),
+            }],
+            relations: vec![],
+            context: BTreeMap::new(),
+        },
+    );
+    let alignment = Tracked::from_recorded(
+        DerivedId::new("cross-domain-pipeline-alignment"),
+        Alignment {
+            observation: observation_id.clone(),
+            candidates: vec![AlignmentCandidate {
+                observed: ObservedUnitId::new("observed-a"),
+                domain: UnitId::new("a"),
+                confidence: 1.0,
+                evidence: vec!["fixture".into()],
+            }],
+        },
+    );
+    let split = fixture
+        .engine
+        .select_observations(
+            &[observation],
+            &[],
+            std::slice::from_ref(&observation_id),
+            "cross-domain-pipeline-split",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap();
+    let split = Tracked::from(&split);
+    let experiment_plan = fixture
+        .engine
+        .plan(&EngineProfile {
+            sensors: vec![PluginSelection::any("sensor.coverage")],
+            comparators: vec![PluginSelection::any("compare.scalar-difference")],
+            ..EngineProfile::default()
+        })
+        .unwrap();
+    let pair = unclip_engine::ComparisonPair {
+        before: DerivedId::new("cross-domain-pipeline-experiment/before/sensor.coverage"),
+        after: DerivedId::new("cross-domain-pipeline-experiment/after/sensor.coverage"),
+    };
+    let execute = || {
+        fixture.engine.run_counterfactual_experiment(
+            &experiment_plan,
+            CounterfactualMeasurementInputs {
+                baseline: HeldOutInputs {
+                    baseline: &fixture.left,
+                    frame: &fixture.left_frame,
+                    split: &split,
+                    alignments: std::slice::from_ref(&alignment),
+                    rankings: &[],
+                },
+                counterfactual: &application,
+                alignments: std::slice::from_ref(&alignment),
+                rankings: &[],
+            },
+            &candidate,
+            std::slice::from_ref(&pair),
+            ExperimentConstraints::default(),
+            MeasurementRun {
+                id: "cross-domain-pipeline-experiment",
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &BTreeMap::new(),
+            },
+        )
+    };
+    let experiment = execute().unwrap();
+    assert_eq!(
+        experiment.evidence.provenance().operation,
+        Operation::Experimental
+    );
+    assert_eq!(experiment.evidence.value().candidate, *candidate.id());
+    assert_eq!(experiment.execution.comparison.deltas.len(), 1);
+    assert!(experiment.null_results.is_empty());
+    assert!(experiment.constraints.is_none());
+    assert_eq!(execute().unwrap().evidence, experiment.evidence);
 }
