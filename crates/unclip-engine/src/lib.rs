@@ -64,9 +64,11 @@ mod matrix_comparison;
 mod partition_comparison;
 pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
 mod spectral_comparison;
+mod structured_comparison;
 pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
 pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
 pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
+pub use structured_comparison::{StructuredIdentityComparator, StructuredIdentityComparison};
 mod ranking_comparison;
 mod revision;
 mod role_application;
@@ -99,9 +101,13 @@ pub use transformation_null::ExistingTransformationNull;
 
 mod empirical;
 mod independence;
+mod independence_comparison;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
 pub use independence::{
     IndependenceDefinition, IndependenceExpectation, IndependenceExpectationProfile,
+};
+pub use independence_comparison::{
+    IndependenceComparisonEntry, IndependenceComparisonProfile, IndependenceComparisonResult,
 };
 
 use std::collections::BTreeMap;
@@ -132,6 +138,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_comparator(std::sync::Arc::new(SpectrumComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(PartitionRandComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(GraphIdentityComparator::default()))?;
+    registry.register_comparator(std::sync::Arc::new(StructuredIdentityComparator::default()))?;
     registry.register_comparator(std::sync::Arc::new(
         ChangePointAlignmentComparator::default(),
     ))?;
@@ -760,7 +767,8 @@ mod tests {
                 "compare.partition-rand",
                 "compare.rbo",
                 "compare.scalar-difference",
-                "compare.spectrum"
+                "compare.spectrum",
+                "compare.structured-identity"
             ]
         );
         assert_eq!(interpreters, vec!["interpret.llm-label"]);

@@ -1312,3 +1312,73 @@ fn graph_validation_rejects_ambiguity_and_preserves_empty_vs_missing() {
     )
     .is_err());
 }
+
+fn structured_payload(
+    results: &[Calculated<Delta>],
+) -> unclip_engine::StructuredIdentityComparison {
+    let MeasurementValue::Structured(value) = &results[0].value().value else {
+        panic!("expected structured comparison payload")
+    };
+    serde_json::from_value(value.clone()).unwrap()
+}
+
+#[test]
+fn structured_identity_comparison_preserves_exact_values_and_sparse_states() {
+    use unclip_engine::StructuredIdentityComparison;
+
+    let expected = Reading::Value {
+        value: MeasurementValue::Structured(json!({"axis": [1, 2], "status": "independent"})),
+    };
+    let same = compare_rank(
+        "compare.structured-identity",
+        expected.clone(),
+        expected.clone(),
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        structured_payload(&same),
+        StructuredIdentityComparison::Value {
+            identical: true,
+            ..
+        }
+    ));
+
+    let changed = compare_rank(
+        "compare.structured-identity",
+        expected.clone(),
+        Reading::Value {
+            value: MeasurementValue::Structured(json!({"axis": [1, 3], "status": "dependent"})),
+        },
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        structured_payload(&changed),
+        StructuredIdentityComparison::Value {
+            identical: false,
+            ..
+        }
+    ));
+
+    let unavailable = compare_rank(
+        "compare.structured-identity",
+        Reading::NotApplicable {
+            reason: "no independence rule".into(),
+        },
+        expected,
+        json!({}),
+    )
+    .unwrap();
+    assert!(matches!(
+        structured_payload(&unavailable),
+        StructuredIdentityComparison::Unavailable { .. }
+    ));
+    assert!(compare_rank(
+        "compare.structured-identity",
+        Reading::NotMeasured,
+        Reading::NotMeasured,
+        json!({"infer_fields": true})
+    )
+    .is_err());
+}

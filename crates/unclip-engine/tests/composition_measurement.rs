@@ -11,7 +11,7 @@ use unclip_engine::{
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, FrameVersion, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainMutualInformationConfig, CrossDomainSample, ExpectedIndependentBehavior,
-    Measurement, MeasurementKind, Reading,
+    Measurement, MeasurementKind, MeasurementValue, Reading,
 };
 use unclip_observe::ObservationId;
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -490,4 +490,224 @@ fn independence_rules_reject_implicit_kinds_and_unselected_sources() {
         .unwrap_err()
         .to_string()
         .contains("cover every product measurement"));
+}
+
+fn define_expectations(
+    fixture: &Fixture,
+    composition: &Calculated<unclip_engine::CompositionMeasurementProfile>,
+    expected: ExpectedIndependentBehavior,
+    run_id: &str,
+) -> Calculated<unclip_engine::IndependenceExpectationProfile> {
+    fixture
+        .engine
+        .define_independent_behavior(
+            composition,
+            &[independence_definition(composition, expected)],
+            run_id,
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap()
+}
+
+fn structured_comparison_plan(engine: &Engine) -> unclip_plugin::RunPlan {
+    engine
+        .plan(&EngineProfile {
+            comparators: vec![PluginSelection::any("compare.structured-identity")],
+            ..EngineProfile::default()
+        })
+        .unwrap()
+}
+
+#[test]
+fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
+    let fixture = fixture("compare-independence");
+    let composition = compose(&fixture, "compare-independence-composition").unwrap();
+    let Reading::Value {
+        value: MeasurementValue::Structured(observed),
+    } = &composition.value().product.measurements[0]
+        .measurement
+        .reading
+    else {
+        panic!("fixture product measurement must be structured")
+    };
+    let expectations = define_expectations(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Structured {
+            value: observed.clone(),
+        },
+        "compare-independence-expectations",
+    );
+    let plan = structured_comparison_plan(&fixture.engine);
+    let params = BTreeMap::new();
+    let compare = || {
+        fixture.engine.compare_product_with_independence(
+            &plan,
+            &composition,
+            &expectations,
+            MeasurementRun {
+                id: "compare-independence-run",
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &params,
+            },
+        )
+    };
+    let result = compare().unwrap();
+
+    assert_eq!(result.expectations.len(), 1);
+    assert_eq!(result.deltas.len(), 1);
+    assert_eq!(result.profile.value().comparisons.len(), 1);
+    let entry = &result.profile.value().comparisons[0];
+    assert_eq!(
+        entry.product_measurement,
+        composition.value().product.measurements[0].id
+    );
+    assert_eq!(entry.expectation_measurement, *result.expectations[0].id());
+    assert_eq!(entry.delta_id, *result.deltas[0].id());
+    assert_eq!(
+        entry.comparator,
+        unclip_epistemic::PluginId::new("compare.structured-identity")
+    );
+    let MeasurementValue::Structured(delta) = &entry.delta.value else {
+        panic!("expected structured delta")
+    };
+    let delta: unclip_engine::StructuredIdentityComparison =
+        serde_json::from_value(delta.clone()).unwrap();
+    assert!(matches!(
+        delta,
+        unclip_engine::StructuredIdentityComparison::Value {
+            identical: true,
+            ..
+        }
+    ));
+
+    let expected_inputs = [
+        composition.id().clone(),
+        expectations.id().clone(),
+        fixture.left_measurements[0].id().clone(),
+        fixture.right_measurements[0].id().clone(),
+        fixture.product_measurements[0].id().clone(),
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect::<Vec<_>>();
+    assert_eq!(result.expectations[0].provenance().inputs, expected_inputs);
+    assert_eq!(
+        result.deltas[0].provenance().inputs,
+        [
+            result.expectations[0].id().clone(),
+            fixture.product_measurements[0].id().clone(),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+    );
+    let profile_inputs = [
+        composition.id().clone(),
+        expectations.id().clone(),
+        fixture.left_measurements[0].id().clone(),
+        fixture.right_measurements[0].id().clone(),
+        fixture.product_measurements[0].id().clone(),
+        result.expectations[0].id().clone(),
+        result.deltas[0].id().clone(),
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect::<Vec<_>>();
+    assert_eq!(result.profile.provenance().inputs, profile_inputs);
+    assert_eq!(
+        result.profile.provenance().params["binding"]["product_version"],
+        "product-v6"
+    );
+    let replay = compare().unwrap();
+    assert_eq!(replay.profile, result.profile);
+    assert_eq!(replay.expectations, result.expectations);
+    assert_eq!(replay.deltas, result.deltas);
+    let encoded = serde_json::to_string(result.profile.value()).unwrap();
+    let decoded: unclip_engine::IndependenceComparisonProfile =
+        serde_json::from_str(&encoded).unwrap();
+    assert_eq!(&decoded, result.profile.value());
+}
+
+#[test]
+fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparators() {
+    let fixture = fixture("unavailable-independence");
+    let composition = compose(&fixture, "unavailable-composition").unwrap();
+    let expectations = define_expectations(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Undefined {
+            measurement_kind: MeasurementKind::Structured,
+            reason: "no validated structured independence rule".into(),
+        },
+        "unavailable-expectations",
+    );
+    let plan = structured_comparison_plan(&fixture.engine);
+    let result = fixture
+        .engine
+        .compare_product_with_independence(
+            &plan,
+            &composition,
+            &expectations,
+            MeasurementRun {
+                id: "unavailable-comparison",
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    let MeasurementValue::Structured(delta) = &result.deltas[0].value().value else {
+        panic!("expected structured delta")
+    };
+    let delta: unclip_engine::StructuredIdentityComparison =
+        serde_json::from_value(delta.clone()).unwrap();
+    assert!(matches!(
+        delta,
+        unclip_engine::StructuredIdentityComparison::Unavailable {
+            expected: Reading::NotApplicable { .. },
+            ..
+        }
+    ));
+
+    let scalar_plan = fixture
+        .engine
+        .plan(&EngineProfile {
+            comparators: vec![PluginSelection::any("compare.scalar-difference")],
+            ..EngineProfile::default()
+        })
+        .unwrap();
+    let wrong_comparator = fixture.engine.compare_product_with_independence(
+        &scalar_plan,
+        &composition,
+        &expectations,
+        MeasurementRun {
+            id: "wrong-comparator",
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    );
+    assert!(wrong_comparator
+        .unwrap_err()
+        .to_string()
+        .contains("comparator for its measurement kind"));
+
+    let other = self::fixture("other-comparison");
+    let other_composition = compose(&other, "other-composition").unwrap();
+    let foreign = fixture.engine.compare_product_with_independence(
+        &plan,
+        &other_composition,
+        &expectations,
+        MeasurementRun {
+            id: "foreign-expectations",
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    );
+    assert!(foreign
+        .unwrap_err()
+        .to_string()
+        .contains("belongs to another composition"));
 }
