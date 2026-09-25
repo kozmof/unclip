@@ -44,8 +44,13 @@ pub use held_out::{
     CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
     HeldOutInputs,
 };
+mod composition_measurement;
 mod cross_domain;
 mod product_domain;
+pub use composition_measurement::{
+    BoundDomainMeasurementProfile, BoundProductMeasurementProfile, CompositionMeasurementInputs,
+    CompositionMeasurementProfile, ProfileMeasurement,
+};
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,

@@ -24,7 +24,10 @@ fn invalid(message: impl std::fmt::Display) -> PluginError {
     PluginError::Message(message.to_string())
 }
 
-fn validate_frame(product: &ProductDomainSnapshot, frame: &ProductMeasurementFrame) -> Result<()> {
+pub(super) fn validate_frame(
+    product: &ProductDomainSnapshot,
+    frame: &ProductMeasurementFrame,
+) -> Result<()> {
     if frame.id.0.trim().is_empty()
         || frame.version.0.trim().is_empty()
         || frame.product != product.id
@@ -33,7 +36,7 @@ fn validate_frame(product: &ProductDomainSnapshot, frame: &ProductMeasurementFra
         || frame.right != product.right
     {
         return Err(invalid(
-            "canonical correlation requires a product frame bound to the exact product and input versions",
+            "product measurement requires a frame bound to the exact product and input versions",
         ));
     }
     let interactions = product
@@ -53,7 +56,7 @@ fn validate_frame(product: &ProductDomainSnapshot, frame: &ProductMeasurementFra
             || !axes.insert((&axis.left, &axis.right))
         {
             return Err(invalid(
-                "canonical correlation requires unique materialized product-frame axes",
+                "product measurement requires unique materialized product-frame axes",
             ));
         }
     }
