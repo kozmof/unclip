@@ -304,7 +304,7 @@ fn level_plugins_does_not_require_a_database() {
 }
 
 #[tokio::test]
-async fn level_domain_frame_and_observe_workflow() {
+async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() {
     let db = TempDb::new();
     let path = db.path();
     assert!(unclip(&path, &["init"]).status.success());
@@ -1309,6 +1309,10 @@ fn level_help_lists_plugins_command() {
     assert!(stdout(&out).contains("candidates"));
     assert!(stdout(&out).contains("experiment"));
     assert!(stdout(&out).contains("verify"));
+    let help = stdout(&out);
+    for operation in ["inferred", "calculated", "experimental", "interpreted"] {
+        assert!(help.contains(operation), "level help omits {operation}");
+    }
     let verify_help = unclip(&db.path(), &["level", "verify", "--help"]);
     assert!(verify_help.status.success());
     assert!(stdout(&verify_help).contains("Replay persisted inference"));
@@ -1967,7 +1971,7 @@ fn replay_reproduces_sample_and_compose_packets() {
 }
 
 #[tokio::test]
-async fn batch_measurement_cli_snapshots_inputs_and_detects_replay_mismatches() {
+async fn level_measure_derive_interpret_and_verify_workflow() {
     use sea_orm::ConnectionTrait;
     use std::collections::BTreeMap;
     use unclip_domain::{

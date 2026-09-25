@@ -1,0 +1,13 @@
+error[E0451]: fields `id`, `value`, `provenance` and `operation` of struct `Derived` are private
+  --> tests/ui/construct_calculated.rs:10:9
+   |
+ 9 |     let _ = Derived::<u32, ops::Calculation> {
+   |             -------------------------------- in this type
+10 |         id: unavailable(),
+   |         ^^ private field
+11 |         value: 1,
+   |         ^^^^^ private field
+12 |         provenance: unavailable(),
+   |         ^^^^^^^^^^ private field
+13 |         operation: PhantomData,
+   |         ^^^^^^^^^ private field

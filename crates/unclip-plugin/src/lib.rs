@@ -655,9 +655,29 @@ pub trait NullModel: Send + Sync {
 /// Reusable checks for first-party and cooperative third-party sensors.
 pub mod conformance {
     use super::{
-        classify_sensor, Calculated, MeasureCtx, Measurement, MeasurementKind, Result, Sensor,
-        SensorDecision,
+        classify_sensor, Calculated, CrossProductSensor, MeasureCtx, Measurement, MeasurementKind,
+        ProductSensor, Result, Sensor, SensorDecision, SensorDescriptor,
     };
+
+    fn assert_measurement(descriptor: &SensorDescriptor, derived: &Calculated<Measurement>) {
+        if let super::Reading::Value { value } = &derived.value().reading {
+            let kind: MeasurementKind = value.kind();
+            assert!(
+                descriptor.produces.contains(&kind),
+                "sensor emitted undeclared measurement kind {kind:?}"
+            );
+        }
+        assert_eq!(
+            derived.value().sensor,
+            descriptor.id,
+            "measurement carries the wrong sensor id"
+        );
+        assert_eq!(
+            derived.value().sensor_version,
+            descriptor.version,
+            "measurement carries the wrong sensor version"
+        );
+    }
 
     /// Run a sensor twice through the supplied fixture and assert the common
     /// deterministic and descriptor contracts.
@@ -679,24 +699,35 @@ pub mod conformance {
         assert_eq!(first, second, "sensor output is not deterministic");
 
         for derived in &first {
-            if let super::Reading::Value { value } = &derived.value().reading {
-                let kind: MeasurementKind = value.kind();
-                assert!(
-                    sensor.descriptor().produces.contains(&kind),
-                    "sensor emitted undeclared measurement kind {kind:?}"
-                );
-            }
-            assert_eq!(
-                derived.value().sensor,
-                sensor.descriptor().id,
-                "measurement carries the wrong sensor id"
-            );
-            assert_eq!(
-                derived.value().sensor_version,
-                sensor.descriptor().version,
-                "measurement carries the wrong sensor version"
-            );
+            assert_measurement(sensor.descriptor(), derived);
         }
+    }
+
+    /// Run a product-domain sensor twice and assert the common deterministic
+    /// output and descriptor contracts.
+    pub fn assert_product_sensor<F>(sensor: &dyn ProductSensor, mut run: F)
+    where
+        F: FnMut() -> Result<Calculated<Measurement>>,
+    {
+        let first = run().expect("product sensor fixture failed on first run");
+        let second = run().expect("product sensor fixture failed on repeated run");
+        assert_eq!(first, second, "product sensor output is not deterministic");
+        assert_measurement(sensor.descriptor(), &first);
+    }
+
+    /// Run a cross-product sensor twice and assert the common deterministic
+    /// output and descriptor contracts.
+    pub fn assert_cross_product_sensor<F>(sensor: &dyn CrossProductSensor, mut run: F)
+    where
+        F: FnMut() -> Result<Calculated<Measurement>>,
+    {
+        let first = run().expect("cross-product sensor fixture failed on first run");
+        let second = run().expect("cross-product sensor fixture failed on repeated run");
+        assert_eq!(
+            first, second,
+            "cross-product sensor output is not deterministic"
+        );
+        assert_measurement(sensor.descriptor(), &first);
     }
 }
 

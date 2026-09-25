@@ -1,0 +1,17 @@
+error[E0277]: the trait bound `f64: From<MeasurementProfile>` is not satisfied
+ --> tests/ui/profile_into_scalar.rs:4:48
+  |
+4 |     let _: f64 = MeasurementProfile::default().into();
+  |                                                ^^^^ the trait `From<MeasurementProfile>` is not implemented for `f64`
+  |
+  = help: `f64` implements trait `From<T>`:
+            From<bool>
+            From<f16>
+            From<f32>
+            From<i16>
+            From<i32>
+            From<i8>
+            From<u16>
+            From<u32>
+            From<u8>
+  = note: required for `MeasurementProfile` to implement `Into<f64>`

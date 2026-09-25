@@ -13,6 +13,7 @@ use unclip_measure::{
     MeasurementValue, Reading,
 };
 use unclip_observe::ObservationId;
+use unclip_plugin::conformance;
 
 fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
     DomainSnapshot {
@@ -157,6 +158,11 @@ fn engine_cross_domain_mi_preserves_axes_versions_and_dependencies() {
             Timestamp::new("2026-09-24T00:00:01Z"),
         )
     };
+    let sensor = engine
+        .registry()
+        .product_sensor(&PluginId::new("sensor.cross-domain-mutual-information"))
+        .unwrap();
+    conformance::assert_product_sensor(sensor.as_ref(), || measure(&samples));
     let result = measure(&samples).unwrap();
     let reversed = samples.iter().cloned().rev().collect::<Vec<_>>();
     assert_eq!(measure(&reversed).unwrap(), result);

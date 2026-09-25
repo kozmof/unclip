@@ -14,6 +14,7 @@ use unclip_measure::{
     MeasurementValue, ObservationSequence, OrderedObservation, Reading,
 };
 use unclip_observe::ObservationId;
+use unclip_plugin::conformance;
 
 fn domain(id: &str, units: &[&str]) -> DomainSnapshot {
     DomainSnapshot {
@@ -247,20 +248,26 @@ fn fixture() -> Fixture {
 #[test]
 fn engine_cross_product_transfer_preserves_signed_zero_versions_and_dependencies() {
     let fixture = fixture();
-    let result = fixture
-        .engine
-        .measure_cross_product_transfer(
+    let measure = || {
+        fixture.engine.measure_cross_product_transfer(
             &Tracked::from(&fixture.source_product),
             &Tracked::from(&fixture.source_frame),
-            &Tracked::from_derived(&fixture.source_measurement, fixture.source_movement),
+            &Tracked::from_derived(&fixture.source_measurement, fixture.source_movement.clone()),
             &Tracked::from(&fixture.target_product),
             &Tracked::from(&fixture.target_frame),
-            &Tracked::from_derived(&fixture.target_measurement, fixture.target_movement),
+            &Tracked::from_derived(&fixture.target_measurement, fixture.target_movement.clone()),
             config(2),
             "transfer-run",
             Timestamp::new("2026-09-24T00:00:02Z"),
         )
+    };
+    let sensor = fixture
+        .engine
+        .registry()
+        .cross_product_sensor(&PluginId::new("sensor.cross-product-transfer"))
         .unwrap();
+    conformance::assert_cross_product_sensor(sensor.as_ref(), measure);
+    let result = measure().unwrap();
     let Reading::Value {
         value: MeasurementValue::Structured(value),
     } = &result.value().reading

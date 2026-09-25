@@ -1,0 +1,11 @@
+error[E0277]: the trait bound `MeasurementProfile: Ord` is not satisfied
+ --> tests/ui/profile_is_ordered.rs:6:22
+  |
+6 |     requires_order::<MeasurementProfile>();
+  |                      ^^^^^^^^^^^^^^^^^^ the trait `Ord` is not implemented for `MeasurementProfile`
+  |
+note: required by a bound in `requires_order`
+ --> tests/ui/profile_is_ordered.rs:3:22
+  |
+3 | fn requires_order<T: Ord>() {}
+  |                      ^^^ required by this bound in `requires_order`

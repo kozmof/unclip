@@ -12,6 +12,7 @@ use unclip_measure::{
     Reading,
 };
 use unclip_observe::ObservationId;
+use unclip_plugin::conformance;
 
 fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
     DomainSnapshot {
@@ -155,6 +156,11 @@ fn engine_cca_binds_product_versions_and_tracks_every_input() {
             Timestamp::new("2026-09-24T00:00:01Z"),
         )
     };
+    let sensor = engine
+        .registry()
+        .product_sensor(&PluginId::new("sensor.canonical-correlation"))
+        .unwrap();
+    conformance::assert_product_sensor(sensor.as_ref(), || measure(&samples));
     let result = measure(&samples).unwrap();
     let reversed = samples.iter().cloned().rev().collect::<Vec<_>>();
     assert_eq!(measure(&reversed).unwrap(), result);

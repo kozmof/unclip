@@ -230,7 +230,7 @@ pub(crate) enum Command {
     /// List stored pattern entries.
     Patterns,
 
-    /// Semantic leveling engine commands.
+    /// Run inferred, calculated, experimental, and interpreted leveling stages.
     Level {
         #[command(subcommand)]
         action: LevelAction,
@@ -239,14 +239,14 @@ pub(crate) enum Command {
 
 #[derive(Subcommand)]
 pub(crate) enum LevelAction {
-    /// Execute and persist an explicit held-out candidate experiment.
+    /// Execute and persist explicit held-out experimental evidence.
     Experiment {
         #[arg(long)]
         profile: PathBuf,
         #[arg(long)]
         request: PathBuf,
     },
-    /// Interpret one stored candidate through an explicit empirical source.
+    /// Store interpreted evidence for a candidate and empirical source.
     Interpret {
         candidate_id: String,
         #[arg(long)]
@@ -257,7 +257,7 @@ pub(crate) enum LevelAction {
         #[arg(long)]
         response: PathBuf,
     },
-    /// Promote a tested candidate into one explicit immutable domain version.
+    /// Apply completed experimental evidence to one immutable domain successor.
     Apply {
         candidate_id: String,
         /// Completed held-out experiment that tested this candidate.
@@ -273,7 +273,7 @@ pub(crate) enum LevelAction {
         #[arg(long = "interpretation")]
         interpretations: Vec<String>,
     },
-    /// Generate candidates from explicitly selected stored evidence.
+    /// Calculate candidates from explicitly selected stored evidence.
     Discover {
         #[arg(long)]
         profile: PathBuf,
@@ -308,10 +308,8 @@ pub(crate) enum LevelAction {
         action: LevelFrameAction,
     },
 
-    /// Infer observations, alignments, and rankings using an engine profile.
-    Explain {
-        observation_id: String,
-    },
+    /// Explain one stored inferred observation and its producing plugin.
+    Explain { observation_id: String },
 
     /// Calculate a profile from one or more explicitly selected observations.
     Measure {
@@ -324,11 +322,9 @@ pub(crate) enum LevelAction {
     #[command(
         about = "Replay persisted inference, rerun calculations, and compare stored results"
     )]
-    Verify {
-        run_id: String,
-    },
+    Verify { run_id: String },
 
-    /// Derive anonymous structures from explicitly selected stored profiles.
+    /// Calculate anonymous structures from explicitly selected stored profiles.
     Derive {
         #[arg(required = true, num_args = 1..)]
         profile_ids: Vec<String>,
@@ -343,9 +339,8 @@ pub(crate) enum LevelAction {
         format: Format,
     },
 
-    Provenance {
-        derived_id: String,
-    },
+    /// Trace the recorded operation and inputs of derived evidence.
+    Provenance { derived_id: String },
 
     /// Display a stored profile, preserving independent sensor results.
     Profile {
@@ -357,6 +352,7 @@ pub(crate) enum LevelAction {
         table: bool,
     },
 
+    /// Infer and persist observations from an explicit source and profile.
     Observe {
         source: PathBuf,
         #[arg(long)]

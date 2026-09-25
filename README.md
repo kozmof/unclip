@@ -140,6 +140,16 @@ Run `unclip <command> --help` for the full options of any command.
 
 ## Output and reproducibility
 
+Leveling keeps its four epistemic operations explicit. `level observe` infers and
+persists source observations; `level explain` inspects that recorded inference.
+`level measure`, `level derive`, and `level discover` calculate reproducible
+results from selected evidence. `level experiment` tests a candidate with held-out
+evidence, and `level apply` records the accepted experimental revision.
+`level interpret` stores a model-backed interpretation separately from the
+calculated structure. `level verify` replays persisted inference outputs and
+reruns calculated stages against their stored values and provenance; it does not
+claim deterministic reinference from an external model.
+
 `unclip level measure obs-1 obs-2 --profile engine.yaml` calculates a profile over
 the explicitly selected observations. A single observation still uses the same
 command. Batch profiles can select `sensor.trajectories`, `sensor.spearman`,
@@ -334,8 +344,9 @@ return `NotApplicable`; small samples return `InsufficientEvidence`.
 This null tests endpoint co-presence only, not relation direction or kind. It assumes
 exchangeable observations and does not control source, time, genre, extraction bias,
 or candidate selection. Results do not automatically accept or reject candidates.
-Other null families, held-out split enforcement, and persisted experiment
-execution remain pending.
+Held-out experiments execute the explicitly selected null models, freeze the
+training and held-out split, compare before and after profiles, and persist the
+complete experimental evidence bundle.
 
 `null.ranking-constraints` uses the same minimum-observation parameter, applied to
 untied, comparable endpoint pairs. Supply tracked partial rankings through
@@ -375,8 +386,9 @@ signed difference, tolerance, and whether the change falls within that tolerance
 Missing properties are insufficient evidence, not zero. Non-numeric values,
 nonfinite values, differences that overflow, and integer conversions that lose
 precision are rejected. This is a baseline-retention diagnostic, not a statistical
-significance test or a measure of explanatory improvement. Held-out comparison
-and application of weight revisions remain experiment-harness work.
+significance test or a measure of explanatory improvement. Weight-revision
+candidates enter the same held-out experiment and explicit revision-application
+path as the other supported candidate families.
 
 `null.coupling-zero` checks supported dynamic-coupling evidence against an
 explicit zero-association baseline. Configure a finite nonnegative
@@ -440,7 +452,8 @@ measurements must share sensor identity, version, and context. The structured
 rejects structured inputs without scalarizing them. Nonfinite readings and
 overflowing differences are errors. Provenance records both measurements and
 the exact comparator configuration. Pair selection is explicit; the caller must
-ensure comparable coordinate frames. Experiment orchestration remains pending.
+ensure comparable coordinate frames. Held-out experiments use these comparators
+to retain typed before/after deltas without reducing a profile to one score.
 
 `compare.kendall` and `compare.rbo` are separate ranking comparators using the
 same tracked measurement-pair harness and sensor/version/context checks. Their
@@ -543,8 +556,9 @@ depends on all selected measurements and emitted deltas, with exact pairings,
 comparator versions, parameters, and hashes recorded. Canonical ordering makes
 input and pairing order irrelevant to replay. Duplicate identities, conflicting
 values under one identity, missing references, output-ID collisions, and reused
-pair endpoints are rejected. No profile score is computed. This is a library
-calculation API; persisted experiment orchestration and its CLI remain pending.
+pair endpoints are rejected. No profile score is computed. The persisted `unclip level experiment` workflow
+uses this calculation API and stores its typed deltas with the completed
+experimental evidence.
 
 `Engine::apply_candidate` begins the counterfactual path for atomic
 `exact_observed_label` proposals. It clones a tracked baseline into a distinct
@@ -619,10 +633,12 @@ by at least two ordered unique directed state pairs and explicit measurements. T
 result retains the direction, source evidence, and full candidate pattern.
 
 The caller supplies a unique run ID. Application covers the current built-in
-generator families, semantic-role and transformation proposals, and explicit
-numeric weight revisions. Cross-domain proposals remain unsupported. Frame
-extension, alignment or inference integration, and held-out measurement remain pending;
-creating this snapshot alone does not establish that a candidate explains data.
+generator families, semantic-role and transformation proposals, explicit numeric
+weight revisions, and anonymous cross-domain deviation structures. Held-out
+experiments measure the temporary snapshot before any promotion, while
+`unclip level apply` creates an explicit immutable successor only from completed
+experimental evidence. Candidate application does not invent frame extensions,
+alignments, or inference outputs.
 
 `Engine::record_delta_w_test`, `Engine::record_delta_e_test`,
 `Engine::record_dynamic_coupling_test`, `Engine::record_structural_test`, and

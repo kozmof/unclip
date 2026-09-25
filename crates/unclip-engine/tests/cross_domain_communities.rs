@@ -14,6 +14,7 @@ use unclip_measure::{
     MeasurementValue, ProductSide, Reading,
 };
 use unclip_observe::ObservationId;
+use unclip_plugin::conformance;
 
 fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
     DomainSnapshot {
@@ -166,8 +167,8 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
     let (engine, product, frame) = product_and_frame();
     let (mi, profile) = mutual_information(&engine, &product, &frame);
     let tracked_mi = Tracked::from_derived(&mi, profile);
-    let result = engine
-        .measure_cross_domain_communities(
+    let measure = || {
+        engine.measure_cross_domain_communities(
             &Tracked::from(&product),
             &Tracked::from(&frame),
             &tracked_mi,
@@ -175,7 +176,13 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
             "community-run",
             Timestamp::new("2026-09-24T00:00:02Z"),
         )
+    };
+    let sensor = engine
+        .registry()
+        .product_sensor(&PluginId::new("sensor.cross-domain-communities"))
         .unwrap();
+    conformance::assert_product_sensor(sensor.as_ref(), measure);
+    let result = measure().unwrap();
 
     let Reading::Value {
         value: MeasurementValue::Structured(value),
