@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use unclip_domain::{
-    DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, ProductDomainId,
+    CandidateKind, DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, ProductDomainId,
     ProductDomainSnapshot, ProductDomainVersion, ProductFrameAxis, ProductFrameId,
     ProductFrameVersion, ProductInteraction, ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
-    CompositionMeasurementInputs, Engine, IndependenceDefinition, MeasurementInputs, MeasurementRun,
+    CandidateInputs, CompositionMeasurementInputs, Engine, IndependenceDefinition,
+    MeasurementInputs, MeasurementRun,
 };
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, FrameVersion, Timestamp, Tracked};
 use unclip_measure::{
@@ -710,4 +711,205 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         .unwrap_err()
         .to_string()
         .contains("belongs to another composition"));
+}
+
+fn compare_for_candidates(
+    fixture: &Fixture,
+    composition: &Calculated<unclip_engine::CompositionMeasurementProfile>,
+    expected: ExpectedIndependentBehavior,
+    prefix: &str,
+) -> unclip_engine::IndependenceComparisonResult {
+    let expectations = define_expectations(
+        fixture,
+        composition,
+        expected,
+        &format!("{prefix}-expectations"),
+    );
+    fixture
+        .engine
+        .compare_product_with_independence(
+            &structured_comparison_plan(&fixture.engine),
+            composition,
+            &expectations,
+            MeasurementRun {
+                id: &format!("{prefix}-comparison"),
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &BTreeMap::new(),
+            },
+        )
+        .unwrap()
+}
+
+#[test]
+fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
+    let fixture = fixture("cross-domain-candidate");
+    let composition = compose(&fixture, "cross-domain-candidate-composition").unwrap();
+    let comparison = compare_for_candidates(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Structured {
+            value: serde_json::json!({"status":"independent","rule":"fixture"}),
+        },
+        "cross-domain-candidate",
+    );
+    let derive = || {
+        fixture.engine.derive_cross_domain_deviations(
+            &comparison.profile,
+            "cross-domain-candidate-derive",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+    };
+    let structures = derive().unwrap();
+    assert_eq!(structures.len(), 1);
+    assert_eq!(
+        structures[0].value().kind,
+        "cross_domain_independence_deviation"
+    );
+    assert_eq!(
+        structures[0].provenance().inputs,
+        vec![comparison.profile.id().clone()]
+    );
+    let evidence: unclip_engine::CrossDomainDeviationEvidence =
+        serde_json::from_value(structures[0].value().value.clone()).unwrap();
+    assert_eq!(evidence.comparison_profile, *comparison.profile.id());
+    assert_eq!(evidence.binding, composition.value().product.binding);
+    assert_eq!(
+        evidence.comparison,
+        comparison.profile.value().comparisons[0]
+    );
+    assert_eq!(derive().unwrap(), structures);
+
+    let tracked = structures.iter().map(Tracked::from).collect::<Vec<_>>();
+    let plan = fixture
+        .engine
+        .plan(&EngineProfile {
+            candidate_generators: vec![PluginSelection::any("generate.cross-domain-structure")],
+            ..EngineProfile::default()
+        })
+        .unwrap();
+    let target = serde_json::to_string(&(
+        &composition.value().product.binding.left.domain.0,
+        &composition.value().product.binding.left.version.0,
+    ))
+    .unwrap();
+    let generate = || {
+        fixture.engine.generate_candidates(
+            &plan,
+            CandidateInputs {
+                domain_version_id: &target,
+                measurements: &[],
+                observations: &[],
+                structures: &tracked,
+            },
+            MeasurementRun {
+                id: "cross-domain-candidate-generate",
+                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                params: &BTreeMap::new(),
+            },
+        )
+    };
+    let candidates = generate().unwrap();
+    assert_eq!(candidates.len(), 1);
+    let candidate = &candidates[0];
+    assert_eq!(candidate.value().kind, CandidateKind::CrossDomainStructure);
+    assert_eq!(candidate.value().domain_version_id, target);
+    assert_eq!(
+        candidate.value().value["pattern"]["matching"],
+        "typed_product_deviation_from_independence"
+    );
+    assert_eq!(
+        candidate.value().value["evidence"]["structure"],
+        structures[0].id().0
+    );
+    assert_eq!(
+        candidate.value().value["evidence"]["binding"],
+        serde_json::to_value(&composition.value().product.binding).unwrap()
+    );
+    assert_eq!(
+        candidate.value().value["evidence"]["typed_delta"],
+        serde_json::to_value(&comparison.profile.value().comparisons[0].delta).unwrap()
+    );
+    assert!(!serde_json::to_string(candidate.value())
+        .unwrap()
+        .contains("\"label\""));
+    assert_eq!(
+        candidate.provenance().inputs,
+        vec![structures[0].id().clone()]
+    );
+    assert_eq!(generate().unwrap(), candidates);
+
+    let foreign = fixture.engine.generate_candidates(
+        &plan,
+        CandidateInputs {
+            domain_version_id: "[\"foreign\",\"v1\"]",
+            measurements: &[],
+            observations: &[],
+            structures: &tracked,
+        },
+        MeasurementRun {
+            id: "cross-domain-candidate-foreign",
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    );
+    assert!(foreign
+        .unwrap_err()
+        .to_string()
+        .contains("one of the product source-domain versions"));
+}
+
+#[test]
+fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
+    let fixture = fixture("no-cross-domain-candidate");
+    let composition = compose(&fixture, "no-cross-domain-candidate-composition").unwrap();
+    let Reading::Value {
+        value: MeasurementValue::Structured(observed),
+    } = &composition.value().product.measurements[0]
+        .measurement
+        .reading
+    else {
+        panic!("fixture product measurement must be structured")
+    };
+    let equal = compare_for_candidates(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Structured {
+            value: observed.clone(),
+        },
+        "equal-cross-domain-candidate",
+    );
+    assert!(fixture
+        .engine
+        .derive_cross_domain_deviations(
+            &equal.profile,
+            "equal-cross-domain-candidate-derive",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap()
+        .is_empty());
+
+    let unavailable = compare_for_candidates(
+        &fixture,
+        &composition,
+        ExpectedIndependentBehavior::Undefined {
+            measurement_kind: MeasurementKind::Structured,
+            reason: "no validated rule".into(),
+        },
+        "unavailable-cross-domain-candidate",
+    );
+    assert!(fixture
+        .engine
+        .derive_cross_domain_deviations(
+            &unavailable.profile,
+            "unavailable-cross-domain-candidate-derive",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap()
+        .is_empty());
+
+    assert!(fixture
+        .engine
+        .registry()
+        .candidate_generators()
+        .any(|generator| generator.descriptor().id.0 == "generate.cross-domain-structure"));
 }

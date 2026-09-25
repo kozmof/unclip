@@ -46,11 +46,13 @@ pub use held_out::{
 };
 mod composition_measurement;
 mod cross_domain;
+mod cross_domain_discovery;
 mod product_domain;
 pub use composition_measurement::{
     BoundDomainMeasurementProfile, BoundProductMeasurementProfile, CompositionMeasurementInputs,
     CompositionMeasurementProfile, ProfileMeasurement,
 };
+pub use cross_domain_discovery::{CrossDomainCandidateGenerator, CrossDomainDeviationEvidence};
 mod profile_comparison;
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
@@ -149,6 +151,7 @@ pub fn builtin_registry() -> Result<Registry> {
     registry.register_generator(std::sync::Arc::new(TemporalCouplingGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(CommunityCandidateGenerator::default()))?;
     registry.register_generator(std::sync::Arc::new(LatentAxisGenerator::default()))?;
+    registry.register_generator(std::sync::Arc::new(CrossDomainCandidateGenerator::default()))?;
     registry.register_null_model(std::sync::Arc::new(RandomCooccurrenceNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(RankingConstraintNull::default()))?;
     registry.register_null_model(std::sync::Arc::new(ExistingUnitNull::default()))?;
