@@ -98,7 +98,11 @@ pub use role_null::ExistingRoleNull;
 pub use transformation_null::ExistingTransformationNull;
 
 mod empirical;
+mod independence;
 pub use empirical::{EmpiricalMethod, EmpiricalResult};
+pub use independence::{
+    IndependenceDefinition, IndependenceExpectation, IndependenceExpectationProfile,
+};
 
 use std::collections::BTreeMap;
 

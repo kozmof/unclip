@@ -17,6 +17,10 @@
 
 #![forbid(unsafe_code)]
 mod empirical;
+mod independence;
+pub use independence::{
+    ExpectedIndependentBehavior, IndependentMatrix, InvalidIndependentBehavior,
+};
 
 mod community;
 pub use community::{

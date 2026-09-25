@@ -5,9 +5,14 @@ use unclip_domain::{
     ProductDomainSnapshot, ProductDomainVersion, ProductFrameAxis, ProductFrameId,
     ProductFrameVersion, ProductInteraction, ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{CompositionMeasurementInputs, Engine, MeasurementInputs, MeasurementRun};
+use unclip_engine::{
+    CompositionMeasurementInputs, Engine, IndependenceDefinition, MeasurementInputs, MeasurementRun,
+};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, FrameVersion, Timestamp, Tracked};
-use unclip_measure::{CrossDomainMutualInformationConfig, CrossDomainSample, Measurement};
+use unclip_measure::{
+    CrossDomainMutualInformationConfig, CrossDomainSample, ExpectedIndependentBehavior,
+    Measurement, MeasurementKind, Reading,
+};
 use unclip_observe::ObservationId;
 use unclip_plugin::{EngineProfile, PluginSelection};
 
@@ -321,4 +326,168 @@ fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
         .unwrap_err()
         .to_string()
         .contains("at least one measurement"));
+}
+
+fn independence_definition(
+    composition: &Calculated<unclip_engine::CompositionMeasurementProfile>,
+    expected: ExpectedIndependentBehavior,
+) -> IndependenceDefinition {
+    IndependenceDefinition {
+        product_measurement: composition.value().product.measurements[0].id.clone(),
+        left_measurements: vec![composition.value().left.measurements[0].id.clone()],
+        right_measurements: vec![composition.value().right.measurements[0].id.clone()],
+        rule: "fixture.explicit-independent-association".into(),
+        parameters: serde_json::json!({"assumption": "factorized inputs"}),
+        expected,
+    }
+}
+
+#[test]
+fn independence_rules_are_typed_versioned_and_bound_to_both_input_profiles() {
+    let fixture = fixture("expectation");
+    let composition = compose(&fixture, "expectation-composition").unwrap();
+    let definition = independence_definition(
+        &composition,
+        ExpectedIndependentBehavior::Structured {
+            value: serde_json::json!({
+                "status": "independent",
+                "assumption": "factorized inputs"
+            }),
+        },
+    );
+    let expectations = fixture
+        .engine
+        .define_independent_behavior(
+            &composition,
+            &[definition],
+            "expectation-run",
+            Timestamp::new("2026-09-25T00:00:00Z"),
+        )
+        .unwrap();
+    let value = expectations.value();
+
+    assert_eq!(value.composition_profile, *composition.id());
+    assert_eq!(value.expectations.len(), 1);
+    assert_eq!(
+        value.expectations[0].measurement_kind,
+        MeasurementKind::Structured
+    );
+    assert_eq!(
+        value.expectations[0].left_measurements,
+        vec![fixture.left_measurements[0].id().clone()]
+    );
+    assert_eq!(
+        value.expectations[0].right_measurements,
+        vec![fixture.right_measurements[0].id().clone()]
+    );
+    assert_eq!(
+        value.expectations[0].expected.reading(),
+        Reading::Value {
+            value: unclip_measure::MeasurementValue::Structured(serde_json::json!({
+                "status": "independent",
+                "assumption": "factorized inputs"
+            }))
+        }
+    );
+    assert_eq!(
+        expectations.provenance().inputs,
+        vec![composition.id().clone()]
+    );
+    assert_eq!(
+        expectations.provenance().params["definitions"][0]["rule"],
+        "fixture.explicit-independent-association"
+    );
+    assert_eq!(
+        fixture
+            .engine
+            .define_independent_behavior(
+                &composition,
+                &[independence_definition(
+                    &composition,
+                    ExpectedIndependentBehavior::Structured {
+                        value: serde_json::json!({
+                            "status": "independent",
+                            "assumption": "factorized inputs"
+                        })
+                    }
+                )],
+                "expectation-run",
+                Timestamp::new("2026-09-25T00:00:00Z"),
+            )
+            .unwrap(),
+        expectations
+    );
+    let encoded = serde_json::to_string(value).unwrap();
+    let decoded: unclip_engine::IndependenceExpectationProfile =
+        serde_json::from_str(&encoded).unwrap();
+    assert_eq!(&decoded, value);
+}
+
+#[test]
+fn independence_rules_reject_implicit_kinds_and_unselected_sources() {
+    let fixture = fixture("bad-expectation");
+    let composition = compose(&fixture, "bad-expectation-composition").unwrap();
+
+    let wrong_kind = fixture.engine.define_independent_behavior(
+        &composition,
+        &[independence_definition(
+            &composition,
+            ExpectedIndependentBehavior::Scalar { value: 0.0 },
+        )],
+        "wrong-kind",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    );
+    assert!(wrong_kind
+        .unwrap_err()
+        .to_string()
+        .contains("kind must match"));
+
+    let mut missing_side = independence_definition(
+        &composition,
+        ExpectedIndependentBehavior::Undefined {
+            measurement_kind: MeasurementKind::Structured,
+            reason: "no validated structured independence rule".into(),
+        },
+    );
+    missing_side.left_measurements.clear();
+    let missing_side = fixture.engine.define_independent_behavior(
+        &composition,
+        &[missing_side],
+        "missing-side",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    );
+    assert!(missing_side
+        .unwrap_err()
+        .to_string()
+        .contains("selected left measurements"));
+
+    let mut foreign_source = independence_definition(
+        &composition,
+        ExpectedIndependentBehavior::Undefined {
+            measurement_kind: MeasurementKind::Structured,
+            reason: "no validated structured independence rule".into(),
+        },
+    );
+    foreign_source.right_measurements = vec![DerivedId::new("foreign")];
+    let foreign_source = fixture.engine.define_independent_behavior(
+        &composition,
+        &[foreign_source],
+        "foreign-source",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    );
+    assert!(foreign_source
+        .unwrap_err()
+        .to_string()
+        .contains("selected right profile"));
+
+    let uncovered = fixture.engine.define_independent_behavior(
+        &composition,
+        &[],
+        "uncovered",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    );
+    assert!(uncovered
+        .unwrap_err()
+        .to_string()
+        .contains("cover every product measurement"));
 }
