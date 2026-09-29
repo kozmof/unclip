@@ -58,10 +58,10 @@ impl Inferrer for PatternInferrer {
         token: unclip_epistemic::InferenceToken,
     ) -> Result<unclip_epistemic::Inferred<InferenceOutput>> {
         let input: PatternInput =
-            serde_json::from_value(ctx.io.request(&ctx.source, ctx.params).await?)
+            serde_json::from_value(ctx.io().request(ctx.source(), ctx.params()).await?)
                 .map_err(|e| PluginError::Message(format!("invalid pattern input: {e}")))?;
         let confidence = ctx
-            .params
+            .params()
             .get("min_confidence")
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(1.0);
@@ -86,7 +86,7 @@ impl Inferrer for PatternInferrer {
                 .iter()
                 .filter_map(|hit| {
                     let id = UnitId::new(value(&hit.target));
-                    ctx.domain
+                    ctx.domain()
                         .units
                         .contains_key(&id)
                         .then_some((id, hit.pattern.clone()))
@@ -94,7 +94,7 @@ impl Inferrer for PatternInferrer {
                 .collect();
             for hit in &hits {
                 let id = RelationId::new(value(&hit.target));
-                if ctx.domain.relations.contains_key(&id) {
+                if ctx.domain().relations.contains_key(&id) {
                     relation_hits.insert(id);
                 }
             }
@@ -124,7 +124,7 @@ impl Inferrer for PatternInferrer {
         let relations = relation_hits
             .into_iter()
             .filter_map(|id| {
-                let relation = &ctx.domain.relations[&id];
+                let relation = &ctx.domain().relations[&id];
                 Some(ObservedRelation {
                     id: ObservedRelationId::new(format!("relation-{}", id.0)),
                     source: mapped.get(&relation.source)?.clone(),
@@ -136,7 +136,7 @@ impl Inferrer for PatternInferrer {
             .collect();
         let observation = Observation {
             id: observation_id.clone(),
-            source: ctx.source.clone(),
+            source: ctx.source().clone(),
             observed_at: input.observed_at,
             units,
             relations,
@@ -221,12 +221,7 @@ mod tests {
         };
         let params = serde_json::json!({"min_confidence": 0.7});
         let source = SourceRef::new("notes/pattern.txt");
-        let ctx = InferCtx {
-            source: source.clone(),
-            domain: &domain,
-            params: &params,
-            io: &FixtureIo,
-        };
+        let ctx = InferCtx::new(source.clone(), &domain, &params, &FixtureIo);
         let token = unclip_epistemic::InferenceToken::from_harness(
             EmitMetadata::new(
                 DerivedId::new("pattern-derived"),

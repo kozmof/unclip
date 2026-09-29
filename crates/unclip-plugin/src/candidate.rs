@@ -28,6 +28,7 @@ impl<'a> CandidateCtx<'a> {
             structures: &[],
         }
     }
+    #[must_use]
     pub fn with_structures(mut self, structures: &'a [Tracked<EmpiricalStructure>]) -> Self {
         self.structures = structures;
         self

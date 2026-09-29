@@ -285,3 +285,42 @@ fn engine_cca_rejects_a_frame_from_another_product_version() {
         )
         .is_err());
 }
+
+#[test]
+fn engine_cca_holds_the_sensor_to_its_declared_params_schema() {
+    // Product sensors are dispatched by fixed id and never reach
+    // `classify_sensor`, so the descriptor's schema is enforced on this path
+    // explicitly. `tolerance` is declared `exclusiveMaximum: 1`; before that
+    // keyword was implemented the bound was declared and never applied.
+    let (engine, product, frame) = product_and_frame();
+    let out_of_range = CanonicalCorrelationConfig {
+        tolerance: 1.0,
+        ..CanonicalCorrelationConfig::default()
+    };
+    let error = engine
+        .measure_canonical_correlation(
+            &Tracked::from(&product),
+            &Tracked::from(&frame),
+            &coupled_samples(),
+            out_of_range,
+            "schema-cca",
+            Timestamp::new("now"),
+        )
+        .expect_err("a config the declared schema rejects must not reach the sensor");
+    let message = error.to_string();
+    assert!(message.contains("tolerance"), "got: {message}");
+    assert!(message.contains("must be less than 1"), "got: {message}");
+
+    // The same call with an in-range tolerance still succeeds, so the gate
+    // rejects the violation rather than the path.
+    assert!(engine
+        .measure_canonical_correlation(
+            &Tracked::from(&product),
+            &Tracked::from(&frame),
+            &coupled_samples(),
+            CanonicalCorrelationConfig::default(),
+            "schema-cca-ok",
+            Timestamp::new("now"),
+        )
+        .is_ok());
+}

@@ -460,6 +460,29 @@ impl<O: OperationKind> EmitToken<O> {
         }
     }
 
+    /// Emit one derived value under this token's operation and provenance.
+    ///
+    /// # Provenance across several emissions
+    ///
+    /// One token may emit more than once, and each emission records **every**
+    /// input read through the token's collector so far — not the inputs read
+    /// since the previous emission. So the first of two emissions can omit an
+    /// input the plugin reads afterwards, and both carry the union at the point
+    /// each was emitted.
+    ///
+    /// This is deliberate, and per-emission deltas would be wrong rather than
+    /// more precise. A sensor that derives several measurements from one pass
+    /// over its evidence — `sensor.residual` emits `unmatched_units` and
+    /// `unexplained_relations` from a single analysis — genuinely derives both
+    /// from all of it, and splitting the reads by emission order would credit
+    /// each with whichever fragment happened to be read last. The union is
+    /// therefore the sound reading; it is imprecise only for a plugin that reads
+    /// disjoint evidence per output, and such a plugin should take a token per
+    /// output instead, which is what makes the distinction expressible.
+    ///
+    /// Provenance is consequently a superset of what a value strictly depends
+    /// on. Verification relies on that direction: a missing input breaks a
+    /// replay, an extra one does not.
     pub fn emit<T>(&self, value: T) -> Derived<T, O> {
         let sequence = self.emitted.fetch_add(1, Ordering::Relaxed);
         let id = if sequence == 0 {

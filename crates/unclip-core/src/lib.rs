@@ -394,6 +394,37 @@ unexpected: true
         let mut branch = Branch::new("/oversized-metadata");
         branch.metadata = serde_json::json!({ "payload": "x".repeat(MAX_BRANCH_RECORD_BYTES) });
         assert!(validate_branch_record(&branch).is_err());
+
+        // Just under the limit is accepted, so the size check is a real
+        // boundary and not a function that rejects large metadata outright.
+        let mut branch = Branch::new("/large-metadata");
+        branch.metadata = serde_json::json!({ "payload": "x".repeat(1024) });
+        assert!(validate_branch_record(&branch).is_ok());
+    }
+
+    /// The record-size counter measures exactly what serialization would write.
+    ///
+    /// It counts into a sink instead of building the string, so this pins the
+    /// two together: a counter that drifted low would wave through a record
+    /// over [`MAX_BRANCH_RECORD_BYTES`].
+    #[test]
+    fn metadata_size_matches_its_serialized_length() {
+        for metadata in [
+            serde_json::json!(null),
+            serde_json::json!({}),
+            serde_json::json!({"a": 1, "b": [true, null, 1.5], "c": {"d": "é☃"}}),
+            serde_json::json!({"quote": "a\"b\\c\nd\te"}),
+            serde_json::json!("x".repeat(5000)),
+        ] {
+            let mut branch = Branch::new("/sized");
+            branch.metadata = metadata.clone();
+            let counted = validate::branch_record_bytes(&branch);
+            let serialized = branch.path.len() + metadata.to_string().len();
+            assert_eq!(
+                counted, serialized,
+                "counted size disagrees with serialization for {metadata}"
+            );
+        }
     }
 
     #[test]
@@ -401,7 +432,21 @@ unexpected: true
         assert!(validate_path("/ikebukuro/station/exit").is_ok());
         assert!(validate_path("/a").is_ok());
 
-        for bad in ["/", "", "ikebukuro", "/a/", "/a//b", "/a/ b", "/a/\0b"] {
+        for bad in [
+            "/",
+            "",
+            "ikebukuro",
+            "/a/",
+            "/a//b",
+            "/a/ b",
+            "/a/\0b",
+            // Relative segments: a storage key that reads as a path it is not.
+            "/.",
+            "/..",
+            "/a/..",
+            "/a/../b",
+            "/a/./b",
+        ] {
             assert!(
                 validate_path(bad).is_err(),
                 "expected `{bad}` to be invalid"

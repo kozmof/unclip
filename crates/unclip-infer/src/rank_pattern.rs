@@ -157,9 +157,9 @@ impl Inferrer for RankPatternInferrer {
         ctx: &InferCtx<'_>,
         token: unclip_epistemic::InferenceToken,
     ) -> Result<unclip_epistemic::Inferred<InferenceOutput>> {
-        validate_params(ctx.params)?;
+        validate_params(ctx.params())?;
         let input: RankPatternInput = serde_json::from_value(
-            ctx.io.request(&ctx.source, ctx.params).await?,
+            ctx.io().request(ctx.source(), ctx.params()).await?,
         )
         .map_err(|error| PluginError::Message(format!("invalid rank-pattern input: {error}")))?;
         let (observation, ranking) = rank_observation(input.observation, input.evidence)?;
@@ -215,12 +215,7 @@ mod tests {
         };
         let params = serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"});
         let source = SourceRef::new("notes/ranking.yaml");
-        let ctx = InferCtx {
-            source: source.clone(),
-            domain: &domain,
-            params: &params,
-            io: &FixtureIo,
-        };
+        let ctx = InferCtx::new(source.clone(), &domain, &params, &FixtureIo);
         let token = unclip_epistemic::InferenceToken::from_harness(
             EmitMetadata::new(
                 DerivedId::new("ranking-derived"),

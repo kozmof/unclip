@@ -27,6 +27,7 @@ impl<'a> NullCtx<'a> {
             dependencies,
         }
     }
+    #[must_use]
     pub fn with_domain(mut self, domain: Option<&'a Tracked<DomainSnapshot>>) -> Self {
         self.domain = domain;
         self
@@ -34,6 +35,7 @@ impl<'a> NullCtx<'a> {
     pub fn domain(&self) -> Option<&DomainSnapshot> {
         self.domain.map(|domain| self.read(domain))
     }
+    #[must_use]
     pub fn with_rankings(mut self, rankings: &'a [Tracked<PartialRanking>]) -> Self {
         self.rankings = rankings;
         self

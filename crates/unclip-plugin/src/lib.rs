@@ -201,11 +201,21 @@ pub enum Applicability {
 
 /// Where a sensor runs in the calculation pipeline.
 ///
-/// The stages form a dependency chain and execute in `Ord` order. An
-/// explanation sensor establishes what the domain already accounts for; a
-/// residual sensor reads that to report what it does not; measurement sensors
-/// calculate over the result. `Engine::execute` also collects each stage's
-/// output into its own field of `PipelineResults`.
+/// Stages execute in `Ord` order and `Engine::execute` collects each stage's
+/// output into its own field of `PipelineResults`. The order expresses how the
+/// results are *read* — an explanation sensor reports what the domain already
+/// accounts for, a residual sensor what it does not, and measurement sensors
+/// calculate over established evidence.
+///
+/// It is not a data dependency. `MeasureCtx` carries observations, alignments
+/// and rankings; it does not carry earlier stages' measurements, so a residual
+/// sensor cannot read an explanation sensor's output and derives its own from
+/// the same evidence. Running later buys a residual sensor nothing today, and a
+/// sensor written as if it could consume an earlier stage's result will not
+/// compile rather than silently see nothing. Introducing that channel means
+/// adding the prior measurements to `MeasureCtx` and stating how they are
+/// recorded in provenance; until then, treat the stage as a label on the
+/// output, not a position in a chain.
 ///
 /// Stage is declared here, on the descriptor, rather than inferred from the
 /// plugin id. Inferring it would silently reclassify a renamed sensor and
@@ -330,13 +340,23 @@ impl<'a> MeasureCtx<'a> {
         self.frame.version.clone()
     }
 
+    /// Whether one declared requirement is unmet, and by how much.
+    ///
+    /// Inputs are inspected through a scratch collector that is discarded, so
+    /// asking the question does not answer it into provenance. A requirement
+    /// check is about the *shape* of the offered evidence; the values a
+    /// measurement actually derives from are the ones the sensor reads through
+    /// [`Self::read`]. Sharing the context's collector here made every
+    /// `Ordered` sensor claim every observation as an input, including the ones
+    /// it went on to ignore.
     pub fn evidence_gap(&self, requirement: EvidenceRequirement) -> Option<EvidenceGap> {
+        let scratch = DependencyCollector::default();
         match requirement {
             EvidenceRequirement::TotalOrder => {
                 let have = usize::from(
                     self.rankings
                         .iter()
-                        .any(|ranking| self.read(ranking).is_total()),
+                        .any(|ranking| scratch.read(ranking).is_total()),
                 );
                 (have < 1).then_some(EvidenceGap {
                     requirement,
@@ -356,7 +376,7 @@ impl<'a> MeasureCtx<'a> {
                 let have = self
                     .observations
                     .iter()
-                    .filter(|observation| self.read(observation).observed_at.is_some())
+                    .filter(|observation| scratch.read(observation).observed_at.is_some())
                     .count();
                 let need = self.observations.len();
                 (have < need).then_some(EvidenceGap {
@@ -453,11 +473,53 @@ pub fn classify_sensor(
     SensorDecision::Run
 }
 
+/// Capability-scoped inputs for one inference stage invocation.
+///
+/// Fields are private and reached through accessors, matching every other
+/// context in this module. They were public, which let a plugin destructure the
+/// context and take `io` out of it — the one handle whose use is supposed to be
+/// confined to this stage — and meant this context alone could not later record
+/// or restrict a read without breaking its callers.
 pub struct InferCtx<'a> {
-    pub source: SourceRef,
-    pub domain: &'a DomainSnapshot,
-    pub params: &'a Params,
-    pub io: &'a dyn InferenceIo,
+    source: SourceRef,
+    domain: &'a DomainSnapshot,
+    params: &'a Params,
+    io: &'a dyn InferenceIo,
+}
+
+impl<'a> InferCtx<'a> {
+    pub fn new(
+        source: SourceRef,
+        domain: &'a DomainSnapshot,
+        params: &'a Params,
+        io: &'a dyn InferenceIo,
+    ) -> Self {
+        Self {
+            source,
+            domain,
+            params,
+            io,
+        }
+    }
+
+    /// The external source this inference is drawing from.
+    pub fn source(&self) -> &SourceRef {
+        &self.source
+    }
+
+    pub fn domain(&self) -> &DomainSnapshot {
+        self.domain
+    }
+
+    pub fn params(&self) -> &Params {
+        self.params
+    }
+
+    /// The model boundary for this stage. Requests made any other way are not
+    /// recorded against the run.
+    pub fn io(&self) -> &dyn InferenceIo {
+        self.io
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -473,7 +535,6 @@ pub enum InferenceOutput {
     Structured(serde_json::Value),
 }
 
-#[async_trait]
 /// The boundary to an external model for the inference stage.
 ///
 /// This is the one place a model provider is contacted during inference. It is
@@ -1792,6 +1853,83 @@ mod tests {
         assert_eq!(
             registry.resolve(&profile).err().unwrap(),
             PluginError::MissingPlugin(PluginId::new("sensor.missing"))
+        );
+    }
+
+    #[test]
+    fn an_evidence_check_does_not_record_the_inputs_it_inspects() {
+        use std::collections::BTreeMap;
+        use unclip_domain::{DomainId, FrameId};
+        use unclip_epistemic::{DerivedId, DomainVersion, FrameVersion, Timestamp};
+        use unclip_observe::{Observation, ObservationId};
+
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("1"),
+            axes: Vec::new(),
+        };
+        // Two observations, only one of which a sensor would go on to use.
+        let observations = ["kept", "ignored"]
+            .map(|id| {
+                Tracked::from_recorded(
+                    DerivedId::new(id),
+                    Observation {
+                        id: ObservationId::new(id),
+                        source: SourceRef::new("fixture"),
+                        observed_at: Some("2026-09-17T00:00:00Z".into()),
+                        units: Vec::new(),
+                        relations: Vec::new(),
+                        context: BTreeMap::new(),
+                    },
+                )
+            })
+            .to_vec();
+        let params = serde_json::json!({});
+        let ctx = MeasureCtx::new(
+            &domain,
+            &frame,
+            &observations,
+            &[],
+            &[],
+            &params,
+            DependencyCollector::default(),
+        );
+
+        // `Ordered` inspects every observation to count how many are ordered.
+        assert_eq!(ctx.evidence_gap(EvidenceRequirement::Ordered), None);
+        assert_eq!(
+            ctx.evidence_gap(EvidenceRequirement::MinSamples(3)),
+            Some(EvidenceGap {
+                requirement: EvidenceRequirement::MinSamples(3),
+                have: 2,
+                need: 3
+            })
+        );
+
+        // Only what the sensor itself reads becomes an input.
+        let _ = ctx.read(&observations[0]);
+        let derived = ctx
+            .calculation_token(
+                EmitMetadata::new(
+                    DerivedId::new("measurement"),
+                    PluginId::new("sensor.stub"),
+                    Version::new(0, 1, 0),
+                    &params,
+                    Timestamp::new("2026-09-17T00:00:00Z"),
+                )
+                .with_algorithm("stub"),
+            )
+            .emit(());
+        assert_eq!(
+            derived.provenance().inputs,
+            vec![DerivedId::new("kept")],
+            "an evidence check must not claim inputs the sensor never used"
         );
     }
 }

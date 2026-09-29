@@ -32,6 +32,12 @@ pub const MAX_QUERY_FILTER_ITEMS: usize = 400;
 /// A path must be absolute (`/`-prefixed), have no empty segments (no `//`),
 /// no trailing slash, and contain no whitespace. The bare root `/` is not a
 /// valid branch address.
+///
+/// `.` and `..` are rejected as segments. A branch path is a storage key, not a
+/// filesystem path: nothing resolves it, so `/a/../b` would be a row distinct
+/// from `/b` while reading as the same place, and `is_under` would report it as
+/// scoped beneath `/a`. Refusing the segment is the only way the two readings
+/// cannot disagree.
 pub fn validate_path(path: &str) -> Result<()> {
     let invalid = |path: &str| CoreError::InvalidPath(path.to_string());
 
@@ -40,6 +46,8 @@ pub fn validate_path(path: &str) -> Result<()> {
     }
     for segment in path.split('/').skip(1) {
         if segment.is_empty()
+            || segment == "."
+            || segment == ".."
             || segment
                 .chars()
                 .any(|ch| ch.is_whitespace() || ch.is_control())
@@ -195,13 +203,45 @@ pub fn validate_reference(reference: &Reference) -> Result<()> {
     Ok(())
 }
 
-fn branch_record_bytes(branch: &Branch) -> usize {
+/// Serialized byte length of a JSON value, without building the string.
+///
+/// `metadata.to_string()` would allocate the entire payload — up to the
+/// [`MAX_BRANCH_RECORD_BYTES`] limit this function exists to enforce — only to
+/// read its length and drop it. Counting into a sink measures the same bytes
+/// `serde_json` would write while holding nothing.
+fn json_bytes(value: &serde_json::Value) -> usize {
+    /// Discards every byte and keeps the count.
+    struct CountingSink(usize);
+
+    impl std::io::Write for CountingSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut sink = CountingSink(0);
+    // Serializing a `Value` to a sink that cannot fail has no failure mode of
+    // its own, but a size that silently read as 0 would wave an oversized
+    // record through, so fall back to the allocating path rather than guessing.
+    if serde_json::to_writer(&mut sink, value).is_ok() {
+        sink.0
+    } else {
+        value.to_string().len()
+    }
+}
+
+pub(crate) fn branch_record_bytes(branch: &Branch) -> usize {
     let mut total = branch
         .path
         .len()
         .saturating_add(branch.title.as_ref().map_or(0, String::len))
         .saturating_add(branch.description.as_ref().map_or(0, String::len))
-        .saturating_add(branch.metadata.to_string().len());
+        .saturating_add(json_bytes(&branch.metadata));
     for (name, value) in &branch.o2o {
         total = total.saturating_add(name.len()).saturating_add(value.len());
     }
@@ -309,14 +349,6 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
                 selection.branch.path
             ));
         }
-        if let Some(slot_name) = &selection.slot {
-            if !seen_per_slot.insert((&**slot_name, selection.branch.path.as_str())) {
-                violations.push(format!(
-                    "slot `{slot_name}` selects `{}` more than once",
-                    selection.branch.path
-                ));
-            }
-        }
         let Some(slot_name) = &selection.slot else {
             violations.push(format!(
                 "selection `{}` has no slot for frame `{}`",
@@ -324,6 +356,12 @@ pub fn validate_packet(frame: &Frame, packet: &SelectionPacket) -> Vec<String> {
             ));
             continue;
         };
+        if !seen_per_slot.insert((&**slot_name, selection.branch.path.as_str())) {
+            violations.push(format!(
+                "slot `{slot_name}` selects `{}` more than once",
+                selection.branch.path
+            ));
+        }
         match frame.slot(slot_name) {
             Some(slot) => {
                 for reason in validate_branch(slot, &selection.branch) {

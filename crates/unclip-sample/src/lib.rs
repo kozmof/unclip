@@ -25,6 +25,20 @@ const PREFER_BONUS_PER_MATCH: f64 = 0.5;
 const RECENT_PENALTY: f64 = 0.25;
 /// Floor so a candidate with weight 0 can still be chosen if nothing else is.
 const MIN_SCORE: f64 = 1e-6;
+/// Ceiling that keeps a dominant score from collapsing into a tie.
+///
+/// [`Reservoir`] keys a candidate as `u^(1/score)`. Once `score` reaches about
+/// `1e30`, `1/score` is small enough that `u^(1/score)` rounds to exactly `1.0`
+/// for *every* `u`, so all such candidates hold the identical key and the
+/// strictly-greater comparison in `offer` lets whichever arrived first hold its
+/// slot against all of them. That turns weighted sampling into first-come order
+/// precisely among the candidates that should dominate it.
+///
+/// At `1e12` the keys stay distinct, and nothing below the ceiling changes: the
+/// gap between `1e12` and a larger score was never representable in the key
+/// anyway. Saturating here rather than at [`f64::MAX`] costs no ordering that
+/// f64 could express.
+const MAX_SCORE: f64 = 1e12;
 
 /// Build a seeded RNG.
 pub fn rng_from_seed(seed: u64) -> StdRng {
@@ -76,11 +90,12 @@ pub fn score(
     }
 
     // Preference multiplication can overflow even when the persisted weight is
-    // finite. Saturate so every score remains a valid sampling input.
+    // finite. Saturate so every score remains a valid sampling input, and clamp
+    // to a ceiling the reservoir key can still tell apart — see [`MAX_SCORE`].
     if s.is_finite() {
-        s.max(MIN_SCORE)
+        s.clamp(MIN_SCORE, MAX_SCORE)
     } else {
-        f64::MAX
+        MAX_SCORE
     }
 }
 
@@ -363,5 +378,75 @@ mod tests {
 
         p.avoid_recent = true;
         assert!(score(&b, &q, &p, &recent) < score(&b, &q, &p, &HashSet::new()));
+    }
+}
+
+#[cfg(test)]
+mod saturation_tests {
+    use super::*;
+
+    #[test]
+    fn a_dominant_score_still_sorts_by_its_random_draw() {
+        // Every candidate saturates, so the reservoir has nothing but the draw
+        // to order them by. Before `MAX_SCORE` each key rounded to exactly 1.0
+        // and `offer`'s strictly-greater test kept whichever came first,
+        // regardless of what was drawn afterwards.
+        let mut reservoir = Reservoir::new(1);
+        let mut rng = rng_from_seed(7);
+        let mut branches = Vec::new();
+        for index in 0..8 {
+            let mut branch = Branch::new(format!("/candidate-{index}"));
+            branch.weight = f64::MAX;
+            branches.push(branch);
+        }
+        for branch in &branches {
+            reservoir.offer(branch.clone(), score_of(branch), &mut rng);
+        }
+        let kept = reservoir.into_branches();
+        assert_eq!(kept.len(), 1);
+
+        // Whichever candidate wins, it is not simply the first one for every
+        // seed: the draw decides. Scan seeds and require at least two distinct
+        // winners, which a collapsed key can never produce.
+        let winners = (0..32u64)
+            .map(|seed| {
+                let mut reservoir = Reservoir::new(1);
+                let mut rng = rng_from_seed(seed);
+                for branch in &branches {
+                    reservoir.offer(branch.clone(), score_of(branch), &mut rng);
+                }
+                reservoir.into_branches()[0].path.clone()
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            winners.len() > 1,
+            "a saturated score collapsed into first-come order: {winners:?}"
+        );
+    }
+
+    #[test]
+    fn saturation_is_clamped_rather_than_infinite() {
+        let mut branch = Branch::new("/huge");
+        branch.weight = f64::MAX;
+        let s = score_of(&branch);
+        assert!(s.is_finite());
+        assert_eq!(s, MAX_SCORE);
+
+        // A zero weight still scores at the floor, so it remains selectable.
+        let mut branch = Branch::new("/zero");
+        branch.weight = 0.0;
+        assert_eq!(score_of(&branch), MIN_SCORE);
+    }
+
+    fn score_of(branch: &Branch) -> f64 {
+        score(
+            branch,
+            &SampleQuery::default(),
+            &SampleParams {
+                weighted: true,
+                ..SampleParams::default()
+            },
+            &HashSet::new(),
+        )
     }
 }

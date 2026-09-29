@@ -42,7 +42,7 @@ impl Inferrer for ManualInferrer {
         token: unclip_epistemic::InferenceToken,
     ) -> Result<unclip_epistemic::Inferred<InferenceOutput>> {
         let input: ManualInput = serde_json::from_value(
-            ctx.io.request(&ctx.source, ctx.params).await?,
+            ctx.io().request(ctx.source(), ctx.params()).await?,
         )
         .map_err(|error| PluginError::Message(format!("invalid manual observation: {error}")))?;
         if let Some(ranking) = &input.ranking {
@@ -101,12 +101,7 @@ mod tests {
         };
         let params = serde_json::json!({"strict": true});
         let source = SourceRef::new("observations/manual.yaml");
-        let ctx = InferCtx {
-            source: source.clone(),
-            domain: &domain,
-            params: &params,
-            io: &FixtureIo,
-        };
+        let ctx = InferCtx::new(source.clone(), &domain, &params, &FixtureIo);
         let metadata = EmitMetadata::new(
             DerivedId::new("manual-derived"),
             PluginId::new("infer.manual"),

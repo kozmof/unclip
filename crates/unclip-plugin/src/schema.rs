@@ -16,10 +16,19 @@
 //!
 //! `type` (`object`/`array`/`string`/`number`/`integer`/`boolean`/`null`),
 //! `properties`, `required`, `additionalProperties` (boolean form), `items`,
-//! `enum`, `minLength`, `minimum`, `maximum`, `exclusiveMinimum`, and `oneOf`.
-//! Anything else in a schema is ignored rather than rejected, so an unsupported
-//! keyword weakens the check instead of failing a valid plugin. [`check_schema`]
-//! reports a schema that is malformed or that relies on nothing this understands.
+//! `enum`, `const`, `minLength`, `minimum`, `maximum`, `exclusiveMinimum`,
+//! `exclusiveMaximum`, `minItems`, `maxItems`, `uniqueItems`, and `oneOf`.
+//!
+//! [`check_schema`] *rejects* any other keyword rather than ignoring it. An
+//! ignored keyword is the failure mode this module exists to prevent: a
+//! descriptor that declares `exclusiveMaximum` and is never held to it has the
+//! same standing as a comment, which is exactly the state `validate_params` was
+//! introduced to end. A schema may still carry the purely informative keywords
+//! in [`ANNOTATION_KEYWORDS`], which constrain nothing by definition.
+//!
+//! Adding a keyword therefore means two edits — teach [`validate_params`] to
+//! enforce it and add it to [`CONSTRAINT_KEYWORDS`] — and the registry-wide
+//! `check_schema` test fails until both are done.
 
 use serde_json::Value;
 
@@ -122,6 +131,15 @@ fn validate(schema: &Value, value: &Value, path: &str) -> Result<(), SchemaViola
         }
     }
 
+    // `const` is what discriminates the branches of a tagged `oneOf`. Without it
+    // a branch's tag field accepts any string of the right type, so two branches
+    // that differ only by tag both match and the `oneOf` reports the wrong count.
+    if let Some(expected) = schema.get("const") {
+        if value != expected {
+            return Err(violation(path, format!("must be {expected}")));
+        }
+    }
+
     if let Some(text) = value.as_str() {
         if let Some(minimum) = schema.get("minLength").and_then(Value::as_u64) {
             if (text.chars().count() as u64) < minimum {
@@ -147,6 +165,43 @@ fn validate(schema: &Value, value: &Value, path: &str) -> Result<(), SchemaViola
         if let Some(limit) = schema.get("exclusiveMinimum").and_then(Value::as_f64) {
             if number <= limit {
                 return Err(violation(path, format!("must be greater than {limit}")));
+            }
+        }
+        if let Some(limit) = schema.get("exclusiveMaximum").and_then(Value::as_f64) {
+            if number >= limit {
+                return Err(violation(path, format!("must be less than {limit}")));
+            }
+        }
+    }
+
+    if let Some(values) = value.as_array() {
+        if let Some(minimum) = schema.get("minItems").and_then(Value::as_u64) {
+            if (values.len() as u64) < minimum {
+                return Err(violation(
+                    path,
+                    format!("must have at least {minimum} item(s)"),
+                ));
+            }
+        }
+        if let Some(maximum) = schema.get("maxItems").and_then(Value::as_u64) {
+            if (values.len() as u64) > maximum {
+                return Err(violation(
+                    path,
+                    format!("must have at most {maximum} item(s)"),
+                ));
+            }
+        }
+        // Quadratic, which is the right trade at these sizes: parameter arrays
+        // are a handful of entries, and `serde_json::Value` is not `Hash`, so a
+        // set would mean serializing every element to key it.
+        if schema.get("uniqueItems") == Some(&Value::Bool(true)) {
+            for (index, item) in values.iter().enumerate() {
+                if values[..index].contains(item) {
+                    return Err(violation(
+                        &join(path, &index.to_string()),
+                        format!("duplicates an earlier item: {item}"),
+                    ));
+                }
             }
         }
     }
@@ -195,13 +250,47 @@ fn validate(schema: &Value, value: &Value, path: &str) -> Result<(), SchemaViola
 #[error("{0}")]
 pub struct MalformedSchema(pub String);
 
+/// Every keyword [`validate_params`] actually enforces.
+///
+/// [`check_schema`] rejects anything outside this list and
+/// [`ANNOTATION_KEYWORDS`], so a keyword cannot be declared by a descriptor
+/// without being enforced. Extend this only together with the matching arm in
+/// `validate`.
+pub const CONSTRAINT_KEYWORDS: &[&str] = &[
+    "additionalProperties",
+    "const",
+    "enum",
+    "exclusiveMaximum",
+    "exclusiveMinimum",
+    "items",
+    "maxItems",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minimum",
+    "oneOf",
+    "properties",
+    "required",
+    "type",
+    "uniqueItems",
+];
+
+/// Keywords that document a schema without constraining any value.
+///
+/// These are safe to ignore because ignoring them is their specified behaviour:
+/// `default` supplies a value the *plugin* applies when a key is absent, and it
+/// would be wrong for a validator to enforce it. `title` and `description` are
+/// prose.
+pub const ANNOTATION_KEYWORDS: &[&str] = &["default", "description", "title"];
+
 /// Check that a declared schema is well formed enough to constrain anything.
 ///
 /// This is what keeps a descriptor's schema from decaying into a comment. It
-/// requires an object schema to say whether it accepts unknown keys and to list
-/// every `required` name among its `properties` — a `required` name that is not
-/// a declared property can never be satisfied by a value the schema also
-/// accepts, so it is always a mistake rather than a strict contract.
+/// requires an object schema to say whether it accepts unknown keys, requires
+/// every `required` name to appear among its `properties` — a `required` name
+/// that is not a declared property can never be satisfied by a value the schema
+/// also accepts, so it is always a mistake rather than a strict contract — and
+/// rejects any keyword `validate_params` would silently ignore.
 pub fn check_schema(schema: &str) -> Result<(), MalformedSchema> {
     let parsed: Value = serde_json::from_str(schema)
         .map_err(|error| MalformedSchema(format!("schema is not valid JSON: {error}")))?;
@@ -212,11 +301,35 @@ fn check(schema: &Value, path: &str) -> Result<(), MalformedSchema> {
     let Some(object) = schema.as_object() else {
         return Ok(());
     };
+    let named = |path: &str| {
+        if path.is_empty() {
+            "params".to_owned()
+        } else {
+            path.to_owned()
+        }
+    };
+
+    // An unenforced keyword is worse than an absent one: it reads as a
+    // constraint to everyone but the validator. Reject it here so the gap
+    // surfaces on the descriptor that opened it.
+    for keyword in object.keys() {
+        if !CONSTRAINT_KEYWORDS.contains(&keyword.as_str())
+            && !ANNOTATION_KEYWORDS.contains(&keyword.as_str())
+        {
+            return Err(MalformedSchema(format!(
+                "{}: `{keyword}` is not enforced by validate_params; \
+                 implement it and add it to CONSTRAINT_KEYWORDS, or remove it",
+                named(path)
+            )));
+        }
+    }
+
     if let Some(Value::Array(branches)) = object.get("oneOf") {
         for (index, branch) in branches.iter().enumerate() {
             check(branch, &join(path, &index.to_string()))?;
         }
-        return Ok(());
+        // Fall through rather than returning: `validate` applies a `oneOf`
+        // schema's sibling keywords too, so they have to be checked as well.
     }
     let declares_object = object.get("type") == Some(&Value::String("object".into()))
         || object.contains_key("properties");
@@ -224,7 +337,7 @@ fn check(schema: &Value, path: &str) -> Result<(), MalformedSchema> {
     if declares_object && !object.contains_key("additionalProperties") {
         return Err(MalformedSchema(format!(
             "{}: object schema must state `additionalProperties`",
-            if path.is_empty() { "params" } else { path }
+            named(path)
         )));
     }
     if let Some(Value::Array(required)) = object.get("required") {
@@ -232,7 +345,7 @@ fn check(schema: &Value, path: &str) -> Result<(), MalformedSchema> {
             if !properties.is_some_and(|declared| declared.contains_key(name)) {
                 return Err(MalformedSchema(format!(
                     "{}: `{name}` is required but not a declared property",
-                    if path.is_empty() { "params" } else { path }
+                    named(path)
                 )));
             }
         }
@@ -358,6 +471,161 @@ mod tests {
         .expect_err("unsatisfiable requirement must be rejected");
         assert!(error.0.contains("`b` is required"), "got: {}", error.0);
         assert!(check_schema("{oops").is_err());
+    }
+
+    #[test]
+    fn numeric_and_array_bounds_are_enforced() {
+        let schema = r#"{"type":"object","additionalProperties":false,
+            "properties":{
+                "p":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1},
+                "strata":{"type":"array","minItems":1,"maxItems":2,"uniqueItems":true,
+                          "items":{"type":"string"}}}}"#;
+        assert!(check_schema(schema).is_ok());
+        assert!(validate_params(schema, &json!({"p": 0.9, "strata": ["a", "b"]})).is_ok());
+
+        // `exclusiveMaximum` was previously declared by four descriptors and
+        // enforced by none of them, so the boundary value was accepted.
+        assert_eq!(
+            validate_params(schema, &json!({"p": 1.0}))
+                .unwrap_err()
+                .reason,
+            "must be less than 1"
+        );
+        assert_eq!(
+            validate_params(schema, &json!({"strata": []}))
+                .unwrap_err()
+                .reason,
+            "must have at least 1 item(s)"
+        );
+        assert_eq!(
+            validate_params(schema, &json!({"strata": ["a", "b", "c"]}))
+                .unwrap_err()
+                .reason,
+            "must have at most 2 item(s)"
+        );
+        let duplicate = validate_params(schema, &json!({"strata": ["a", "a"]})).unwrap_err();
+        assert_eq!(duplicate.path, "strata/1");
+        assert!(duplicate.reason.contains("duplicates an earlier item"));
+    }
+
+    #[test]
+    fn const_discriminates_tagged_one_of_branches() {
+        // Without `const` both branches accept `{"field":"source"}` on the
+        // strength of `required` alone, so the `oneOf` count is wrong.
+        let schema = r#"{"oneOf":[
+            {"type":"object","additionalProperties":false,"required":["field"],
+             "properties":{"field":{"const":"source"}}},
+            {"type":"object","additionalProperties":false,"required":["field"],
+             "properties":{"field":{"const":"context"}}}]}"#;
+        assert!(check_schema(schema).is_ok());
+        assert!(validate_params(schema, &json!({"field": "source"})).is_ok());
+        assert!(validate_params(schema, &json!({"field": "context"})).is_ok());
+        assert_eq!(
+            validate_params(schema, &json!({"field": "other"}))
+                .unwrap_err()
+                .reason,
+            "value matches 0 of 2 alternatives, expected exactly 1"
+        );
+    }
+
+    #[test]
+    fn check_schema_rejects_a_keyword_validate_params_would_ignore() {
+        // The decay this module exists to prevent: a constraint that reads as
+        // enforced and is not. Rejecting it at the descriptor is the only way
+        // the gap becomes visible, since a valid value never trips it.
+        let error = check_schema(
+            r#"{"type":"object","additionalProperties":false,
+                "properties":{"name":{"type":"string","pattern":"^a"}}}"#,
+        )
+        .expect_err("an unenforced keyword must be rejected");
+        assert!(
+            error.0.contains("`pattern` is not enforced"),
+            "got: {}",
+            error.0
+        );
+
+        // Nested positions are reached too: inside `items` and inside `oneOf`.
+        assert!(
+            check_schema(r#"{"type":"array","items":{"type":"number","multipleOf":2}}"#).is_err()
+        );
+        assert!(check_schema(r#"{"oneOf":[{"type":"string","format":"email"}]}"#).is_err());
+
+        // Annotations constrain nothing by specification, so they stay legal.
+        assert!(check_schema(
+            r#"{"type":"object","additionalProperties":false,"description":"x",
+                "properties":{"p":{"type":"number","default":0.9,"title":"P"}}}"#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_one_of_schema_still_has_its_sibling_keywords_checked() {
+        // `validate` applies both, so `check` must not stop at `oneOf`.
+        assert!(check_schema(
+            r#"{"oneOf":[{"type":"null"}],"properties":{"a":{"type":"string"}}}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn every_enforced_keyword_is_listed_and_every_listed_keyword_is_enforced() {
+        // CONSTRAINT_KEYWORDS is what `check_schema` admits, so a keyword that
+        // drifts out of `validate` has to drift out of this list as well. Each
+        // entry below is paired with a value its constraint rejects; a keyword
+        // that no longer constrains anything fails here rather than silently
+        // widening every descriptor that declares it.
+        let cases: &[(&str, &str, Value)] = &[
+            ("type", r#"{"type":"string"}"#, json!(1)),
+            ("enum", r#"{"enum":["a"]}"#, json!("b")),
+            ("const", r#"{"const":"a"}"#, json!("b")),
+            ("minLength", r#"{"minLength":2}"#, json!("a")),
+            ("minimum", r#"{"minimum":2}"#, json!(1)),
+            ("maximum", r#"{"maximum":2}"#, json!(3)),
+            ("exclusiveMinimum", r#"{"exclusiveMinimum":0}"#, json!(0)),
+            ("exclusiveMaximum", r#"{"exclusiveMaximum":1}"#, json!(1)),
+            ("minItems", r#"{"minItems":1}"#, json!([])),
+            ("maxItems", r#"{"maxItems":1}"#, json!([1, 2])),
+            ("uniqueItems", r#"{"uniqueItems":true}"#, json!([1, 1])),
+            ("items", r#"{"items":{"type":"string"}}"#, json!([1])),
+            ("oneOf", r#"{"oneOf":[{"type":"string"}]}"#, json!(1)),
+            (
+                "required",
+                r#"{"type":"object","additionalProperties":true,"required":["a"],
+                    "properties":{"a":{"type":"string"}}}"#,
+                json!({}),
+            ),
+            (
+                "properties",
+                r#"{"type":"object","additionalProperties":true,
+                    "properties":{"a":{"type":"string"}}}"#,
+                json!({"a": 1}),
+            ),
+            (
+                "additionalProperties",
+                r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
+                json!({"a": 1}),
+            ),
+        ];
+        for (keyword, schema, rejected) in cases {
+            assert!(
+                CONSTRAINT_KEYWORDS.contains(keyword),
+                "`{keyword}` is enforced but missing from CONSTRAINT_KEYWORDS"
+            );
+            assert!(
+                validate_params(schema, rejected).is_err(),
+                "`{keyword}` is listed as a constraint but accepted {rejected}"
+            );
+        }
+        let covered = cases
+            .iter()
+            .map(|(keyword, _, _)| *keyword)
+            .collect::<Vec<_>>();
+        for keyword in CONSTRAINT_KEYWORDS {
+            assert!(
+                covered.contains(keyword),
+                "`{keyword}` is admitted by check_schema with no case proving it constrains anything"
+            );
+        }
     }
 
     #[test]

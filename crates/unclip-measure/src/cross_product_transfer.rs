@@ -267,8 +267,11 @@ fn validate_movement(
             .and_then(|count| count.checked_add(axis.left_only_transitions))
             .and_then(|count| count.checked_add(axis.right_only_transitions))
             .and_then(|count| count.checked_add(axis.stationary_transitions));
-        let expected = (axis.concordant_transitions as f64 - axis.discordant_transitions as f64)
-            / axis.transition_count as f64;
+        // The count checks come first so the score is only ever re-derived from
+        // a count that can divide. A zero `transition_count` used to reach the
+        // division and produce `NaN`, which the `!=` below then rejected because
+        // `NaN != NaN` — the right answer for the wrong reason, and one that
+        // would silently invert if the comparison were ever reordered.
         if axis.left.0.trim().is_empty()
             || axis.right.0.trim().is_empty()
             || axis.transition_count < movement.minimum_transitions
@@ -277,7 +280,20 @@ fn validate_movement(
                 .transition_count
                 .checked_add(axis.excluded_transitions.len())
                 != Some(movement.transition_count)
-            || !axis.directional_concordance.is_finite()
+        {
+            return Err(CrossProductTransferError::InvalidMovementEvidence);
+        }
+        // `minimum_transitions == 0` is rejected above, so the preceding
+        // `transition_count < minimum_transitions` check establishes this.
+        debug_assert!(axis.transition_count > 0);
+        // Exact equality against a re-derivation through the shared producer
+        // function: see `directional_concordance`.
+        let expected = crate::directional_concordance(
+            axis.concordant_transitions,
+            axis.discordant_transitions,
+            axis.transition_count,
+        );
+        if !axis.directional_concordance.is_finite()
             || !(-1.0..=1.0).contains(&axis.directional_concordance)
             || axis.directional_concordance != expected
             || !valid_exclusions(&axis.excluded_transitions, &valid_transitions)

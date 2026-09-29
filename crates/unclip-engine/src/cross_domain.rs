@@ -24,6 +24,30 @@ fn invalid(message: impl std::fmt::Display) -> PluginError {
     PluginError::Message(message.to_string())
 }
 
+/// Hold a product sensor to its declared `params_schema` before invoking it.
+///
+/// `classify_sensor` does this for the [`Sensor`] family, but product and
+/// cross-product sensors are dispatched here by fixed id and so never reach it.
+/// Without this call their schemas are decoration: the five descriptors below
+/// state bounds that nothing checks, and a third-party sensor registered under
+/// one of these ids is held to nothing at all.
+///
+/// The parameters are serialized from a typed config, so a violation is a
+/// disagreement between that struct and the descriptor rather than bad user
+/// input — which is exactly the drift the schema exists to catch, and why this
+/// is an error rather than a recorded sparse reading.
+fn validate_sensor_params(
+    descriptor: &unclip_plugin::SensorDescriptor,
+    params: &serde_json::Value,
+) -> Result<()> {
+    unclip_plugin::validate_params(descriptor.params_schema, params).map_err(|violation| {
+        PluginError::InvalidParams(format!(
+            "{} parameters do not satisfy the declared schema: {violation}",
+            descriptor.id
+        ))
+    })
+}
+
 pub(super) fn validate_frame(
     product: &ProductDomainSnapshot,
     frame: &ProductMeasurementFrame,
@@ -134,6 +158,7 @@ impl crate::Engine {
         validate_frame(product_value, frame_value)?;
         let (left_units, right_units) = frame_units(frame_value);
         let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
             "product_domain": &product_value.id,
@@ -218,6 +243,7 @@ impl crate::Engine {
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
             "product_domain": &product_value.id,
@@ -293,6 +319,7 @@ impl crate::Engine {
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
             "product_domain": &product_value.id,
@@ -379,6 +406,7 @@ impl crate::Engine {
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
             "product_domain": &product_value.id,
@@ -478,6 +506,7 @@ impl crate::Engine {
         let target_frame_value = dependencies.read(target_frame);
         validate_frame(target_product_value, target_frame_value)?;
         let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "source_product": source_product.id(),
             "source_product_domain": &source_product_value.id,

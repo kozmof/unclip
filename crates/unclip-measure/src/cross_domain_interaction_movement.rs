@@ -23,6 +23,27 @@ pub struct CrossDomainTransition {
     pub to: ObservationId,
 }
 
+/// The directional-concordance score for one axis, from its transition counts.
+///
+/// Both the producer of [`CrossDomainAxisMovement`] and the validator that
+/// re-derives the score to check stored evidence call this, because the check is
+/// an exact `f64` comparison. That comparison is sound only while both sides
+/// evaluate the *same expression*: `(c - d) / n` and `c / n - d / n` are equal in
+/// real arithmetic and not always in floating point, so two open-coded copies
+/// would be free to drift into disagreement with nothing to catch it. One
+/// function means there is only one rounding to agree on.
+///
+/// `transition_count` is the caller's responsibility to check first — a count of
+/// zero yields `NaN`, which every downstream guard rejects, but by accident
+/// rather than by intent.
+pub(crate) fn directional_concordance(
+    concordant: usize,
+    discordant: usize,
+    transition_count: usize,
+) -> f64 {
+    (concordant as f64 - discordant as f64) / transition_count as f64
+}
+
 /// Movement evidence for one materialized product interaction.
 ///
 /// The score is the mean of `sign(delta_left) * sign(delta_right)` over every
@@ -215,7 +236,7 @@ pub fn cross_domain_interaction_movement(
             measured.push(CrossDomainAxisMovement {
                 left: axis.left.clone(),
                 right: axis.right.clone(),
-                directional_concordance: (concordant as f64 - discordant as f64) / complete as f64,
+                directional_concordance: directional_concordance(concordant, discordant, complete),
                 transition_count: complete,
                 concordant_transitions: concordant,
                 discordant_transitions: discordant,

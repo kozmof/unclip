@@ -48,6 +48,7 @@ pub use canonical_correlation::{
 mod cross_domain_interaction_movement;
 mod cross_domain_mutual_information;
 mod cross_product_transfer;
+pub(crate) use cross_domain_interaction_movement::directional_concordance;
 pub use cross_domain_interaction_movement::{
     cross_domain_interaction_movement, CrossDomainAxisMovement, CrossDomainInteractionMovement,
     CrossDomainInteractionMovementConfig, CrossDomainInteractionMovementError,

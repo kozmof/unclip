@@ -41,6 +41,13 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --all-targets
 
+      # `--all-targets` excludes doctests, so the `compile_fail` blocks that
+      # document the epistemic boundary were never compiled by CI: one that
+      # stopped failing would have gone unnoticed. The trybuild suite pins the
+      # rendered diagnostics; this pins everything asserted only in the docs.
+      - name: Doctests
+        run: cargo test --locked --workspace --doc
+
       # Keep release-only code generation and optimization failures from being
       # discovered for the first time during packaging.
       - name: Release build

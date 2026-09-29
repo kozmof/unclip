@@ -517,12 +517,7 @@ impl Engine {
         for inferrer in &plan.inferrers {
             let descriptor = inferrer.descriptor();
             let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
-            let ctx = unclip_plugin::InferCtx {
-                source: run.source.clone(),
-                domain,
-                params,
-                io: run.io,
-            };
+            let ctx = unclip_plugin::InferCtx::new(run.source.clone(), domain, params, run.io);
             let metadata = EmitMetadata::new(
                 DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 descriptor.id.clone(),
