@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::Engine;
+use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig, CrossDomainSample,
@@ -55,47 +55,45 @@ fn product_and_frame() -> (
     Calculated<ProductMeasurementFrame>,
 ) {
     let engine = Engine::with_builtins().unwrap();
-    let product = engine
-        .materialize_product_domain(
-            &Tracked::from_recorded(
-                DerivedId::new("coffee@7"),
-                domain("coffee", "7", &["presentation", "social"]),
-            ),
-            &Tracked::from_recorded(
-                DerivedId::new("photo@3"),
-                domain("photo", "3", &["composition", "sharing"]),
-            ),
-            &[
-                interaction("presentation-composition", "presentation", "composition"),
-                interaction("social-sharing", "social", "sharing"),
-            ],
-            ProductDomainId::new("coffee-x-photo"),
-            ProductDomainVersion::new("2"),
-            "product-run",
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
-    let frame = engine
-        .create_product_frame(
-            &Tracked::from(&product),
-            &[
-                ProductFrameAxis {
-                    left: UnitId::new("presentation"),
-                    right: UnitId::new("composition"),
-                    label: Some("visual form".into()),
-                },
-                ProductFrameAxis {
-                    left: UnitId::new("social"),
-                    right: UnitId::new("sharing"),
-                    label: Some("social exchange".into()),
-                },
-            ],
-            ProductFrameId::new("coffee-photo.general"),
-            ProductFrameVersion::new("5"),
-            "frame-run",
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
+    let product = materialize_product_domain(
+        &Tracked::from_recorded(
+            DerivedId::new("coffee@7"),
+            domain("coffee", "7", &["presentation", "social"]),
+        ),
+        &Tracked::from_recorded(
+            DerivedId::new("photo@3"),
+            domain("photo", "3", &["composition", "sharing"]),
+        ),
+        &[
+            interaction("presentation-composition", "presentation", "composition"),
+            interaction("social-sharing", "social", "sharing"),
+        ],
+        ProductDomainId::new("coffee-x-photo"),
+        ProductDomainVersion::new("2"),
+        "product-run",
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
+    let frame = create_product_frame(
+        &Tracked::from(&product),
+        &[
+            ProductFrameAxis {
+                left: UnitId::new("presentation"),
+                right: UnitId::new("composition"),
+                label: Some("visual form".into()),
+            },
+            ProductFrameAxis {
+                left: UnitId::new("social"),
+                right: UnitId::new("sharing"),
+                label: Some("social exchange".into()),
+            },
+        ],
+        ProductFrameId::new("coffee-photo.general"),
+        ProductFrameVersion::new("5"),
+        "frame-run",
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
     (engine, product, frame)
 }
 

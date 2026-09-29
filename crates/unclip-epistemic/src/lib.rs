@@ -269,12 +269,45 @@ impl<T> Tracked<T> {
         }
     }
 
-    /// Restore a tracked value using its persisted provenance identity.
+    /// Restore a tracked value whose operation is not known here.
+    ///
+    /// The result carries no operation, so a gate such as the engine's
+    /// calculated-evidence check cannot verify it and must accept it on trust.
+    /// Prefer [`Self::from_calculated`] or [`Self::from_inferred`] whenever the
+    /// table the value was read from establishes which operation produced it —
+    /// which, for every first-party repository, it does.
     pub fn from_recorded(id: DerivedId, value: T) -> Self {
         Self {
             id,
             value,
             operation: None,
+        }
+    }
+
+    /// Restore a value the caller knows was produced by calculation.
+    ///
+    /// Use this when the row's table admits only calculated values — a stored
+    /// measurement, profile, or empirical structure. Naming the operation is
+    /// what lets a downstream gate reject an interpreted or inferred value
+    /// instead of accepting an unlabeled one.
+    pub fn from_calculated(id: DerivedId, value: T) -> Self {
+        Self {
+            id,
+            value,
+            operation: Some(Operation::Calculated),
+        }
+    }
+
+    /// Restore a value the caller knows was produced by inference.
+    ///
+    /// Observations, alignments, and rankings replayed from a recorded run are
+    /// inference products; labeling them as such keeps a calculated-evidence
+    /// gate from silently accepting them.
+    pub fn from_inferred(id: DerivedId, value: T) -> Self {
+        Self {
+            id,
+            value,
+            operation: Some(Operation::Inferred),
         }
     }
 
@@ -330,6 +363,82 @@ pub struct EmitMetadata {
     pub domain_version: Option<DomainVersion>,
     pub frame_version: Option<FrameVersion>,
     pub model: Option<ModelRef>,
+}
+
+impl EmitMetadata {
+    /// The five fields every emission must supply, with the optional
+    /// provenance qualifiers left unset.
+    ///
+    /// `params_hash` is derived from `params` rather than accepted separately:
+    /// a caller that passes the two independently can pass a hash of something
+    /// else, which would make the recorded provenance unverifiable. Callers
+    /// that record a hash of different bytes than they record as parameters
+    /// have to say so by assigning the field.
+    ///
+    /// `algorithm` defaults to the producer's id, which is what every
+    /// first-party emission uses; override the field for a plugin that runs
+    /// more than one named algorithm.
+    pub fn new(
+        id: DerivedId,
+        producer: PluginId,
+        version: Version,
+        params: &serde_json::Value,
+        timestamp: Timestamp,
+    ) -> Self {
+        Self {
+            id,
+            algorithm: producer.0.clone(),
+            producer,
+            version,
+            params: params.clone(),
+            params_hash: hash_params(params),
+            source: None,
+            timestamp,
+            domain_version: None,
+            frame_version: None,
+            model: None,
+        }
+    }
+
+    // The qualifiers take `impl Into<Option<_>>` so a caller can pass either the
+    // value or an already-optional one. Several callers forward a qualifier read
+    // straight off an input's provenance, where it is already `Option`, and a
+    // value-only signature would make each of those re-wrap it.
+
+    /// Record the external source this value was derived from.
+    #[must_use]
+    pub fn with_source(mut self, source: impl Into<Option<SourceRef>>) -> Self {
+        self.source = source.into();
+        self
+    }
+
+    /// Record the domain version this value was calculated against.
+    #[must_use]
+    pub fn with_domain_version(mut self, version: impl Into<Option<DomainVersion>>) -> Self {
+        self.domain_version = version.into();
+        self
+    }
+
+    /// Record the measurement-frame version this value was calculated against.
+    #[must_use]
+    pub fn with_frame_version(mut self, version: impl Into<Option<FrameVersion>>) -> Self {
+        self.frame_version = version.into();
+        self
+    }
+
+    /// Record the model selector that produced this value, when one did.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<Option<ModelRef>>) -> Self {
+        self.model = model.into();
+        self
+    }
+
+    /// Name the algorithm separately from the producing plugin.
+    #[must_use]
+    pub fn with_algorithm(mut self, algorithm: impl Into<String>) -> Self {
+        self.algorithm = algorithm.into();
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -391,19 +500,14 @@ mod tests {
     use super::*;
 
     fn metadata(id: &str) -> EmitMetadata {
-        EmitMetadata {
-            id: DerivedId::new(id),
-            producer: PluginId::new("sensor.test"),
-            algorithm: "test".into(),
-            version: Version::new(0, 1, 0),
-            params: serde_json::json!({}),
-            params_hash: ParameterHash::new("hash"),
-            source: None,
-            timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        }
+        EmitMetadata::new(
+            DerivedId::new(id),
+            PluginId::new("sensor.test"),
+            Version::new(0, 1, 0),
+            &serde_json::json!({}),
+            Timestamp::new("2026-09-17T00:00:00Z"),
+        )
+        .with_algorithm("test")
     }
 
     #[test]

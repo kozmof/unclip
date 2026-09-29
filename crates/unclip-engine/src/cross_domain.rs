@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use unclip_domain::{ProductDomainSnapshot, ProductMeasurementFrame, UnitId};
 use unclip_epistemic::{
-    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, Operation, PluginId,
-    Timestamp, Tracked,
+    Calculated, DependencyCollector, DerivedId, EmitMetadata, Operation, PluginId, Timestamp,
+    Tracked,
 };
 use unclip_measure::{
     CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainInteractionMovementConfig,
@@ -149,19 +149,14 @@ impl crate::Engine {
             "tolerance": config.tolerance,
             "max_sweeps": config.max_sweeps,
         });
-        let metadata = EmitMetadata {
-            id: output_id,
-            producer: descriptor.id.clone(),
-            algorithm: "regularized_canonical_correlation".into(),
-            version: descriptor.version.clone(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+        let metadata = EmitMetadata::new(
+            output_id,
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            &params,
             timestamp,
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        };
+        )
+        .with_algorithm("regularized_canonical_correlation");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
@@ -235,19 +230,14 @@ impl crate::Engine {
             "minimum_samples": config.minimum_samples,
             "bins": config.bins,
         });
-        let metadata = EmitMetadata {
-            id: output_id,
-            producer: descriptor.id.clone(),
-            algorithm: "equal_width_cross_domain_mutual_information".into(),
-            version: descriptor.version.clone(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+        let metadata = EmitMetadata::new(
+            output_id,
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            &params,
             timestamp,
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        };
+        )
+        .with_algorithm("equal_width_cross_domain_mutual_information");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
@@ -315,19 +305,14 @@ impl crate::Engine {
             "minimum_mutual_information_bits": config.minimum_mutual_information_bits,
             "minimum_samples": config.minimum_samples,
         });
-        let metadata = EmitMetadata {
-            id: output_id,
-            producer: descriptor.id.clone(),
-            algorithm: "thresholded_bipartite_mutual_information_communities".into(),
-            version: descriptor.version.clone(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+        let metadata = EmitMetadata::new(
+            output_id,
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            &params,
             timestamp,
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        };
+        )
+        .with_algorithm("thresholded_bipartite_mutual_information_communities");
         let ctx = ProductMeasureCtx::with_mutual_information(
             product,
             frame,
@@ -406,19 +391,14 @@ impl crate::Engine {
             "minimum_transitions": config.minimum_transitions,
             "sequence": &config.sequence,
         });
-        let metadata = EmitMetadata {
-            id: output_id,
-            producer: descriptor.id.clone(),
-            algorithm: "signed_consecutive_cross_domain_movement".into(),
-            version: descriptor.version.clone(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+        let metadata = EmitMetadata::new(
+            output_id,
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            &params,
             timestamp,
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        };
+        )
+        .with_algorithm("signed_consecutive_cross_domain_movement");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
         sensor.measure(&ctx, ctx.calculation_token(metadata))
     }
@@ -518,19 +498,14 @@ impl crate::Engine {
             "mappings": &config.mappings,
             "minimum_transitions": config.minimum_transitions,
         });
-        let metadata = EmitMetadata {
-            id: output_id,
-            producer: descriptor.id.clone(),
-            algorithm: "mapped_cross_product_movement_transfer".into(),
-            version: descriptor.version.clone(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+        let metadata = EmitMetadata::new(
+            output_id,
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            &params,
             timestamp,
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        };
+        )
+        .with_algorithm("mapped_cross_product_movement_transfer");
         let ctx = CrossProductMeasureCtx::new(
             source_product,
             source_frame,

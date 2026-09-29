@@ -6,8 +6,8 @@ use unclip_domain::{
     UnitId, UnitKind,
 };
 use unclip_epistemic::{
-    hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, DomainVersion,
-    EmitMetadata, PluginId, Timestamp, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, DomainVersion, EmitMetadata,
+    PluginId, Timestamp, Tracked,
 };
 use unclip_plugin::{PluginError, Result};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -416,19 +416,15 @@ impl super::Engine {
             params["revision_step"] = serde_json::to_value(step).map_err(invalid)?;
         }
         let token = CalculationToken::from_harness(
-            EmitMetadata {
-                id: output_id,
-                producer: PluginId::new("experiment.apply-candidate"),
-                algorithm: "temporary_candidate_application".into(),
-                version: semver::Version::new(0, 8, 0),
-                params_hash: hash_params(&params),
-                params,
-                source: None,
+            EmitMetadata::new(
+                output_id,
+                PluginId::new("experiment.apply-candidate"),
+                semver::Version::new(0, 8, 0),
+                &params,
                 timestamp,
-                domain_version: Some(version),
-                frame_version: None,
-                model: None,
-            },
+            )
+            .with_algorithm("temporary_candidate_application")
+            .with_domain_version(version),
             dependencies,
         );
         Ok(token.emit(CounterfactualSnapshot {

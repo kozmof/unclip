@@ -21,8 +21,11 @@ unclip-measure.workspace = true
 unclip-observe.workspace = true
 unclip-plugin.workspace = true
 unclip-sensors.workspace = true
-unclip-store.workspace = true
+unclip-record.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
+# Integration tests round-trip records through SQLite to prove the engine's
+# output persists and replays; the library itself performs no persistence.
+unclip-store.workspace = true
 tokio.workspace = true

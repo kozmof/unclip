@@ -10,7 +10,11 @@ use unclip_plugin::{
     InterpretCtx, InterpretationRequest, Interpreter, Params, PluginDescriptor, PluginError, Result,
 };
 
-const PARAMS_SCHEMA: &str = r#"{"type":"object","required":["model","model_version"],"properties":{"model":{"type":"string","minLength":1},"model_version":{"type":"string","minLength":1},"context":{"type":"string"},"generation":{"type":"object"}},"additionalProperties":false}"#;
+// `generation` states `additionalProperties: true` deliberately: it is forwarded
+// to the model provider untouched, so its keys are the provider's vocabulary and
+// not this plugin's. Saying so explicitly distinguishes "free-form by design"
+// from a sub-schema nobody constrained.
+const PARAMS_SCHEMA: &str = r#"{"type":"object","required":["model","model_version"],"properties":{"model":{"type":"string","minLength":1},"model_version":{"type":"string","minLength":1},"context":{"type":"string"},"generation":{"type":"object","additionalProperties":true}},"additionalProperties":false}"#;
 const INSTRUCTIONS: &str = "Assign a concise provisional semantic label and explanation to the supplied validated empirical structure. Treat the structure as the primary evidence. The label is a secondary annotation and must not replace or modify that structure. Return only JSON matching the supplied response schema. Do not present the interpretation as measurement evidence.";
 
 #[derive(Debug, Deserialize)]
@@ -149,7 +153,7 @@ impl Interpreter for LlmLabelInterpreter {
 #[cfg(test)]
 mod tests {
     use unclip_epistemic::{
-        hash_params, DependencyCollector, DerivedId, EmitMetadata, Operation, Timestamp, Tracked,
+        DependencyCollector, DerivedId, EmitMetadata, Operation, Timestamp, Tracked,
     };
     use unclip_plugin::InterpretationIo;
 
@@ -176,19 +180,15 @@ mod tests {
     }
 
     fn metadata(params: &Value, model: Option<ModelRef>) -> EmitMetadata {
-        EmitMetadata {
-            id: DerivedId::new("interpretation/1"),
-            producer: PluginId::new("interpret.llm-label"),
-            algorithm: "llm-label".into(),
-            version: Version::new(1, 0, 0),
-            params: params.clone(),
-            params_hash: hash_params(params),
-            source: None,
-            timestamp: Timestamp::new("2026-09-23T00:00:00Z"),
-            domain_version: None,
-            frame_version: None,
-            model,
-        }
+        EmitMetadata::new(
+            DerivedId::new("interpretation/1"),
+            PluginId::new("interpret.llm-label"),
+            Version::new(1, 0, 0),
+            params,
+            Timestamp::new("2026-09-23T00:00:00Z"),
+        )
+        .with_algorithm("llm-label")
+        .with_model(model)
     }
 
     fn structure() -> EmpiricalStructure {

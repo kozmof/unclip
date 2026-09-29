@@ -220,19 +220,14 @@ impl crate::Engine {
             "definitions": &value.expectations,
         });
         let token = CalculationToken::from_harness(
-            EmitMetadata {
-                id: output_id,
-                producer: PluginId::new("calculate.independence-expectations"),
-                algorithm: "explicit_typed_independence_rules".into(),
-                version: semver::Version::new(0, 1, 0),
-                params_hash: hash_params(&params),
-                params,
-                source: None,
+            EmitMetadata::new(
+                output_id,
+                PluginId::new("calculate.independence-expectations"),
+                semver::Version::new(0, 1, 0),
+                &params,
                 timestamp,
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            },
+            )
+            .with_algorithm("explicit_typed_independence_rules"),
             dependencies,
         );
         Ok(token.emit(value))

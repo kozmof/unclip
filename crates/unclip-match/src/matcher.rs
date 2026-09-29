@@ -128,16 +128,22 @@ impl Matcher {
         let Some(automaton) = &self.automaton else {
             return;
         };
-        let (haystack, original_boundaries) = lowercase_with_original_boundaries(text);
-        for m in automaton.find_overlapping_iter(&haystack) {
-            if !at_word_boundary(&haystack, m.start(), m.end()) {
+        let (haystack, boundaries) = lowercase_for_matching(text);
+        let haystack: &str = match &haystack {
+            Some(lowered) => lowered,
+            // Already lowercase: match against the caller's own buffer, so a
+            // scan of ASCII text allocates nothing at all.
+            None => text,
+        };
+        for m in automaton.find_overlapping_iter(haystack) {
+            if !at_word_boundary(haystack, m.start(), m.end()) {
                 continue;
             }
             // A lowercase expansion can create internal byte boundaries that
             // do not exist in the original character. Ignore such partial
             // matches rather than returning offsets that cannot slice `text`.
             let (Some(start), Some(end)) =
-                (original_boundaries[m.start()], original_boundaries[m.end()])
+                (boundaries.original(m.start()), boundaries.original(m.end()))
             else {
                 continue;
             };
@@ -154,24 +160,86 @@ impl Matcher {
     }
 }
 
-/// Lowercase text while mapping valid lowercase byte boundaries back to byte
-/// boundaries in the original string.
-fn lowercase_with_original_boundaries(text: &str) -> (String, Vec<Option<usize>>) {
-    let mut lowered = String::with_capacity(text.len());
-    let mut boundaries = vec![Some(0)];
+/// One character whose lowercase form does not have its original byte width.
+#[derive(Debug)]
+struct WidthChange {
+    lowered_start: usize,
+    lowered_end: usize,
+    original_start: usize,
+    original_end: usize,
+}
 
-    for (original_start, ch) in text.char_indices() {
-        let original_end = original_start + ch.len_utf8();
-        let lowered_start = lowered.len();
-        lowered.extend(ch.to_lowercase());
-        let lowered_end = lowered.len();
+/// Maps byte offsets in the lowercased haystack back to the original string.
+///
+/// Unicode lowercasing can change a character's byte width — `İ` (U+0130, two
+/// bytes) lowercases to two scalars spanning three — so an offset in the
+/// lowered text is not generally an offset in the original.
+///
+/// Nearly all text lowercases width-for-width, so only the characters that do
+/// change width are recorded. Text with none records nothing and the mapping is
+/// the identity, which keeps the cost proportional to how unusual the input is
+/// rather than to how long it is: `unclip scan` accepts up to 64 MiB, and a
+/// per-byte map at that size would dominate the process's memory.
+#[derive(Default)]
+struct OffsetMap {
+    /// One entry per width-changing character, ascending by `lowered_start`.
+    ///
+    /// Each entry carries absolute offsets on both sides, so every earlier
+    /// change's accumulated shift is already folded into it and a lookup costs
+    /// one binary search rather than a running sum.
+    changes: Vec<WidthChange>,
+}
 
-        boundaries.resize(lowered_end + 1, None);
-        boundaries[lowered_start] = Some(original_start);
-        boundaries[lowered_end] = Some(original_end);
+impl OffsetMap {
+    /// The original offset for a boundary in the lowered text, or `None` when
+    /// the offset falls inside a character that lowercasing expanded.
+    fn original(&self, lowered: usize) -> Option<usize> {
+        let index = self
+            .changes
+            .partition_point(|change| change.lowered_start <= lowered);
+        // Before the first change the mapping is the identity.
+        let Some(change) = index.checked_sub(1).map(|i| &self.changes[i]) else {
+            return Some(lowered);
+        };
+        if lowered == change.lowered_start {
+            Some(change.original_start)
+        } else if lowered < change.lowered_end {
+            // Interior of an expanded character: no original boundary here.
+            None
+        } else {
+            // At or past this change's end, offset by its own resolved end.
+            Some(change.original_end + (lowered - change.lowered_end))
+        }
+    }
+}
+
+/// Lowercase `text` for matching, with the offset map back to the original.
+///
+/// The buffer is `None` when `text` is already lowercase: the caller then
+/// matches against `text` itself and the identity mapping applies, so scanning
+/// ASCII prose — the overwhelmingly common case — allocates nothing here.
+fn lowercase_for_matching(text: &str) -> (Option<String>, OffsetMap) {
+    if !text.chars().any(|ch| ch.to_lowercase().next() != Some(ch)) {
+        return (None, OffsetMap::default());
     }
 
-    (lowered, boundaries)
+    let mut lowered = String::with_capacity(text.len());
+    let mut map = OffsetMap::default();
+    for (original_start, ch) in text.char_indices() {
+        let lowered_start = lowered.len();
+        lowered.extend(ch.to_lowercase());
+        if lowered.len() - lowered_start == ch.len_utf8() {
+            continue;
+        }
+        map.changes.push(WidthChange {
+            lowered_start,
+            lowered_end: lowered.len(),
+            original_start,
+            original_end: original_start + ch.len_utf8(),
+        });
+    }
+
+    (Some(lowered), map)
 }
 
 /// Whether the `[start, end)` byte range in `haystack` is delimited by word
@@ -368,6 +436,50 @@ mod tests {
 
         assert_eq!(&text[hit.start..hit.end], "RED");
         assert_eq!((hit.start, hit.end), (3, 6));
+    }
+
+    #[test]
+    fn offsets_survive_several_lowercase_expansions() {
+        let entries = vec![PatternEntry::new(
+            "red",
+            PatternTarget::O2m {
+                name: "color".into(),
+                value: "red".into(),
+            },
+        )];
+        let matcher = Matcher::build(entries).unwrap();
+        // Each `İ` shifts the lowered text one byte further from the original,
+        // so the offset map must accumulate the shifts rather than record one.
+        let text = "İ İ İ RED";
+        let hit = &matcher.scan(text)[0];
+
+        assert_eq!(&text[hit.start..hit.end], "RED");
+    }
+
+    #[test]
+    fn already_lowercase_text_is_matched_without_a_lowered_copy() {
+        let (lowered, map) = lowercase_for_matching("red locker area");
+        assert!(
+            lowered.is_none(),
+            "lowercase text must not be copied for matching"
+        );
+        // With nothing lowered, every offset maps to itself.
+        assert_eq!(map.original(0), Some(0));
+        assert_eq!(map.original(9), Some(9));
+    }
+
+    #[test]
+    fn the_offset_map_records_only_width_changing_characters() {
+        // One expansion in an otherwise ASCII string records a bounded number of
+        // entries, not one per input byte.
+        let (lowered, map) = lowercase_for_matching("İ RED");
+        assert_eq!(lowered.as_deref(), Some("i\u{307} red"));
+        assert_eq!(map.changes.len(), 1, "changes: {:?}", map.changes);
+        assert_eq!(map.original(0), Some(0));
+        // Interior of the expanded character has no original boundary.
+        assert_eq!(map.original(1), None);
+        assert_eq!(map.original(3), Some(2));
+        assert_eq!(map.original(4), Some(3));
     }
 
     #[test]

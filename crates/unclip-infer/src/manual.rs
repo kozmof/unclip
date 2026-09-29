@@ -66,8 +66,7 @@ mod tests {
 
     use unclip_domain::{DomainId, DomainSnapshot};
     use unclip_epistemic::{
-        hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId,
-        SourceRef, Timestamp,
+        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId, SourceRef, Timestamp,
     };
     use unclip_observe::ObservationId;
     use unclip_plugin::{InferenceIo, Inferrer};
@@ -108,19 +107,16 @@ mod tests {
             params: &params,
             io: &FixtureIo,
         };
-        let metadata = EmitMetadata {
-            id: DerivedId::new("manual-derived"),
-            producer: PluginId::new("infer.manual"),
-            algorithm: "manual".into(),
-            version: Version::new(1, 0, 0),
-            params: params.clone(),
-            params_hash: hash_params(&params),
-            source: Some(source.clone()),
-            timestamp: Timestamp::new("2026-09-18T00:00:00Z"),
-            domain_version: Some(domain.version.clone()),
-            frame_version: None,
-            model: None,
-        };
+        let metadata = EmitMetadata::new(
+            DerivedId::new("manual-derived"),
+            PluginId::new("infer.manual"),
+            Version::new(1, 0, 0),
+            &params,
+            Timestamp::new("2026-09-18T00:00:00Z"),
+        )
+        .with_algorithm("manual")
+        .with_source(source.clone())
+        .with_domain_version(domain.version.clone());
         let token = unclip_epistemic::InferenceToken::from_harness(
             metadata,
             DependencyCollector::default(),

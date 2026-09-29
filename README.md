@@ -4,6 +4,9 @@ unclip is a CLI for getting varied output from LLMs by building
 the possibility space outside the model. Store ideas as addressable branches,
 index and constrain them, then sample structured selections to feed the model.
 
+For how the code is laid out — which crate owns what, and where the guarantees
+the engine establishes begin and end — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Data structure
 
 - branch — an addressable node at a slash-separated path, e.g. `/ikebukuro/station/exit`.

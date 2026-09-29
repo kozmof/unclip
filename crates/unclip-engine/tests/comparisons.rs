@@ -1,6 +1,6 @@
 use serde_json::json;
 use std::collections::BTreeMap;
-use unclip_engine::{Engine, MeasurementRun, ScalarDifference};
+use unclip_engine::{compare_measurements, run_record, Engine, MeasurementRun, ScalarDifference};
 use unclip_epistemic::{Calculated, DerivedId, PluginId, Timestamp, Tracked};
 use unclip_measure::{Delta, Measurement, MeasurementContext, MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -31,7 +31,7 @@ fn compare(
             ..Default::default()
         })
         .unwrap();
-    engine.compare_measurements(
+    compare_measurements(
         &plan,
         &Tracked::from_recorded(DerivedId::new("before"), before),
         &Tracked::from_recorded(DerivedId::new("after"), after),
@@ -149,7 +149,7 @@ fn explicit_selection_enforces_versions_and_records_comparator_configuration() {
             ..Default::default()
         })
         .unwrap();
-    let record = engine.run_record(
+    let record = run_record(
         &plan,
         &BTreeMap::new(),
         "comparison",
@@ -200,7 +200,7 @@ fn compare_rank(
             ..Default::default()
         })
         .unwrap();
-    engine.compare_measurements(
+    compare_measurements(
         &plan,
         &Tracked::from_recorded(DerivedId::new("before"), measurement(a)),
         &Tracked::from_recorded(DerivedId::new("after"), measurement(b)),
@@ -1064,7 +1064,7 @@ fn align_events(
             ..Default::default()
         })
         .unwrap();
-    engine.compare_measurements(
+    compare_measurements(
         &plan,
         &Tracked::from_recorded(DerivedId::new("before"), before),
         &Tracked::from_recorded(DerivedId::new("after"), after),

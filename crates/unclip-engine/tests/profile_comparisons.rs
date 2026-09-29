@@ -1,6 +1,8 @@
 use serde_json::json;
 use std::collections::BTreeMap;
-use unclip_engine::{ComparisonPair, Engine, MeasurementRun, ProfileComparisonResult};
+use unclip_engine::{
+    compare_profiles, ComparisonPair, Engine, MeasurementRun, ProfileComparisonResult,
+};
 use unclip_epistemic::{DerivedId, PluginId, Timestamp, Tracked};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -45,7 +47,7 @@ fn compare(
             ..Default::default()
         })
         .unwrap();
-    engine.compare_profiles(
+    compare_profiles(
         &plan,
         before,
         after,
@@ -148,19 +150,18 @@ fn invalid_or_ambiguous_pairings_fail_without_partial_profiles() {
     assert!(compare(&[input("same", 1.0)], &[input("same", 2.0)], &[], false).is_err());
     let engine = Engine::with_builtins().unwrap();
     let plan = engine.plan(&EngineProfile::default()).unwrap();
-    assert!(engine
-        .compare_profiles(
-            &plan,
-            &[],
-            &[],
-            &[],
-            MeasurementRun {
-                id: "empty",
-                timestamp: Timestamp::new("now"),
-                params: &BTreeMap::new()
-            }
-        )
-        .is_err());
+    assert!(compare_profiles(
+        &plan,
+        &[],
+        &[],
+        &[],
+        MeasurementRun {
+            id: "empty",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::new()
+        }
+    )
+    .is_err());
 }
 
 #[test]

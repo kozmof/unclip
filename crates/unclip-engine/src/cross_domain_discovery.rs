@@ -101,104 +101,6 @@ fn validate_evidence(value: &CrossDomainDeviationEvidence) -> Result<()> {
     Ok(())
 }
 
-impl crate::Engine {
-    /// Derive one anonymous empirical structure per measured typed deviation.
-    ///
-    /// Equal readings and unavailable comparisons produce no structure. The
-    /// complete product binding and typed comparison remain intact for candidate
-    /// generation and later interpretation.
-    pub fn derive_cross_domain_deviations(
-        &self,
-        profile: &Calculated<IndependenceComparisonProfile>,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Vec<Calculated<EmpiricalStructure>>> {
-        if run_id.trim().is_empty() {
-            return Err(invalid(
-                "cross-domain deviation derivation requires a nonempty run ID",
-            ));
-        }
-        let provenance = profile.provenance();
-        if profile.id().0.trim().is_empty()
-            || provenance.producer != PluginId::new("compare.product-independence")
-            || provenance.algorithm != "explicit_typed_product_independence_comparison"
-            || provenance.params_hash != hash_params(&provenance.params)
-            || profile.value().composition_profile.0.trim().is_empty()
-            || profile.value().expectation_profile.0.trim().is_empty()
-            || !valid_binding(&profile.value().binding)
-        {
-            return Err(invalid(
-                "cross-domain deviations require a valid calculated independence comparison profile",
-            ));
-        }
-
-        let mut comparisons = profile.value().comparisons.iter().collect::<Vec<_>>();
-        comparisons.sort_by(|left, right| {
-            (&left.product_measurement, &left.comparator)
-                .cmp(&(&right.product_measurement, &right.comparator))
-        });
-        let mut pairs = BTreeSet::new();
-        let mut deltas = BTreeSet::new();
-        let mut results = Vec::new();
-        for (index, comparison) in comparisons.into_iter().enumerate() {
-            if !pairs.insert((&comparison.product_measurement, &comparison.comparator))
-                || !deltas.insert(&comparison.delta_id)
-            {
-                return Err(invalid(
-                    "cross-domain deviation comparisons require unique measurement/comparator pairs and deltas",
-                ));
-            }
-            if !is_measured_deviation(comparison)? {
-                continue;
-            }
-            let evidence = CrossDomainDeviationEvidence {
-                comparison_profile: profile.id().clone(),
-                binding: profile.value().binding.clone(),
-                comparison: comparison.clone(),
-            };
-            let value = EmpiricalStructure {
-                kind: STRUCTURE_KIND.into(),
-                value: serde_json::to_value(&evidence)
-                    .map_err(|error| invalid(error.to_string()))?,
-            };
-            let params = serde_json::json!({
-                "comparison_profile": profile.id(),
-                "binding": &evidence.binding,
-                "product_measurement": &comparison.product_measurement,
-                "comparator": &comparison.comparator,
-                "delta": &comparison.delta_id,
-                "selection": "exact_typed_reading_inequality",
-            });
-            let output_id = DerivedId::new(format!("{run_id}/cross-domain-deviations/{index}"));
-            if &output_id == profile.id() {
-                return Err(invalid(
-                    "cross-domain deviation output identity collides with its comparison input",
-                ));
-            }
-            let dependencies = DependencyCollector::default();
-            dependencies.read(&Tracked::from(profile));
-            let token = CalculationToken::from_harness(
-                EmitMetadata {
-                    id: output_id,
-                    producer: PluginId::new("calculate.cross-domain-deviation"),
-                    algorithm: "typed_product_independence_deviation".into(),
-                    version: semver::Version::new(0, 1, 0),
-                    params_hash: hash_params(&params),
-                    params,
-                    source: None,
-                    timestamp: timestamp.clone(),
-                    domain_version: None,
-                    frame_version: None,
-                    model: None,
-                },
-                dependencies,
-            );
-            results.push(token.emit(value));
-        }
-        Ok(results)
-    }
-}
-
 impl CandidateGenerator for CrossDomainCandidateGenerator {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
@@ -346,4 +248,93 @@ pub(super) fn validate_candidate(
         ));
     }
     Ok(value.evidence.binding)
+}
+
+/// Derive one anonymous empirical structure per measured typed deviation.
+///
+/// Equal readings and unavailable comparisons produce no structure. The
+/// complete product binding and typed comparison remain intact for candidate
+/// generation and later interpretation.
+pub fn derive_cross_domain_deviations(
+    profile: &Calculated<IndependenceComparisonProfile>,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Vec<Calculated<EmpiricalStructure>>> {
+    if run_id.trim().is_empty() {
+        return Err(invalid(
+            "cross-domain deviation derivation requires a nonempty run ID",
+        ));
+    }
+    let provenance = profile.provenance();
+    if profile.id().0.trim().is_empty()
+        || provenance.producer != PluginId::new("compare.product-independence")
+        || provenance.algorithm != "explicit_typed_product_independence_comparison"
+        || provenance.params_hash != hash_params(&provenance.params)
+        || profile.value().composition_profile.0.trim().is_empty()
+        || profile.value().expectation_profile.0.trim().is_empty()
+        || !valid_binding(&profile.value().binding)
+    {
+        return Err(invalid(
+            "cross-domain deviations require a valid calculated independence comparison profile",
+        ));
+    }
+
+    let mut comparisons = profile.value().comparisons.iter().collect::<Vec<_>>();
+    comparisons.sort_by(|left, right| {
+        (&left.product_measurement, &left.comparator)
+            .cmp(&(&right.product_measurement, &right.comparator))
+    });
+    let mut pairs = BTreeSet::new();
+    let mut deltas = BTreeSet::new();
+    let mut results = Vec::new();
+    for (index, comparison) in comparisons.into_iter().enumerate() {
+        if !pairs.insert((&comparison.product_measurement, &comparison.comparator))
+            || !deltas.insert(&comparison.delta_id)
+        {
+            return Err(invalid(
+                "cross-domain deviation comparisons require unique measurement/comparator pairs and deltas",
+            ));
+        }
+        if !is_measured_deviation(comparison)? {
+            continue;
+        }
+        let evidence = CrossDomainDeviationEvidence {
+            comparison_profile: profile.id().clone(),
+            binding: profile.value().binding.clone(),
+            comparison: comparison.clone(),
+        };
+        let value = EmpiricalStructure {
+            kind: STRUCTURE_KIND.into(),
+            value: serde_json::to_value(&evidence).map_err(|error| invalid(error.to_string()))?,
+        };
+        let params = serde_json::json!({
+            "comparison_profile": profile.id(),
+            "binding": &evidence.binding,
+            "product_measurement": &comparison.product_measurement,
+            "comparator": &comparison.comparator,
+            "delta": &comparison.delta_id,
+            "selection": "exact_typed_reading_inequality",
+        });
+        let output_id = DerivedId::new(format!("{run_id}/cross-domain-deviations/{index}"));
+        if &output_id == profile.id() {
+            return Err(invalid(
+                "cross-domain deviation output identity collides with its comparison input",
+            ));
+        }
+        let dependencies = DependencyCollector::default();
+        dependencies.read(&Tracked::from(profile));
+        let token = CalculationToken::from_harness(
+            EmitMetadata::new(
+                output_id,
+                PluginId::new("calculate.cross-domain-deviation"),
+                semver::Version::new(0, 1, 0),
+                &params,
+                timestamp.clone(),
+            )
+            .with_algorithm("typed_product_independence_deviation"),
+            dependencies,
+        );
+        results.push(token.emit(value));
+    }
+    Ok(results)
 }

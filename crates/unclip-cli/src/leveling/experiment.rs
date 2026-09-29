@@ -263,7 +263,7 @@ pub(crate) async fn run(
             .get_recorded_observation(id)
             .await?
             .with_context(|| format!("observation not found: {id:?}"))?;
-        observations.push(Tracked::from_recorded(record.provenance, record.value));
+        observations.push(Tracked::from_inferred(record.provenance, record.value));
     }
     let mut alignments = Vec::new();
     let mut rankings = Vec::new();
@@ -274,7 +274,7 @@ pub(crate) async fn run(
                 .alignments_for_observation(id)
                 .await?
                 .into_iter()
-                .map(|record| Tracked::from_recorded(record.provenance, record.value)),
+                .map(|record| Tracked::from_inferred(record.provenance, record.value)),
         );
         rankings.extend(
             repos
@@ -282,7 +282,7 @@ pub(crate) async fn run(
                 .rankings_for_observation(id)
                 .await?
                 .into_iter()
-                .map(|record| Tracked::from_recorded(record.provenance, record.value)),
+                .map(|record| Tracked::from_inferred(record.provenance, record.value)),
         );
     }
     let mut transfer = Vec::new();
@@ -300,7 +300,7 @@ pub(crate) async fn run(
         transfer.extend(
             records
                 .into_iter()
-                .map(|record| Tracked::from_recorded(record.provenance, record.measurement)),
+                .map(|record| Tracked::from_calculated(record.provenance, record.measurement)),
         );
     }
     let timestamp = unclip_store::now();
@@ -308,7 +308,7 @@ pub(crate) async fn run(
     let frame_snapshot_id = DerivedId::new(format!("{}/frame", request.run_id));
     let baseline = Tracked::from_recorded(baseline_id.clone(), domain.clone());
     let tracked_frame = Tracked::from_recorded(frame_snapshot_id.clone(), frame.clone());
-    let split = engine.select_observations(
+    let split = unclip_engine::select_observations(
         &observations,
         &request.training,
         &request.held_out,
@@ -320,7 +320,7 @@ pub(crate) async fn run(
         .map(|value| value.id().clone())
         .chain(rankings.iter().map(|value| value.id().clone()))
         .collect::<Vec<_>>();
-    engine.validate_candidate_ancestry(
+    unclip_engine::validate_candidate_ancestry(
         candidate.id(),
         &candidate_ancestors,
         split.value(),
@@ -376,7 +376,7 @@ pub(crate) async fn run(
     let after_profile_id = format!("{}/after-profile", request.run_id);
     let domain_key = serde_json::to_string(&(&domain.id.0, &domain.version.0))?;
     let frame_key = serde_json::to_string(&(&frame.id.0, &frame.version.0))?;
-    let persistable = engine.persistable_experiment(
+    let persistable = unclip_engine::persistable_experiment(
         &experiment,
         &split,
         &candidate,
@@ -506,7 +506,7 @@ pub(crate) async fn run(
             provenance: experiment.evidence.provenance().clone(),
         },
     ];
-    let run_record = engine.run_record(
+    let run_record = unclip_engine::run_record(
         &plan,
         &parsed.params,
         &request.run_id,

@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use unclip_domain::CandidateKind;
-use unclip_engine::{CandidateInputs, Engine, MeasurementRun};
+use unclip_engine::{generate_candidates, CandidateInputs, Engine, MeasurementRun};
 use unclip_epistemic::{DerivedId, PluginId, Timestamp, Tracked};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -20,7 +20,7 @@ fn generate(
             ..Default::default()
         })
         .unwrap();
-    engine.generate_candidates(
+    generate_candidates(
         &plan,
         CandidateInputs {
             structures: &[],

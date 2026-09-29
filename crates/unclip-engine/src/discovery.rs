@@ -3,8 +3,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
 };
 use unclip_measure::{Measurement, MeasurementValue, Reading};
 use unclip_observe::Observation;
@@ -169,50 +168,42 @@ pub struct CandidateInputs<'a> {
     pub observations: &'a [Tracked<Observation>],
     pub structures: &'a [Tracked<unclip_measure::EmpiricalStructure>],
 }
-impl super::Engine {
-    /// Generate anonymous proposals only; this never inserts domain units.
-    pub fn generate_candidates(
-        &self,
-        plan: &RunPlan,
-        inputs: CandidateInputs<'_>,
-        run: super::MeasurementRun<'_>,
-    ) -> Result<Vec<Calculated<CandidateProposal>>> {
-        for measurement in inputs.measurements {
-            super::require_calculated_evidence(measurement, "candidate input measurement")?;
-        }
-        for structure in inputs.structures {
-            super::require_calculated_evidence(structure, "candidate input structure")?;
-        }
-        let mut generators = plan.candidate_generators.iter().collect::<Vec<_>>();
-        generators.sort_by_key(|generator| &generator.descriptor().id);
-        let mut results = Vec::new();
-        let empty = serde_json::json!({});
-        for generator in generators {
-            let descriptor = generator.descriptor();
-            let params = run.params.get(&descriptor.id).unwrap_or(&empty);
-            let ctx = CandidateCtx::new(
-                inputs.domain_version_id,
-                inputs.measurements,
-                inputs.observations,
-                params,
-                DependencyCollector::default(),
-            )
-            .with_structures(inputs.structures);
-            let token = ctx.calculation_token(EmitMetadata {
-                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
-                producer: descriptor.id.clone(),
-                algorithm: descriptor.id.0.clone(),
-                version: descriptor.version.clone(),
-                params: params.clone(),
-                params_hash: hash_params(params),
-                source: None,
-                timestamp: run.timestamp.clone(),
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            });
-            results.extend(generator.generate(&ctx, token)?);
-        }
-        Ok(results)
+
+/// Generate anonymous proposals only; this never inserts domain units.
+pub fn generate_candidates(
+    plan: &RunPlan,
+    inputs: CandidateInputs<'_>,
+    run: super::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<CandidateProposal>>> {
+    for measurement in inputs.measurements {
+        super::require_calculated_evidence(measurement, "candidate input measurement")?;
     }
+    for structure in inputs.structures {
+        super::require_calculated_evidence(structure, "candidate input structure")?;
+    }
+    let mut generators = plan.candidate_generators.iter().collect::<Vec<_>>();
+    generators.sort_by_key(|generator| &generator.descriptor().id);
+    let mut results = Vec::new();
+    let empty = serde_json::json!({});
+    for generator in generators {
+        let descriptor = generator.descriptor();
+        let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        let ctx = CandidateCtx::new(
+            inputs.domain_version_id,
+            inputs.measurements,
+            inputs.observations,
+            params,
+            DependencyCollector::default(),
+        )
+        .with_structures(inputs.structures);
+        let token = ctx.calculation_token(EmitMetadata::new(
+            DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            params,
+            run.timestamp.clone(),
+        ));
+        results.extend(generator.generate(&ctx, token)?);
+    }
+    Ok(results)
 }

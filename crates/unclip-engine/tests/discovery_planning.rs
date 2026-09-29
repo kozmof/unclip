@@ -178,7 +178,7 @@ fn stored_plans_pin_discovery_versions_parameters_and_hashes_in_canonical_order(
             serde_json::json!({"temperature":0}),
         ),
     ]);
-    let record = engine.run_record(
+    let record = unclip_engine::run_record(
         &plan,
         &params,
         "discovery",
@@ -209,7 +209,7 @@ fn stored_plans_pin_discovery_versions_parameters_and_hashes_in_canonical_order(
     );
     let mut reverse = selected;
     reverse.candidate_generators.reverse();
-    let replay = engine.run_record(
+    let replay = unclip_engine::run_record(
         &engine.plan(&reverse).unwrap(),
         &params,
         "discovery",

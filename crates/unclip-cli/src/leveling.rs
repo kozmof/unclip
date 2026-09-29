@@ -78,7 +78,7 @@ pub(crate) async fn observe(
         .ok_or_else(|| anyhow::anyhow!("inference source path must be valid UTF-8"))?;
     let timestamp = unclip_store::now();
     let run_id = format!("observe-{timestamp}");
-    let record = engine.run_record(
+    let record = unclip_engine::run_record(
         &plan,
         &parsed.params,
         &run_id,

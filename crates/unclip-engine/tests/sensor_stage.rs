@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use unclip_domain::{DomainId, DomainSnapshot, FrameId, MeasurementFrame};
 use unclip_engine::{Engine, MeasurementInputs, MeasurementRun};
 use unclip_epistemic::{
-    hash_params, Calculated, CalculationToken, DerivedId, DomainVersion, EmitMetadata,
-    FrameVersion, PluginId, SourceRef, Timestamp,
+    Calculated, CalculationToken, DerivedId, DomainVersion, EmitMetadata, FrameVersion, PluginId,
+    SourceRef, Timestamp,
 };
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 use unclip_plugin::{
@@ -97,19 +97,16 @@ fn frame() -> MeasurementFrame {
 
 fn run_metadata() -> EmitMetadata {
     let params = serde_json::json!({});
-    EmitMetadata {
-        id: DerivedId::new("stage-run"),
-        producer: PluginId::new("test"),
-        algorithm: "test".into(),
-        version: semver::Version::new(0, 1, 0),
-        params_hash: hash_params(&params),
-        params,
-        source: Some(SourceRef::new("fixture")),
-        timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
-        domain_version: Some(DomainVersion::new("1")),
-        frame_version: Some(FrameVersion::new("1")),
-        model: None,
-    }
+    EmitMetadata::new(
+        DerivedId::new("stage-run"),
+        PluginId::new("test"),
+        semver::Version::new(0, 1, 0),
+        &params,
+        Timestamp::new("2026-09-19T00:00:00Z"),
+    )
+    .with_source(SourceRef::new("fixture"))
+    .with_domain_version(DomainVersion::new("1"))
+    .with_frame_version(FrameVersion::new("1"))
 }
 
 /// Run two sensors whose ids sort opposite to their declared stages.
@@ -199,4 +196,58 @@ fn measurement_is_the_default_stage() {
     assert_eq!(SensorStage::default(), SensorStage::Measurement);
     assert!(SensorStage::Explanation < SensorStage::Residual);
     assert!(SensorStage::Residual < SensorStage::Measurement);
+}
+
+/// Every builtin descriptor's declared schema must be able to constrain something.
+///
+/// `unclip-plugin` now checks parameters against this string before invoking a
+/// sensor, so a schema that is malformed, or that omits `additionalProperties`
+/// and therefore silently permits any key, is a real gap rather than a cosmetic
+/// one. This walks the whole registry so a newly registered plugin cannot skip it.
+#[test]
+fn every_builtin_plugin_declares_a_usable_params_schema() {
+    let registry = unclip_engine::builtin_registry().expect("builtin registry");
+    let mut checked = 0;
+    let mut schemas: Vec<(String, &'static str)> = Vec::new();
+    for plugin in registry.sensors() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.product_sensors() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.cross_product_sensors() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.inferrers() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.comparators() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.interpreters() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.candidate_generators() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for plugin in registry.null_models() {
+        let d = plugin.descriptor();
+        schemas.push((d.id.0.clone(), d.params_schema));
+    }
+    for (id, schema) in schemas {
+        unclip_plugin::check_schema(schema)
+            .unwrap_or_else(|error| panic!("{id} declares an unusable params schema: {error}"));
+        checked += 1;
+    }
+    assert!(
+        checked > 30,
+        "expected the whole registry, checked {checked}"
+    );
 }

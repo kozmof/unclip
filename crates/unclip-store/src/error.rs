@@ -24,8 +24,14 @@ pub enum StoreError {
     #[error("branch {path} has descendants; pass --recursive to delete the subtree")]
     HasDescendants { path: String },
     /// A bounded query exceeded the safe hydration limit.
+    ///
+    /// The remedy names narrowing first because not every caller has a
+    /// paginated alternative: `sample` streams candidates through a reservoir,
+    /// but `compose` draws repeatedly from one shared pool per slot and so must
+    /// hold it, which is why it hits this instead of paging past it.
     #[error(
-        "query matched more than {limit} branches; narrow the filters or use paginated access"
+        "query matched more than {limit} branches; narrow the filters (for example with \
+         a deeper --under scope or more o2o/o2m filters), or use a command with paginated access"
     )]
     QueryTooBroad { limit: u64 },
     /// A bulk query exceeded the safe in-memory result limit.

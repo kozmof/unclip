@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use unclip_domain::{
     DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{Engine, MeasurementInputs, MeasurementRun};
+use unclip_engine::{
+    derive_empirical, generate_candidates, persistable_experiment, run_record, select_observations,
+    Engine, MeasurementInputs, MeasurementRun,
+};
 use unclip_epistemic::{
     hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion,
     InferenceToken, PluginId, SourceRef, Timestamp, Tracked,
@@ -148,19 +151,16 @@ fn fixture_document(json: serde_json::Value) -> Fixture {
 
 fn metadata(id: &str, producer: &str) -> EmitMetadata {
     let params = serde_json::json!({});
-    EmitMetadata {
-        id: DerivedId::new(id),
-        producer: PluginId::new(producer),
-        algorithm: producer.into(),
-        version: semver::Version::new(0, 1, 0),
-        params_hash: hash_params(&params),
-        params,
-        source: Some(SourceRef::new("fixture")),
-        timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
-        domain_version: Some(DomainVersion::new("1")),
-        frame_version: Some(FrameVersion::new("1")),
-        model: None,
-    }
+    EmitMetadata::new(
+        DerivedId::new(id),
+        PluginId::new(producer),
+        semver::Version::new(0, 1, 0),
+        &params,
+        Timestamp::new("2026-09-19T00:00:00Z"),
+    )
+    .with_source(SourceRef::new("fixture"))
+    .with_domain_version(DomainVersion::new("1"))
+    .with_frame_version(FrameVersion::new("1"))
 }
 
 fn profile() -> EngineProfile {
@@ -438,7 +438,7 @@ async fn assert_persisted_batch(
         .unwrap();
     let engine = Engine::with_builtins().unwrap();
     let plan = engine.plan(&profile).unwrap();
-    runs.insert_run(engine.run_record(
+    runs.insert_run(run_record(
         &plan,
         &params,
         "batch",
@@ -625,22 +625,21 @@ async fn assert_persisted_batch(
             )]);
             let discovery_id = format!("batch-candidates/{metric}");
             let calculate = || {
-                engine
-                    .generate_candidates(
-                        &discovery_plan,
-                        unclip_engine::CandidateInputs {
-                            structures: &[],
-                            domain_version_id: &domain_key,
-                            observations: &[],
-                            measurements: &matrix_inputs,
-                        },
-                        MeasurementRun {
-                            id: &discovery_id,
-                            timestamp: Timestamp::new("now"),
-                            params: &candidate_params,
-                        },
-                    )
-                    .unwrap()
+                generate_candidates(
+                    &discovery_plan,
+                    unclip_engine::CandidateInputs {
+                        structures: &[],
+                        domain_version_id: &domain_key,
+                        observations: &[],
+                        measurements: &matrix_inputs,
+                    },
+                    MeasurementRun {
+                        id: &discovery_id,
+                        timestamp: Timestamp::new("now"),
+                        params: &candidate_params,
+                    },
+                )
+                .unwrap()
             };
             let outputs = calculate();
             assert_eq!(outputs, calculate());
@@ -683,9 +682,8 @@ async fn assert_persisted_batch(
                 max_sweeps: std::num::NonZeroUsize::new(100).unwrap(),
             },
         ] {
-            let outputs = engine
-                .derive_empirical(&matrix_inputs, method, "batch-g", Timestamp::new("now"))
-                .unwrap();
+            let outputs =
+                derive_empirical(&matrix_inputs, method, "batch-g", Timestamp::new("now")).unwrap();
             for output in outputs {
                 if let Some(structure) = output.structure {
                     measurements
@@ -717,22 +715,21 @@ async fn assert_persisted_batch(
                     let params = BTreeMap::from([(PluginId::new(generator), params)]);
                     let id = format!("structure-candidates/{}", structure.id().0);
                     let calculate = || {
-                        engine
-                            .generate_candidates(
-                                &plan,
-                                unclip_engine::CandidateInputs {
-                                    domain_version_id: &domain_key,
-                                    structures: &inputs,
-                                    observations: &[],
-                                    measurements: &[],
-                                },
-                                MeasurementRun {
-                                    id: &id,
-                                    timestamp: Timestamp::new("now"),
-                                    params: &params,
-                                },
-                            )
-                            .unwrap()
+                        generate_candidates(
+                            &plan,
+                            unclip_engine::CandidateInputs {
+                                domain_version_id: &domain_key,
+                                structures: &inputs,
+                                observations: &[],
+                                measurements: &[],
+                            },
+                            MeasurementRun {
+                                id: &id,
+                                timestamp: Timestamp::new("now"),
+                                params: &params,
+                            },
+                        )
+                        .unwrap()
                     };
                     let proposals = calculate();
                     assert_eq!(proposals, calculate());
@@ -804,22 +801,21 @@ async fn assert_persisted_batch(
             .map(|result| Tracked::from_derived(result, result.value().clone()))
             .collect::<Vec<_>>();
         let calculate = || {
-            engine
-                .generate_candidates(
-                    &discovery_plan,
-                    unclip_engine::CandidateInputs {
-                        structures: &[],
-                        domain_version_id: &domain_key,
-                        observations: &[],
-                        measurements: &selected,
-                    },
-                    MeasurementRun {
-                        id: "temporal-candidates",
-                        timestamp: Timestamp::new("now"),
-                        params: &candidate_params,
-                    },
-                )
-                .unwrap()
+            generate_candidates(
+                &discovery_plan,
+                unclip_engine::CandidateInputs {
+                    structures: &[],
+                    domain_version_id: &domain_key,
+                    observations: &[],
+                    measurements: &selected,
+                },
+                MeasurementRun {
+                    id: "temporal-candidates",
+                    timestamp: Timestamp::new("now"),
+                    params: &candidate_params,
+                },
+            )
+            .unwrap()
         };
         let outputs = calculate();
         assert_eq!(outputs.len(), 1);
@@ -1440,15 +1436,14 @@ fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() 
         .iter()
         .map(|o| o.id.clone())
         .collect::<Vec<_>>();
-    let split = engine
-        .select_observations(
-            &all.observations,
-            &training,
-            &held_out,
-            "experiment",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let split = select_observations(
+        &all.observations,
+        &training,
+        &held_out,
+        "experiment",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     let split = Tracked::from_derived(&split, split.value().clone());
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
     let frame = Tracked::from_recorded(DerivedId::new("frame"), fixture.frame.clone());
@@ -1562,19 +1557,18 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let plan = engine.plan(&profile()).unwrap();
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
     let frame = Tracked::from_recorded(DerivedId::new("frame"), fixture.frame.clone());
-    let selected = engine
-        .select_observations(
-            &inputs.observations,
-            &[],
-            &fixture
-                .observations
-                .iter()
-                .map(|o| o.id.clone())
-                .collect::<Vec<_>>(),
-            "experiment",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let selected = select_observations(
+        &inputs.observations,
+        &[],
+        &fixture
+            .observations
+            .iter()
+            .map(|o| o.id.clone())
+            .collect::<Vec<_>>(),
+        "experiment",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     let split = Tracked::from_derived(&selected, selected.value().clone());
     let proposal = Tracked::from_recorded(DerivedId::new("candidate"), CandidateProposal {
         domain_version_id: serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap(),
@@ -1860,18 +1854,17 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let restored: unclip_engine::CounterfactualEvidence =
         serde_json::from_value(serde_json::to_value(evidence).unwrap()).unwrap();
     assert_eq!(&restored, evidence);
-    let persisted = engine
-        .persistable_experiment(
-            &experiment,
-            &selected,
-            &proposal,
-            "domain-version",
-            "frame-version",
-            "before-profile",
-            "after-profile",
-            "now",
-        )
-        .unwrap();
+    let persisted = persistable_experiment(
+        &experiment,
+        &selected,
+        &proposal,
+        "domain-version",
+        "frame-version",
+        "before-profile",
+        "after-profile",
+        "now",
+    )
+    .unwrap();
     assert_eq!(persisted.outcome.value().candidate_id, *proposal.id());
     assert_eq!(
         persisted.outcome.value().result,

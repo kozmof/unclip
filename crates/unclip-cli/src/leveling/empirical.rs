@@ -1,7 +1,7 @@
 //! Stored-profile selection and reproducible empirical calculations.
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
-use unclip_engine::{EmpiricalMethod, EmpiricalResult, Engine};
+use unclip_engine::{EmpiricalMethod, EmpiricalResult};
 use unclip_epistemic::{DerivedId, Timestamp, Tracked};
 use unclip_measure::MeasurementKind;
 use unclip_store::{
@@ -28,13 +28,15 @@ fn calculate(run: &EngineRunRecord, snapshot: &Snapshot) -> anyhow::Result<Vec<E
         .inputs
         .iter()
         .map(|input| {
-            Tracked::from_recorded(
+            Tracked::from_calculated(
                 input.record.provenance.clone(),
                 input.record.measurement.clone(),
             )
         })
         .collect::<Vec<_>>();
-    Ok(Engine::with_builtins()?.derive_empirical(
+    // Deriving structures from recorded measurements needs no plugin registry,
+    // so this no longer builds an engine to reach a pure calculation.
+    Ok(unclip_engine::derive_empirical(
         &inputs,
         method,
         &run.id,

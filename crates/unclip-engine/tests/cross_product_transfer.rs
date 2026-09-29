@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::Engine;
+use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainInteractionMovementConfig, CrossDomainSample,
@@ -51,7 +51,6 @@ fn interaction(id: &str, left: &str, right: &str) -> Tracked<ProductInteraction>
 }
 
 fn product_and_frame(
-    engine: &Engine,
     name: &str,
     left: [&str; 2],
     right: [&str; 2],
@@ -59,47 +58,45 @@ fn product_and_frame(
     Calculated<ProductDomainSnapshot>,
     Calculated<ProductMeasurementFrame>,
 ) {
-    let product = engine
-        .materialize_product_domain(
-            &Tracked::from_recorded(
-                DerivedId::new(format!("{name}-left@1")),
-                domain(&format!("{name}-left"), &left),
-            ),
-            &Tracked::from_recorded(
-                DerivedId::new(format!("{name}-right@1")),
-                domain(&format!("{name}-right"), &right),
-            ),
-            &[
-                interaction(&format!("{name}-first"), left[0], right[0]),
-                interaction(&format!("{name}-second"), left[1], right[1]),
-            ],
-            ProductDomainId::new(format!("{name}-product")),
-            ProductDomainVersion::new("2"),
-            &format!("{name}-product-run"),
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
-    let frame = engine
-        .create_product_frame(
-            &Tracked::from(&product),
-            &[
-                ProductFrameAxis {
-                    left: UnitId::new(left[0]),
-                    right: UnitId::new(right[0]),
-                    label: None,
-                },
-                ProductFrameAxis {
-                    left: UnitId::new(left[1]),
-                    right: UnitId::new(right[1]),
-                    label: None,
-                },
-            ],
-            ProductFrameId::new(format!("{name}-frame")),
-            ProductFrameVersion::new("3"),
-            &format!("{name}-frame-run"),
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
+    let product = materialize_product_domain(
+        &Tracked::from_recorded(
+            DerivedId::new(format!("{name}-left@1")),
+            domain(&format!("{name}-left"), &left),
+        ),
+        &Tracked::from_recorded(
+            DerivedId::new(format!("{name}-right@1")),
+            domain(&format!("{name}-right"), &right),
+        ),
+        &[
+            interaction(&format!("{name}-first"), left[0], right[0]),
+            interaction(&format!("{name}-second"), left[1], right[1]),
+        ],
+        ProductDomainId::new(format!("{name}-product")),
+        ProductDomainVersion::new("2"),
+        &format!("{name}-product-run"),
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
+    let frame = create_product_frame(
+        &Tracked::from(&product),
+        &[
+            ProductFrameAxis {
+                left: UnitId::new(left[0]),
+                right: UnitId::new(right[0]),
+                label: None,
+            },
+            ProductFrameAxis {
+                left: UnitId::new(left[1]),
+                right: UnitId::new(right[1]),
+                label: None,
+            },
+        ],
+        ProductFrameId::new(format!("{name}-frame")),
+        ProductFrameVersion::new("3"),
+        &format!("{name}-frame-run"),
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
     (product, frame)
 }
 
@@ -212,10 +209,8 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let engine = Engine::with_builtins().unwrap();
-    let (source_product, source_frame) =
-        product_and_frame(&engine, "source", ["a", "b"], ["x", "y"]);
-    let (target_product, target_frame) =
-        product_and_frame(&engine, "target", ["p", "q"], ["u", "v"]);
+    let (source_product, source_frame) = product_and_frame("source", ["a", "b"], ["x", "y"]);
+    let (target_product, target_frame) = product_and_frame("target", ["p", "q"], ["u", "v"]);
     let source_samples = samples("source", ["a", "b"], ["x", "y"], false);
     let target_samples = samples("target", ["p", "q"], ["u", "v"], true);
     let (source_measurement, source_movement) = movement(

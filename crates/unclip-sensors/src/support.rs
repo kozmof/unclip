@@ -12,12 +12,22 @@ pub(crate) struct SupportAnalysis {
 }
 
 impl SupportAnalysis {
+    /// Observed units the domain accounts for.
+    ///
+    /// `analyze` drives both counters from one pass over the same units, so the
+    /// unsupported list cannot outgrow the observed count. The subtraction
+    /// saturates regardless: this crate must not panic, and an underflow here
+    /// would abort a sensor in debug and wrap to a huge count in release.
     pub fn supported_nodes(&self) -> usize {
-        self.observed_nodes - self.unsupported_units.len()
+        self.observed_nodes
+            .saturating_sub(self.unsupported_units.len())
     }
 
+    /// Observed relations the domain accounts for. Saturates for the same
+    /// reason as [`Self::supported_nodes`].
     pub fn supported_relations(&self) -> usize {
-        self.observed_relations - self.unexplained_relations.len()
+        self.observed_relations
+            .saturating_sub(self.unexplained_relations.len())
     }
 }
 

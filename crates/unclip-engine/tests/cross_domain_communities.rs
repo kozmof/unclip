@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::Engine;
+use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainCommunityConfig, CrossDomainCommunityDetection, CrossDomainCommunityMember,
@@ -56,47 +56,45 @@ fn product_and_frame() -> (
     Calculated<ProductMeasurementFrame>,
 ) {
     let engine = Engine::with_builtins().unwrap();
-    let product = engine
-        .materialize_product_domain(
-            &Tracked::from_recorded(DerivedId::new("left@3"), domain("left", "3", &["a", "b"])),
-            &Tracked::from_recorded(DerivedId::new("right@4"), domain("right", "4", &["x", "y"])),
-            &[
-                interaction("a-x", "a", "x"),
-                interaction("b-x", "b", "x"),
-                interaction("b-y", "b", "y"),
-            ],
-            ProductDomainId::new("left-x-right"),
-            ProductDomainVersion::new("6"),
-            "product-run",
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
-    let frame = engine
-        .create_product_frame(
-            &Tracked::from(&product),
-            &[
-                ProductFrameAxis {
-                    left: UnitId::new("a"),
-                    right: UnitId::new("x"),
-                    label: None,
-                },
-                ProductFrameAxis {
-                    left: UnitId::new("b"),
-                    right: UnitId::new("x"),
-                    label: None,
-                },
-                ProductFrameAxis {
-                    left: UnitId::new("b"),
-                    right: UnitId::new("y"),
-                    label: None,
-                },
-            ],
-            ProductFrameId::new("left-right.interactions"),
-            ProductFrameVersion::new("8"),
-            "frame-run",
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
+    let product = materialize_product_domain(
+        &Tracked::from_recorded(DerivedId::new("left@3"), domain("left", "3", &["a", "b"])),
+        &Tracked::from_recorded(DerivedId::new("right@4"), domain("right", "4", &["x", "y"])),
+        &[
+            interaction("a-x", "a", "x"),
+            interaction("b-x", "b", "x"),
+            interaction("b-y", "b", "y"),
+        ],
+        ProductDomainId::new("left-x-right"),
+        ProductDomainVersion::new("6"),
+        "product-run",
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
+    let frame = create_product_frame(
+        &Tracked::from(&product),
+        &[
+            ProductFrameAxis {
+                left: UnitId::new("a"),
+                right: UnitId::new("x"),
+                label: None,
+            },
+            ProductFrameAxis {
+                left: UnitId::new("b"),
+                right: UnitId::new("x"),
+                label: None,
+            },
+            ProductFrameAxis {
+                left: UnitId::new("b"),
+                right: UnitId::new("y"),
+                label: None,
+            },
+        ],
+        ProductFrameId::new("left-right.interactions"),
+        ProductFrameVersion::new("8"),
+        "frame-run",
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
     (engine, product, frame)
 }
 

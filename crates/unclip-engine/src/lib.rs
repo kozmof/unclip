@@ -2,115 +2,128 @@
 
 #![forbid(unsafe_code)]
 
-mod structure_discovery;
-pub use structure_discovery::{CommunityCandidateGenerator, LatentAxisGenerator};
-
-mod temporal_discovery;
-pub use temporal_discovery::TemporalCouplingGenerator;
-
-mod pairwise_discovery;
-pub use pairwise_discovery::PairwiseCouplingGenerator;
-
-mod motif_discovery;
-pub use motif_discovery::RecurringMotifGenerator;
-
-mod relation_discovery;
-pub use relation_discovery::MissingRelationGenerator;
-
 mod candidate_application;
 mod comparison;
-mod constraints;
-mod pareto;
-pub use pareto::{
-    ObjectiveDirection, ParetoAssessment, ParetoDimension, ParetoEvidence, ParetoRelation,
-};
-mod transfer_constraint;
-pub use transfer_constraint::TransferAssessment;
-mod coupling_application;
-mod distribution_comparison;
-mod event_comparison;
-mod experiment;
-pub use constraints::{ConstraintAssessment, ConstraintStatus, ExperimentConstraint};
-mod graph_comparison;
-mod held_out;
-pub use experiment::{
-    CounterfactualEvidence, CounterfactualExperiment, ExperimentConstraints, NullEvidence,
-    PersistableExperiment,
-};
-mod motif_application;
-mod motif_null;
-mod observation_selection;
-pub use held_out::{
-    CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
-    HeldOutInputs,
-};
 mod composition_measurement;
+mod constraints;
+mod context_null;
+mod coupling_application;
+mod coupling_null;
 mod cross_domain;
 mod cross_domain_discovery;
+mod discovery;
+mod distribution_comparison;
+mod domain_null;
+mod empirical;
+mod event_comparison;
+mod experiment;
+mod graph_comparison;
+mod held_out;
+mod independence;
+mod independence_comparison;
+mod matrix_comparison;
+mod motif_application;
+mod motif_discovery;
+mod motif_null;
+mod null_models;
+mod observation_selection;
+mod pairwise_discovery;
+mod pareto;
+mod partition_comparison;
 mod product_domain;
-pub use composition_measurement::{
-    BoundDomainMeasurementProfile, BoundProductMeasurementProfile, CompositionMeasurementInputs,
-    CompositionMeasurementProfile, ProfileMeasurement,
-};
-pub use cross_domain_discovery::{CrossDomainCandidateGenerator, CrossDomainDeviationEvidence};
+pub use product_domain::{create_product_frame, materialize_product_domain};
 mod profile_comparison;
+mod ranking_comparison;
+mod ranking_null;
+mod relation_discovery;
+mod revision;
+mod role_application;
+mod role_null;
+mod spectral_comparison;
+mod structure_discovery;
+mod structured_comparison;
+mod temporal_discovery;
+mod transfer_constraint;
+mod transformation_application;
+mod transformation_null;
+mod weight_null;
+
 pub use candidate_application::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
+};
+pub use comparison::{compare_measurements, ScalarDifference, ScalarDifferenceComparator};
+pub use composition_measurement::{
+    measure_composition, BoundDomainMeasurementProfile, BoundProductMeasurementProfile,
+    CompositionMeasurementInputs, CompositionMeasurementProfile, ProfileMeasurement,
+};
+pub use constraints::{
+    assess_experiment_constraints, ConstraintAssessment, ConstraintStatus, ExperimentConstraint,
+};
+pub use context_null::ContextualCooccurrenceNull;
+pub use coupling_null::CouplingZeroNull;
+pub use cross_domain_discovery::{
+    derive_cross_domain_deviations, CrossDomainCandidateGenerator, CrossDomainDeviationEvidence,
+};
+pub use discovery::{generate_candidates, CandidateInputs, PersistentResidualGenerator};
+pub use distribution_comparison::{
+    DistributionComparison, DistributionNormalization, JensenShannonComparator,
+};
+pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
+pub use empirical::{derive_empirical, EmpiricalMethod, EmpiricalResult};
+pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
+pub use experiment::{
+    persistable_experiment, CounterfactualEvidence, CounterfactualExperiment,
+    ExperimentConstraints, NullEvidence, PersistableExperiment,
 };
 pub use graph_comparison::{
     DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
 };
-pub use observation_selection::ObservationSplit;
-pub use profile_comparison::{ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta};
-mod matrix_comparison;
-mod partition_comparison;
-pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
-mod spectral_comparison;
-mod structured_comparison;
-pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
-pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
-pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
-pub use structured_comparison::{StructuredIdentityComparator, StructuredIdentityComparison};
-mod ranking_comparison;
-mod revision;
-mod role_application;
-mod role_null;
-mod transformation_application;
-mod transformation_null;
-pub use distribution_comparison::{
-    DistributionComparison, DistributionNormalization, JensenShannonComparator,
+pub use held_out::{
+    CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
+    HeldOutInputs,
 };
-pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
-pub use revision::{RevisionAttempt, RevisionStep, RevisionTestOutcome};
-mod context_null;
-mod coupling_null;
-mod discovery;
-pub use comparison::{ScalarDifference, ScalarDifferenceComparator};
-mod domain_null;
-mod weight_null;
-pub use context_null::ContextualCooccurrenceNull;
-pub use coupling_null::CouplingZeroNull;
-pub use weight_null::WeightChangeNull;
-mod null_models;
-pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
-mod ranking_null;
-pub use discovery::{CandidateInputs, PersistentResidualGenerator};
-pub use motif_null::ExistingMotifNull;
-pub use null_models::{NullInputs, RandomCooccurrenceNull};
-pub use ranking_null::RankingConstraintNull;
-pub use role_null::ExistingRoleNull;
-pub use transformation_null::ExistingTransformationNull;
-
-mod empirical;
-mod independence;
-mod independence_comparison;
-pub use empirical::{EmpiricalMethod, EmpiricalResult};
 pub use independence::{
     IndependenceDefinition, IndependenceExpectation, IndependenceExpectationProfile,
 };
 pub use independence_comparison::{
-    IndependenceComparisonEntry, IndependenceComparisonProfile, IndependenceComparisonResult,
+    compare_product_with_independence, IndependenceComparisonEntry, IndependenceComparisonProfile,
+    IndependenceComparisonResult,
 };
+pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
+pub use motif_discovery::RecurringMotifGenerator;
+pub use motif_null::ExistingMotifNull;
+pub use null_models::{
+    evaluate_null_models, evaluate_null_models_with_inputs, evaluate_null_models_with_rankings,
+    NullInputs, RandomCooccurrenceNull,
+};
+pub use observation_selection::{
+    observation_split_run_record, select_observations, validate_candidate_ancestry,
+    ObservationSplit,
+};
+pub use pairwise_discovery::PairwiseCouplingGenerator;
+pub use pareto::{
+    compare_pareto, ObjectiveDirection, ParetoAssessment, ParetoDimension, ParetoEvidence,
+    ParetoRelation,
+};
+pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
+pub use profile_comparison::{
+    compare_profiles, ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta,
+};
+pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
+pub use ranking_null::RankingConstraintNull;
+pub use relation_discovery::MissingRelationGenerator;
+pub use revision::{
+    record_delta_e_test, record_delta_v_test, record_delta_w_test, record_dynamic_coupling_test,
+    record_structural_test, RevisionAttempt, RevisionStep, RevisionTestOutcome,
+};
+pub use role_null::ExistingRoleNull;
+pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
+pub use structure_discovery::{CommunityCandidateGenerator, LatentAxisGenerator};
+pub use structured_comparison::{StructuredIdentityComparator, StructuredIdentityComparison};
+pub use temporal_discovery::TemporalCouplingGenerator;
+pub use transfer_constraint::TransferAssessment;
+pub use transformation_null::ExistingTransformationNull;
+pub use weight_null::WeightChangeNull;
 
 use std::collections::BTreeMap;
 
@@ -248,8 +261,21 @@ pub struct PipelineResults {
     pub measurements: Vec<Calculated<Measurement>>,
 }
 
-/// Require measurement evidence produced by calculation. Values restored through a
-/// type-specific repository have no in-memory operation marker and remain trusted.
+/// Require evidence produced by calculation.
+///
+/// An in-memory `Calculated<T>` can only have come from a `CalculationToken`, so
+/// its label is trustworthy. A value restored from storage carries whatever
+/// operation its caller named: `Tracked::from_calculated` for a row from a table
+/// that admits only calculated values, `from_inferred` for a replayed inference
+/// product, and `from_recorded` when the operation genuinely is not known there.
+///
+/// `None` is accepted rather than rejected because the unlabeled case means "no
+/// claim was made", and rejecting it would break the import and legacy paths
+/// that legitimately cannot make one. That is the limit of what this check
+/// proves: it rejects evidence *labeled* as inferred, experimental, or
+/// interpreted, and it cannot distinguish trustworthy-but-unlabeled from
+/// carelessly-unlabeled. Call the labeling constructors wherever the source
+/// table settles the question, so this gate has a fact to check.
 pub(crate) fn require_calculated_evidence<T>(input: &Tracked<T>, kind: &str) -> Result<()> {
     match input.operation() {
         None | Some(Operation::Calculated) => Ok(()),
@@ -307,240 +333,33 @@ impl Engine {
         self.registry.resolve(profile)
     }
 
-    /// Build a persistable planned-run record from the exact resolved plugins.
-    pub fn run_record(
-        &self,
-        plan: &RunPlan,
-        params: &BTreeMap<PluginId, serde_json::Value>,
-        id: impl Into<String>,
-        started_at: Timestamp,
-        metadata: serde_json::Value,
-    ) -> unclip_store::EngineRunRecord {
-        fn entry(
-            id: &PluginId,
-            version: &semver::Version,
-            params: &BTreeMap<PluginId, serde_json::Value>,
-        ) -> serde_json::Value {
-            let values = params
-                .get(id)
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-            serde_json::json!({
-                "id": id,
-                "version": version,
-                "params_hash": hash_params(&values),
-                "params": values,
-            })
-        }
-
-        let mut inferrers = plan
-            .inferrers
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let mut sensors = plan
-            .sensors
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let mut comparators = plan
-            .comparators
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let mut interpreters = plan
-            .interpreters
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let mut candidate_generators = plan
-            .candidate_generators
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let mut null_models = plan
-            .null_models
-            .iter()
-            .map(|plugin| {
-                let descriptor = plugin.descriptor();
-                entry(&descriptor.id, &descriptor.version, params)
-            })
-            .collect::<Vec<_>>();
-        let by_id = |left: &serde_json::Value, right: &serde_json::Value| {
-            left["id"].as_str().cmp(&right["id"].as_str())
-        };
-        inferrers.sort_by(by_id);
-        sensors.sort_by(by_id);
-        comparators.sort_by(by_id);
-        interpreters.sort_by(by_id);
-        candidate_generators.sort_by(by_id);
-        null_models.sort_by(by_id);
-
-        unclip_store::EngineRunRecord {
-            id: id.into(),
-            resolved_plan: serde_json::json!({
-                "inferrers": inferrers,
-                "sensors": sensors,
-                "comparators": comparators,
-                "interpreters": interpreters,
-                "candidate_generators": candidate_generators,
-                "null_models": null_models,
-            }),
-            status: unclip_store::EngineRunStatus::Planned,
-            started_at: started_at.0,
-            completed_at: None,
-            metadata,
-        }
-    }
-
-    /// Execute all configured inferrers before any calculation sensor runs.
-    pub async fn infer(
-        &self,
-        plan: &RunPlan,
-        domain: &DomainSnapshot,
-        run: InferenceRun<'_>,
-    ) -> Result<InferenceResults> {
-        let empty_params = serde_json::json!({});
-        let mut results = InferenceResults::default();
-        for inferrer in &plan.inferrers {
-            let descriptor = inferrer.descriptor();
-            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
-            let ctx = unclip_plugin::InferCtx {
-                source: run.source.clone(),
-                domain,
-                params,
-                io: run.io,
-            };
-            let metadata = EmitMetadata {
-                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
-                producer: descriptor.id.clone(),
-                algorithm: descriptor.id.0.clone(),
-                version: descriptor.version.clone(),
-                params: params.clone(),
-                params_hash: hash_params(params),
-                source: Some(run.source.clone()),
-                timestamp: run.timestamp.clone(),
-                domain_version: Some(domain.version.clone()),
-                frame_version: None,
-                model: None,
-            };
-            let output = inferrer
-                .infer(
-                    &ctx,
-                    InferenceToken::from_harness(metadata, DependencyCollector::default()),
-                )
-                .await?;
-            results.push(output);
-        }
-        Ok(results)
-    }
-
-    /// Interpret tracked empirical structures in canonical plugin and source order.
-    ///
-    /// Every output records the exact model selector, plugin parameters, and
-    /// source structure provenance identity supplied to the model.
-    pub async fn interpret(
-        &self,
-        plan: &RunPlan,
-        structures: &[Tracked<EmpiricalStructure>],
-        run: InterpretationRun<'_>,
-    ) -> Result<Vec<Interpreted<serde_json::Value>>> {
-        if plan.interpreters.is_empty() {
-            return Ok(Vec::new());
-        }
-        if run.id.is_empty() || structures.is_empty() {
-            return Err(unclip_plugin::PluginError::Message(
-                "interpretation requires a run ID and empirical structures".into(),
-            ));
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for structure in structures {
-            require_calculated_evidence(structure, "interpretation source structure")?;
-            if structure.id().0.is_empty() {
-                return Err(unclip_plugin::PluginError::Message(
-                    "interpretation source structure ID must not be empty".into(),
-                ));
-            }
-            if !seen.insert(structure.id()) {
-                return Err(unclip_plugin::PluginError::Message(
-                    "duplicate interpretation source structure".into(),
-                ));
-            }
-        }
-
-        let mut sources = structures.iter().collect::<Vec<_>>();
-        sources.sort_by_key(|structure| structure.id());
-        let mut interpreters = plan.interpreters.iter().collect::<Vec<_>>();
-        interpreters.sort_by_key(|interpreter| &interpreter.descriptor().id);
-        let empty_params = serde_json::json!({});
-        let mut outputs = Vec::with_capacity(sources.len() * interpreters.len());
-        for interpreter in interpreters {
-            let descriptor = interpreter.descriptor();
-            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
-            let model = interpreter.model_ref(params)?;
-            for source in &sources {
-                let ctx = InterpretCtx::new(source, params, run.io, DependencyCollector::default());
-                let metadata = EmitMetadata {
-                    id: DerivedId::new(format!("{}/{}/{}", run.id, descriptor.id, source.id())),
-                    producer: descriptor.id.clone(),
-                    algorithm: descriptor.id.0.clone(),
-                    version: descriptor.version.clone(),
-                    params: params.clone(),
-                    params_hash: hash_params(params),
-                    source: None,
-                    timestamp: run.timestamp.clone(),
-                    domain_version: None,
-                    frame_version: None,
-                    model: model.clone(),
-                };
-                outputs.push(
-                    interpreter
-                        .interpret(&ctx, ctx.interpretation_token(metadata))
-                        .await?,
-                );
-            }
-        }
-        Ok(outputs)
-    }
-
     /// Replay persisted inference products and re-execute calculation stages only.
     pub fn verify(
         &self,
         plan: &RunPlan,
         domain: &DomainSnapshot,
         frame: &MeasurementFrame,
-        replay: &unclip_store::EngineRunReplay,
+        replay: &unclip_record::EngineRunReplay,
         run: MeasurementRun<'_>,
     ) -> Result<Vec<Calculated<Measurement>>> {
+        // A replay's observations, alignments, and rankings are inference
+        // products by construction, so they are restored as inferred rather
+        // than unlabeled. A sensor reads them through the context either way;
+        // labeling them keeps them from passing a calculated-evidence gate.
         let observations = replay
             .observations
             .iter()
-            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
             .collect::<Vec<_>>();
         let alignments = replay
             .alignments
             .iter()
-            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
             .collect::<Vec<_>>();
         let rankings = replay
             .rankings
             .iter()
-            .map(|record| Tracked::from_recorded(record.provenance.clone(), record.value.clone()))
+            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
             .collect::<Vec<_>>();
 
         self.measure(
@@ -660,19 +479,13 @@ impl Engine {
                 params,
                 dependencies,
             );
-            let metadata = EmitMetadata {
-                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
-                producer: descriptor.id.clone(),
-                algorithm: descriptor.id.0.clone(),
-                version: descriptor.version.clone(),
-                params: params.clone(),
-                params_hash: hash_params(params),
-                source: None,
-                timestamp: run.timestamp.clone(),
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            };
+            let metadata = EmitMetadata::new(
+                DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+                descriptor.id.clone(),
+                descriptor.version.clone(),
+                params,
+                run.timestamp.clone(),
+            );
             match classify_sensor(sensor.as_ref(), &ctx, true) {
                 SensorDecision::Run => {
                     measurements.extend(sensor.measure(&ctx, ctx.calculation_token(metadata))?);
@@ -691,10 +504,227 @@ impl Engine {
         }
         Ok(measurements)
     }
+
+    /// Execute all configured inferrers before any calculation sensor runs.
+    pub async fn infer(
+        &self,
+        plan: &RunPlan,
+        domain: &DomainSnapshot,
+        run: InferenceRun<'_>,
+    ) -> Result<InferenceResults> {
+        let empty_params = serde_json::json!({});
+        let mut results = InferenceResults::default();
+        for inferrer in &plan.inferrers {
+            let descriptor = inferrer.descriptor();
+            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            let ctx = unclip_plugin::InferCtx {
+                source: run.source.clone(),
+                domain,
+                params,
+                io: run.io,
+            };
+            let metadata = EmitMetadata::new(
+                DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+                descriptor.id.clone(),
+                descriptor.version.clone(),
+                params,
+                run.timestamp.clone(),
+            )
+            .with_source(run.source.clone())
+            .with_domain_version(domain.version.clone());
+            let output = inferrer
+                .infer(
+                    &ctx,
+                    InferenceToken::from_harness(metadata, DependencyCollector::default()),
+                )
+                .await?;
+            results.push(output);
+        }
+        Ok(results)
+    }
+
+    /// Interpret tracked empirical structures in canonical plugin and source order.
+    ///
+    /// Every output records the exact model selector, plugin parameters, and
+    /// source structure provenance identity supplied to the model.
+    pub async fn interpret(
+        &self,
+        plan: &RunPlan,
+        structures: &[Tracked<EmpiricalStructure>],
+        run: InterpretationRun<'_>,
+    ) -> Result<Vec<Interpreted<serde_json::Value>>> {
+        if plan.interpreters.is_empty() {
+            return Ok(Vec::new());
+        }
+        if run.id.is_empty() || structures.is_empty() {
+            return Err(unclip_plugin::PluginError::Message(
+                "interpretation requires a run ID and empirical structures".into(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for structure in structures {
+            require_calculated_evidence(structure, "interpretation source structure")?;
+            if structure.id().0.is_empty() {
+                return Err(unclip_plugin::PluginError::Message(
+                    "interpretation source structure ID must not be empty".into(),
+                ));
+            }
+            if !seen.insert(structure.id()) {
+                return Err(unclip_plugin::PluginError::Message(
+                    "duplicate interpretation source structure".into(),
+                ));
+            }
+        }
+
+        let mut sources = structures.iter().collect::<Vec<_>>();
+        sources.sort_by_key(|structure| structure.id());
+        let mut interpreters = plan.interpreters.iter().collect::<Vec<_>>();
+        interpreters.sort_by_key(|interpreter| &interpreter.descriptor().id);
+        let empty_params = serde_json::json!({});
+        let mut outputs = Vec::with_capacity(sources.len() * interpreters.len());
+        for interpreter in interpreters {
+            let descriptor = interpreter.descriptor();
+            let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            let model = interpreter.model_ref(params)?;
+            for source in &sources {
+                let ctx = InterpretCtx::new(source, params, run.io, DependencyCollector::default());
+                let metadata = EmitMetadata::new(
+                    DerivedId::new(format!("{}/{}/{}", run.id, descriptor.id, source.id())),
+                    descriptor.id.clone(),
+                    descriptor.version.clone(),
+                    params,
+                    run.timestamp.clone(),
+                )
+                .with_model(model.clone());
+                outputs.push(
+                    interpreter
+                        .interpret(&ctx, ctx.interpretation_token(metadata))
+                        .await?,
+                );
+            }
+        }
+        Ok(outputs)
+    }
+}
+
+/// Build a persistable planned-run record from the exact resolved plugins.
+pub fn run_record(
+    plan: &RunPlan,
+    params: &BTreeMap<PluginId, serde_json::Value>,
+    id: impl Into<String>,
+    started_at: Timestamp,
+    metadata: serde_json::Value,
+) -> unclip_record::EngineRunRecord {
+    fn entry(
+        id: &PluginId,
+        version: &semver::Version,
+        params: &BTreeMap<PluginId, serde_json::Value>,
+    ) -> serde_json::Value {
+        let values = params
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        serde_json::json!({
+            "id": id,
+            "version": version,
+            "params_hash": hash_params(&values),
+            "params": values,
+        })
+    }
+
+    let mut inferrers = plan
+        .inferrers
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let mut sensors = plan
+        .sensors
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let mut comparators = plan
+        .comparators
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let mut interpreters = plan
+        .interpreters
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let mut candidate_generators = plan
+        .candidate_generators
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let mut null_models = plan
+        .null_models
+        .iter()
+        .map(|plugin| {
+            let descriptor = plugin.descriptor();
+            entry(&descriptor.id, &descriptor.version, params)
+        })
+        .collect::<Vec<_>>();
+    let by_id = |left: &serde_json::Value, right: &serde_json::Value| {
+        left["id"].as_str().cmp(&right["id"].as_str())
+    };
+    inferrers.sort_by(by_id);
+    sensors.sort_by(by_id);
+    comparators.sort_by(by_id);
+    interpreters.sort_by(by_id);
+    candidate_generators.sort_by(by_id);
+    null_models.sort_by(by_id);
+
+    unclip_record::EngineRunRecord {
+        id: id.into(),
+        resolved_plan: serde_json::json!({
+            "inferrers": inferrers,
+            "sensors": sensors,
+            "comparators": comparators,
+            "interpreters": interpreters,
+            "candidate_generators": candidate_generators,
+            "null_models": null_models,
+        }),
+        status: unclip_record::EngineRunStatus::Planned,
+        started_at: started_at.0,
+        completed_at: None,
+        metadata,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn calculated_evidence_gate_rejects_every_other_operation() {
+        use unclip_epistemic::{DerivedId, Tracked};
+
+        let id = || DerivedId::new("evidence");
+        // Labeled as calculated, or making no claim at all: accepted.
+        assert!(
+            super::require_calculated_evidence(&Tracked::from_calculated(id(), 1), "e").is_ok()
+        );
+        assert!(super::require_calculated_evidence(&Tracked::from_recorded(id(), 1), "e").is_ok());
+        // Labeled as some other operation: rejected, naming what it found.
+        let error = super::require_calculated_evidence(&Tracked::from_inferred(id(), 1), "e")
+            .expect_err("inferred evidence must not pass a calculated-evidence gate");
+        assert!(error.to_string().contains("Inferred"), "got: {error}");
+    }
+
     use super::*;
     use unclip_domain::{DomainId, FrameId};
     use unclip_epistemic::{DomainVersion, FrameVersion};
@@ -1051,8 +1081,8 @@ mod tests {
             ]
         );
 
-        let mut replay = unclip_store::EngineRunReplay {
-            run: engine.run_record(
+        let mut replay = unclip_record::EngineRunReplay {
+            run: run_record(
                 &plan,
                 &params,
                 "run-text",
@@ -1081,7 +1111,7 @@ mod tests {
                 replay
                     .observations
                     .extend(observations.iter().cloned().map(|value| {
-                        unclip_store::RecordedInference {
+                        unclip_record::RecordedInference {
                             provenance: output.id().clone(),
                             value,
                         }
@@ -1089,7 +1119,7 @@ mod tests {
                 replay
                     .alignments
                     .extend(alignments.iter().cloned().map(|value| {
-                        unclip_store::RecordedInference {
+                        unclip_record::RecordedInference {
                             provenance: output.id().clone(),
                             value,
                         }
@@ -1097,7 +1127,7 @@ mod tests {
                 replay
                     .rankings
                     .extend(rankings.iter().cloned().map(|value| {
-                        unclip_store::RecordedInference {
+                        unclip_record::RecordedInference {
                             provenance: output.id().clone(),
                             value,
                         }
@@ -1142,7 +1172,7 @@ mod tests {
             (PluginId::new("infer.pattern"), inference_params.clone()),
         ]);
 
-        let record = engine.run_record(
+        let record = run_record(
             &plan,
             &params,
             "run-record",
@@ -1150,7 +1180,7 @@ mod tests {
             serde_json::json!({"source": "notes.txt"}),
         );
 
-        assert_eq!(record.status, unclip_store::EngineRunStatus::Planned);
+        assert_eq!(record.status, unclip_record::EngineRunStatus::Planned);
         assert_eq!(record.started_at, "2026-09-18T00:00:00Z");
         assert_eq!(record.metadata, serde_json::json!({"source": "notes.txt"}));
         assert_eq!(

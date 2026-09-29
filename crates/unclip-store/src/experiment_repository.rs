@@ -29,6 +29,7 @@ use crate::{
 };
 
 pub use unclip_domain::{CandidateKind, CandidateProposal};
+pub use unclip_record::{ExperimentDelta, ExperimentOutcome};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandidateRecord {
@@ -43,27 +44,6 @@ pub struct CandidateInterpretationRecord {
     pub candidate_id: DerivedId,
     pub value: Value,
     pub created_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExperimentOutcome {
-    pub candidate_id: DerivedId,
-    pub domain_version_id: String,
-    pub frame_version_id: String,
-    pub plan: Map<String, Value>,
-    pub result: Map<String, Value>,
-    /// Explicit sequence order is preserved independently in each split.
-    pub training: Vec<unclip_observe::ObservationId>,
-    pub held_out: Vec<unclip_observe::ObservationId>,
-    pub started_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExperimentDelta {
-    pub before_profile_id: String,
-    pub after_profile_id: String,
-    pub calculated: Calculated<Delta>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,0 +1,19 @@
+[package]
+name = "unclip-record"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+description = "Persistable run and experiment records shared by the unclip engine and store."
+
+[dependencies]
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unclip-epistemic.workspace = true
+unclip-measure.workspace = true
+unclip-observe.workspace = true

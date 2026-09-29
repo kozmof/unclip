@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use unclip_domain::{CandidateKind, DomainId, DomainSnapshot, FrameId, MeasurementFrame};
-use unclip_engine::{CandidateInputs, Engine, MeasurementInputs, MeasurementRun};
+use unclip_engine::{
+    generate_candidates, CandidateInputs, Engine, MeasurementInputs, MeasurementRun,
+};
 use unclip_epistemic::{
     hash_params, Calculated, DependencyCollector, DerivedId, DomainVersion, EmitMetadata,
     FrameVersion, InferenceToken, PluginId, SourceRef, Timestamp, Tracked,
@@ -20,19 +22,15 @@ struct Fixture {
     provenance: Vec<StoredProvenance>,
 }
 fn metadata(id: &str) -> EmitMetadata {
-    EmitMetadata {
-        id: DerivedId::new(id),
-        producer: PluginId::new("infer.fixture"),
-        algorithm: "fixture".into(),
-        version: "0.1.0".parse().unwrap(),
-        params: serde_json::json!({}),
-        params_hash: hash_params(&serde_json::json!({})),
-        source: Some(SourceRef::new("fixture")),
-        timestamp: Timestamp::new("now"),
-        domain_version: None,
-        frame_version: None,
-        model: None,
-    }
+    EmitMetadata::new(
+        DerivedId::new(id),
+        PluginId::new("infer.fixture"),
+        "0.1.0".parse().unwrap(),
+        &serde_json::json!({}),
+        Timestamp::new("now"),
+    )
+    .with_algorithm("fixture")
+    .with_source(SourceRef::new("fixture"))
 }
 fn fixture() -> Fixture {
     let domain = DomainSnapshot {
@@ -148,7 +146,7 @@ fn run_generator(
             ..Default::default()
         })
         .unwrap();
-    engine.generate_candidates(
+    generate_candidates(
         &plan,
         CandidateInputs {
             structures: &[],

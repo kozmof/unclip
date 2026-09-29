@@ -1,8 +1,7 @@
 //! Explicit, tracked comparisons; scalar subtraction is one comparator only.
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
-    hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
 };
 use unclip_measure::{Delta, Measurement, MeasurementKind, MeasurementValue, Reading};
 use unclip_plugin::{Comparator, ComparatorDescriptor, CompareCtx, PluginError, Result, RunPlan};
@@ -106,40 +105,32 @@ impl Comparator for ScalarDifferenceComparator {
         }))
     }
 }
-impl super::Engine {
-    /// Compare one explicitly paired measurement using only selected comparators.
-    pub fn compare_measurements(
-        &self,
-        plan: &RunPlan,
-        before: &Tracked<Measurement>,
-        after: &Tracked<Measurement>,
-        run: super::MeasurementRun<'_>,
-    ) -> Result<Vec<Calculated<Delta>>> {
-        super::require_calculated_evidence(before, "comparison input measurement")?;
-        super::require_calculated_evidence(after, "comparison input measurement")?;
-        let mut comparators = plan.comparators.iter().collect::<Vec<_>>();
-        comparators.sort_by_key(|p| &p.descriptor().id);
-        let mut results = Vec::new();
-        let empty = serde_json::json!({});
-        for comparator in comparators {
-            let descriptor = comparator.descriptor();
-            let params = run.params.get(&descriptor.id).unwrap_or(&empty);
-            let ctx = CompareCtx::new(before, after, params, DependencyCollector::default());
-            let token = ctx.calculation_token(EmitMetadata {
-                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
-                producer: descriptor.id.clone(),
-                algorithm: descriptor.id.0.clone(),
-                version: descriptor.version.clone(),
-                params: params.clone(),
-                params_hash: hash_params(params),
-                source: None,
-                timestamp: run.timestamp.clone(),
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            });
-            results.push(comparator.compare(&ctx, token)?);
-        }
-        Ok(results)
+
+/// Compare one explicitly paired measurement using only selected comparators.
+pub fn compare_measurements(
+    plan: &RunPlan,
+    before: &Tracked<Measurement>,
+    after: &Tracked<Measurement>,
+    run: super::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<Delta>>> {
+    super::require_calculated_evidence(before, "comparison input measurement")?;
+    super::require_calculated_evidence(after, "comparison input measurement")?;
+    let mut comparators = plan.comparators.iter().collect::<Vec<_>>();
+    comparators.sort_by_key(|p| &p.descriptor().id);
+    let mut results = Vec::new();
+    let empty = serde_json::json!({});
+    for comparator in comparators {
+        let descriptor = comparator.descriptor();
+        let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        let ctx = CompareCtx::new(before, after, params, DependencyCollector::default());
+        let token = ctx.calculation_token(EmitMetadata::new(
+            DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            params,
+            run.timestamp.clone(),
+        ));
+        results.push(comparator.compare(&ctx, token)?);
     }
+    Ok(results)
 }

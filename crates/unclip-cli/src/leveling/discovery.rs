@@ -1,6 +1,6 @@
 //! Candidate generation from explicitly selected stored evidence.
 use anyhow::{ensure, Context};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use unclip_epistemic::{DerivedId, Timestamp, Tracked};
 use unclip_store::{
@@ -9,13 +9,32 @@ use unclip_store::{
     RecordedInference,
 };
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SelectedStructure {
-    #[allow(dead_code)]
     id: String,
     provenance: DerivedId,
     value: unclip_measure::EmpiricalStructure,
+}
+
+/// The evidence a discovery run selected, recorded in its run metadata.
+///
+/// One type serves both sides: `discover` builds it, and `verify` reads it back
+/// to recalculate the run. That is the point of declaring it — the snapshot's
+/// shape is what makes a discovery run replayable, so the writer and the reader
+/// must not be able to drift apart. `deny_unknown_fields` makes a snapshot
+/// written by a different version fail loudly instead of verifying against
+/// silently missing evidence.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoverySnapshot {
+    domain: String,
+    profiles: Vec<String>,
+    observation_ids: Vec<String>,
+    structure_ids: Vec<String>,
+    measurements: Vec<MeasurementRecord>,
+    observations: Vec<RecordedInference<unclip_observe::Observation>>,
+    structures: Vec<SelectedStructure>,
 }
 
 fn calculate(
@@ -30,19 +49,19 @@ fn calculate(
     let plan = engine.plan(&profile)?;
     let measurements = measurements
         .into_iter()
-        .map(|record| Tracked::from_recorded(record.provenance, record.measurement))
+        .map(|record| Tracked::from_calculated(record.provenance, record.measurement))
         .collect::<Vec<_>>();
     let observations = observations
         .into_iter()
-        .map(|record| Tracked::from_recorded(record.provenance, record.value))
+        .map(|record| Tracked::from_inferred(record.provenance, record.value))
         .collect::<Vec<_>>();
     let structures = structures
         .into_iter()
-        .map(|record| Tracked::from_recorded(record.provenance, record.value))
+        .map(|record| Tracked::from_inferred(record.provenance, record.value))
         .collect::<Vec<_>>();
     let (domain_id, version) = super::parse_domain_selector(domain)?;
     let domain_key = serde_json::to_string(&(&domain_id.0, &version.0))?;
-    Ok(engine.generate_candidates(
+    Ok(unclip_engine::generate_candidates(
         &plan,
         unclip_engine::CandidateInputs {
             domain_version_id: &domain_key,
@@ -99,7 +118,15 @@ pub(crate) async fn discover(
     let mut measurements = Vec::new();
     let mut observed = Vec::new();
     let mut empirical = Vec::new();
-    let mut snapshot = serde_json::json!({"domain":selector,"profiles":profiles,"observation_ids":observations,"structure_ids":structures,"measurements":[],"observations":[],"structures":[]});
+    let mut snapshot = DiscoverySnapshot {
+        domain: selector.to_owned(),
+        profiles: profiles.to_vec(),
+        observation_ids: observations.to_vec(),
+        structure_ids: structures.to_vec(),
+        measurements: Vec::new(),
+        observations: Vec::new(),
+        structures: Vec::new(),
+    };
     let mut unique = BTreeSet::new();
     let mut measurement_ids = BTreeSet::new();
     for id in profiles {
@@ -115,14 +142,11 @@ pub(crate) async fn discover(
                 "duplicate measurement provenance: {}",
                 record.provenance
             );
-            measurements.push(Tracked::from_recorded(
+            measurements.push(Tracked::from_calculated(
                 record.provenance.clone(),
                 record.measurement.clone(),
             ));
-            snapshot["measurements"]
-                .as_array_mut()
-                .unwrap()
-                .push(serde_json::to_value(record)?);
+            snapshot.measurements.push(record);
         }
     }
     let mut unique = BTreeSet::new();
@@ -133,14 +157,11 @@ pub(crate) async fn discover(
             .get_recorded_observation(&unclip_observe::ObservationId::new(id))
             .await?
             .with_context(|| format!("observation not found: {id}"))?;
-        observed.push(Tracked::from_recorded(
+        observed.push(Tracked::from_inferred(
             record.provenance.clone(),
             record.value.clone(),
         ));
-        snapshot["observations"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::to_value(record)?);
+        snapshot.observations.push(record);
     }
     let mut unique = BTreeSet::new();
     for id in structures {
@@ -150,18 +171,22 @@ pub(crate) async fn discover(
             .get_empirical_structure(id)
             .await?
             .with_context(|| format!("empirical structure not found: {id}"))?;
-        empirical.push(Tracked::from_recorded(
+        empirical.push(Tracked::from_calculated(
             record.provenance.clone(),
             record.structure.clone(),
         ));
-        snapshot["structures"].as_array_mut().unwrap().push(serde_json::json!({"id":record.id,"provenance":record.provenance,"value":record.structure}));
+        snapshot.structures.push(SelectedStructure {
+            id: record.id,
+            provenance: record.provenance,
+            value: record.structure,
+        });
     }
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
     let timestamp = unclip_store::now();
     let run_id = format!("discover-{timestamp}");
     let domain_key = serde_json::to_string(&(&domain.0, &version.0))?;
-    let outputs = engine.generate_candidates(
+    let outputs = unclip_engine::generate_candidates(
         &plan,
         unclip_engine::CandidateInputs {
             domain_version_id: &domain_key,
@@ -175,7 +200,13 @@ pub(crate) async fn discover(
             params: &parsed.params,
         },
     )?;
-    let record = engine.run_record(&plan, &parsed.params, &run_id, Timestamp::new(timestamp), serde_json::json!({"stage":"discovery","snapshot":snapshot,"outputs":outputs.iter().map(|c| c.id()).collect::<Vec<_>>()}));
+    let record = unclip_engine::run_record(
+        &plan,
+        &parsed.params,
+        &run_id,
+        Timestamp::new(timestamp),
+        serde_json::json!({"stage":"discovery","snapshot":snapshot,"outputs":outputs.iter().map(|c| c.id()).collect::<Vec<_>>()}),
+    );
     repos.engine_runs.insert_run(record).await?;
     repos
         .engine_runs
@@ -223,33 +254,23 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
         "discovery run is not completed: {}",
         run.id
     );
-    let snapshot = run
-        .metadata
-        .get("snapshot")
-        .context("discovery run has no input snapshot")?;
-    let domain = snapshot
-        .get("domain")
-        .and_then(serde_json::Value::as_str)
-        .context("discovery snapshot has no domain selector")?;
-    let measurements: Vec<MeasurementRecord> = serde_json::from_value(
-        snapshot
-            .get("measurements")
+    // One typed read replaces five field lookups: the snapshot's shape is
+    // stated once, by the struct `discover` wrote, and a snapshot missing or
+    // misnaming any part of it fails here with serde saying which.
+    let snapshot: DiscoverySnapshot = serde_json::from_value(
+        run.metadata
+            .get("snapshot")
             .cloned()
-            .context("discovery snapshot has no measurements")?,
+            .context("discovery run has no input snapshot")?,
+    )
+    .context("discovery run snapshot does not match the recorded evidence shape")?;
+    let outputs = calculate(
+        run,
+        &snapshot.domain,
+        snapshot.measurements,
+        snapshot.observations,
+        snapshot.structures,
     )?;
-    let observations: Vec<RecordedInference<unclip_observe::Observation>> = serde_json::from_value(
-        snapshot
-            .get("observations")
-            .cloned()
-            .context("discovery snapshot has no observations")?,
-    )?;
-    let structures: Vec<SelectedStructure> = serde_json::from_value(
-        snapshot
-            .get("structures")
-            .cloned()
-            .context("discovery snapshot has no structures")?,
-    )?;
-    let outputs = calculate(run, domain, measurements, observations, structures)?;
     let manifest: Vec<DerivedId> = serde_json::from_value(
         run.metadata
             .get("outputs")

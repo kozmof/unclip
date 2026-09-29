@@ -5,13 +5,13 @@ use unclip_domain::{
     CandidateKind, CandidateProposal, DomainId, DomainSnapshot, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
-    ComparisonPair, ConstraintAssessment, ConstraintStatus, CounterfactualEvidence, DeltaProfile,
-    Engine, ExperimentConstraint, NullEvidence, ProfileDelta, RevisionAttempt, RevisionStep,
-    RevisionTestOutcome,
+    record_delta_v_test, ComparisonPair, ConstraintAssessment, ConstraintStatus,
+    CounterfactualEvidence, DeltaProfile, Engine, ExperimentConstraint, NullEvidence, ProfileDelta,
+    RevisionAttempt, RevisionStep, RevisionTestOutcome,
 };
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
-    Experimental, FrameVersion, Operation, PluginId, Timestamp, Tracked,
+    DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken, Experimental,
+    FrameVersion, Operation, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Delta, MeasurementValue, Reading};
 
@@ -73,19 +73,16 @@ fn prior(outcome: RevisionTestOutcome, step: RevisionStep) -> Experimental<Revis
     }
     let params = json!({"fixture": "structural-prior"});
     ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("structural-ladder/revision/structural"),
-            producer: PluginId::new("experiment.revision-ladder"),
-            algorithm: "minimal_revision_structural".into(),
-            version: semver::Version::new(0, 1, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("structural-ladder/revision/structural"),
+            PluginId::new("experiment.revision-ladder"),
+            semver::Version::new(0, 1, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("minimal_revision_structural")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(RevisionAttempt {
@@ -160,7 +157,6 @@ fn fixture(
     include_null: bool,
     constraint_status: Option<ConstraintStatus>,
 ) -> (
-    Engine,
     Tracked<CandidateProposal>,
     unclip_epistemic::Calculated<unclip_engine::CounterfactualSnapshot>,
     Experimental<CounterfactualEvidence>,
@@ -198,19 +194,16 @@ fn fixture(
 
     let params = json!({"fixture": "atomic"});
     let experiment = ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("atomic-experiment"),
-            producer: PluginId::new("experiment.counterfactual"),
-            algorithm: "held_out_counterfactual_comparison".into(),
-            version: semver::Version::new(0, 5, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("atomic-experiment"),
+            PluginId::new("experiment.counterfactual"),
+            semver::Version::new(0, 5, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("held_out_counterfactual_comparison")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(CounterfactualEvidence {
@@ -232,28 +225,27 @@ fn fixture(
         pareto_assessment: None,
         pareto: None,
     });
-    (engine, candidate, counterfactual, experiment)
+    (candidate, counterfactual, experiment)
 }
 
 #[test]
 fn delta_v_records_the_ordered_atomic_membership_attempt() {
     let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
-    let (engine, candidate, counterfactual, experiment) =
+    let (candidate, counterfactual, experiment) =
         fixture(&prior, true, Some(ConstraintStatus::Satisfied));
 
     let record = || {
-        engine
-            .record_delta_v_test(
-                &prior,
-                &candidate,
-                &counterfactual,
-                &experiment,
-                RevisionTestOutcome::Sufficient,
-                "persistent held-out residual evidence requires one new anonymous unit",
-                "atomic-ladder",
-                Timestamp::new("now"),
-            )
-            .unwrap()
+        record_delta_v_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Sufficient,
+            "persistent held-out residual evidence requires one new anonymous unit",
+            "atomic-ladder",
+            Timestamp::new("now"),
+        )
+        .unwrap()
     };
     let attempt = record();
     assert_eq!(attempt, record());
@@ -319,7 +311,9 @@ fn sufficient_or_out_of_order_structural_attempt_stops_delta_v_before_applicatio
         .is_err());
 
     let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
-    let (engine, candidate, _, experiment) = fixture(&prior, true, None);
+    let (candidate, _, experiment) = fixture(&prior, true, None);
+    // `apply_candidate` resolves plugins, so this one still needs an engine.
+    let engine = Engine::with_builtins().unwrap();
     let unauthorized = engine
         .apply_candidate(
             &Tracked::from_recorded(DerivedId::new("baseline"), domain()),
@@ -328,91 +322,85 @@ fn sufficient_or_out_of_order_structural_attempt_stops_delta_v_before_applicatio
             Timestamp::new("now"),
         )
         .unwrap();
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &candidate,
-            &unauthorized,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(record_delta_v_test(
+        &prior,
+        &candidate,
+        &unauthorized,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 }
 
 #[test]
 fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
     let prior = prior(RevisionTestOutcome::Insufficient, RevisionStep::Structural);
-    let (engine, candidate, counterfactual, experiment) = fixture(&prior, false, None);
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    let (candidate, counterfactual, experiment) = fixture(&prior, false, None);
+    assert!(record_delta_v_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 
-    let (engine, candidate, counterfactual, experiment) =
+    let (candidate, counterfactual, experiment) =
         fixture(&prior, true, Some(ConstraintStatus::Violated));
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_ok());
+    assert!(record_delta_v_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Sufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
+    assert!(record_delta_v_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_ok());
 
     let mut incomplete = proposal();
     incomplete.value["examples"][0]["measurements"] = json!([]);
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &Tracked::from_recorded(DerivedId::new("atomic-candidate"), incomplete),
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(record_delta_v_test(
+        &prior,
+        &Tracked::from_recorded(DerivedId::new("atomic-candidate"), incomplete),
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 
     let mut unsupported = proposal();
     unsupported.kind = CandidateKind::CompositeMeaning;
-    assert!(engine
-        .record_delta_v_test(
-            &prior,
-            &Tracked::from_recorded(DerivedId::new("atomic-candidate"), unsupported),
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "atomic-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(record_delta_v_test(
+        &prior,
+        &Tracked::from_recorded(DerivedId::new("atomic-candidate"), unsupported),
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "atomic-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 }

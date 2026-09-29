@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use unclip_domain::{DomainId, DomainSnapshot, UnitId};
-use unclip_engine::{ConstraintStatus, CounterfactualSnapshot, Engine, ExperimentConstraint};
+use unclip_engine::{
+    assess_experiment_constraints, ConstraintStatus, CounterfactualSnapshot, ExperimentConstraint,
+};
 use unclip_epistemic::{DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{Measurement, MeasurementContext, Reading};
 fn application() -> Tracked<CounterfactualSnapshot> {
@@ -49,7 +51,6 @@ fn budget(maximum_added_units: usize) -> ExperimentConstraint {
 }
 #[test]
 fn explicit_constraints_preserve_failures_missing_counts_and_provenance() {
-    let engine = Engine::with_builtins().unwrap();
     let inputs = [
         measurement("enough", Some(2)),
         measurement("short", Some(1)),
@@ -61,15 +62,14 @@ fn explicit_constraints_preserve_failures_missing_counts_and_provenance() {
         floor("unknown", 2),
         budget(0),
     ];
-    let result = engine
-        .assess_experiment_constraints(
-            &constraints,
-            &inputs,
-            &application(),
-            "run",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let result = assess_experiment_constraints(
+        &constraints,
+        &inputs,
+        &application(),
+        "run",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert_eq!(
         result
             .value()
@@ -90,30 +90,27 @@ fn explicit_constraints_preserve_failures_missing_counts_and_provenance() {
     );
     assert_eq!(
         result,
-        engine
-            .assess_experiment_constraints(
-                &constraints,
-                &inputs,
-                &application(),
-                "run",
-                Timestamp::new("now")
-            )
-            .unwrap()
-    );
-    let accepted = engine
-        .assess_experiment_constraints(
-            &[budget(1)],
-            &[],
+        assess_experiment_constraints(
+            &constraints,
+            &inputs,
             &application(),
             "run",
-            Timestamp::new("now"),
+            Timestamp::new("now")
         )
-        .unwrap();
+        .unwrap()
+    );
+    let accepted = assess_experiment_constraints(
+        &[budget(1)],
+        &[],
+        &application(),
+        "run",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert_eq!(accepted.value()[0].status, ConstraintStatus::Satisfied);
 }
 #[test]
 fn ambiguous_or_missing_requirements_fail() {
-    let engine = Engine::with_builtins().unwrap();
     for constraints in [
         vec![],
         vec![floor("missing", 2)],
@@ -121,37 +118,34 @@ fn ambiguous_or_missing_requirements_fail() {
         vec![floor("m", 2), floor("m", 3)],
         vec![budget(1), budget(2)],
     ] {
-        assert!(engine
-            .assess_experiment_constraints(
-                &constraints,
-                &[measurement("m", Some(2))],
-                &application(),
-                "run",
-                Timestamp::new("now")
-            )
-            .is_err());
+        assert!(assess_experiment_constraints(
+            &constraints,
+            &[measurement("m", Some(2))],
+            &application(),
+            "run",
+            Timestamp::new("now")
+        )
+        .is_err());
     }
     for inputs in [
         vec![measurement("m", Some(2)), measurement("m", Some(3))],
         vec![measurement("run/constraints", Some(2))],
         vec![measurement("application", Some(2))],
     ] {
-        assert!(engine
-            .assess_experiment_constraints(
-                &[budget(1)],
-                &inputs,
-                &application(),
-                "run",
-                Timestamp::new("now")
-            )
-            .is_err());
+        assert!(assess_experiment_constraints(
+            &[budget(1)],
+            &inputs,
+            &application(),
+            "run",
+            Timestamp::new("now")
+        )
+        .is_err());
     }
 }
 
 #[test]
 fn conditional_requirements_validate_context_counts_and_retained_readings() {
     use unclip_measure::MeasurementValue;
-    let engine = Engine::with_builtins().unwrap();
     let requirement = ExperimentConstraint::ConditionalDependency {
         measurement: DerivedId::new("conditional"),
         left: UnitId::new("a"),
@@ -179,7 +173,7 @@ fn conditional_requirements_validate_context_counts_and_retained_readings() {
         },
     };
     let assess = |value: Measurement, constraint: &ExperimentConstraint| {
-        engine.assess_experiment_constraints(
+        assess_experiment_constraints(
             std::slice::from_ref(constraint),
             &[Tracked::from_recorded(DerivedId::new("conditional"), value)],
             &application(),
@@ -229,7 +223,6 @@ fn conditional_requirements_validate_context_counts_and_retained_readings() {
 #[test]
 fn scalar_transfer_requires_disjoint_comparable_evidence_and_preserves_failures() {
     use unclip_measure::MeasurementValue;
-    let engine = Engine::with_builtins().unwrap();
     let requirement = ExperimentConstraint::ScalarTransfer {
         source: DerivedId::new("s"),
         target: DerivedId::new("t"),
@@ -257,7 +250,7 @@ fn scalar_transfer_requires_disjoint_comparable_evidence_and_preserves_failures(
         )
     };
     let assess = |target| {
-        engine.assess_experiment_constraints(
+        assess_experiment_constraints(
             std::slice::from_ref(&requirement),
             &[input("s", &["a", "b"], 0.5, Some(2)), target],
             &application(),

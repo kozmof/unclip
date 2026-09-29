@@ -1,8 +1,8 @@
 use std::num::NonZeroUsize;
-use unclip_engine::{EmpiricalMethod, Engine};
+use unclip_engine::{derive_empirical, EmpiricalMethod};
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, EmitMetadata, InterpretationToken, ModelRef,
-    Operation, PluginId, Timestamp, Tracked,
+    DependencyCollector, DerivedId, EmitMetadata, InterpretationToken, ModelRef, Operation,
+    PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 
@@ -42,24 +42,21 @@ fn methods() -> [EmpiricalMethod; 2] {
 }
 #[test]
 fn distinct_profiles_keep_disagreement_and_replay_exactly() {
-    let engine = Engine::with_builtins().unwrap();
     for method in methods() {
-        let first = engine
-            .derive_empirical(
-                &[input("profile-b/m", -1.0), input("profile-a/m", 1.0)],
-                method,
-                "g",
-                Timestamp::new("now"),
-            )
-            .unwrap();
-        let replay = engine
-            .derive_empirical(
-                &[input("profile-a/m", 1.0), input("profile-b/m", -1.0)],
-                method,
-                "g",
-                Timestamp::new("now"),
-            )
-            .unwrap();
+        let first = derive_empirical(
+            &[input("profile-b/m", -1.0), input("profile-a/m", 1.0)],
+            method,
+            "g",
+            Timestamp::new("now"),
+        )
+        .unwrap();
+        let replay = derive_empirical(
+            &[input("profile-a/m", 1.0), input("profile-b/m", -1.0)],
+            method,
+            "g",
+            Timestamp::new("now"),
+        )
+        .unwrap();
         assert_eq!(first.len(), 2);
         assert_ne!(
             first[0].structure.as_ref().unwrap().value(),
@@ -88,19 +85,15 @@ fn distinct_profiles_keep_disagreement_and_replay_exactly() {
 }
 #[test]
 fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
-    let engine = Engine::with_builtins().unwrap();
     let method = methods()[0];
-    assert!(engine
-        .derive_empirical(&[], method, "g", Timestamp::new("now"))
-        .is_err());
-    assert!(engine
-        .derive_empirical(
-            &[input("a", 1.0), input("a", -1.0)],
-            method,
-            "g",
-            Timestamp::new("now")
-        )
-        .is_err());
+    assert!(derive_empirical(&[], method, "g", Timestamp::new("now")).is_err());
+    assert!(derive_empirical(
+        &[input("a", 1.0), input("a", -1.0)],
+        method,
+        "g",
+        Timestamp::new("now")
+    )
+    .is_err());
     for method in [
         EmpiricalMethod::Communities {
             threshold: f64::NAN,
@@ -112,9 +105,7 @@ fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
             max_sweeps: NonZeroUsize::new(1).unwrap(),
         },
     ] {
-        assert!(engine
-            .derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now"))
-            .is_err());
+        assert!(derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now")).is_err());
     }
     let collector = unclip_epistemic::DependencyCollector::default();
     let source = input("a", 1.0);
@@ -122,36 +113,33 @@ fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
     measurement.reading = Reading::InsufficientEvidence { have: 1, need: 2 };
     let sparse = Tracked::from_recorded(DerivedId::new("sparse"), measurement.clone());
     for method in methods() {
-        assert!(engine
-            .derive_empirical(
-                std::slice::from_ref(&sparse),
-                method,
-                "g",
-                Timestamp::new("now")
-            )
-            .unwrap()[0]
+        assert!(derive_empirical(
+            std::slice::from_ref(&sparse),
+            method,
+            "g",
+            Timestamp::new("now")
+        )
+        .unwrap()[0]
             .structure
             .is_none());
     }
     measurement.reading = Reading::Value {
         value: MeasurementValue::Scalar(0.0),
     };
-    assert!(engine
-        .derive_empirical(
-            &[Tracked::from_recorded(
-                DerivedId::new("scalar"),
-                measurement
-            )],
-            method,
-            "g",
-            Timestamp::new("now")
-        )
-        .is_err());
+    assert!(derive_empirical(
+        &[Tracked::from_recorded(
+            DerivedId::new("scalar"),
+            measurement
+        )],
+        method,
+        "g",
+        Timestamp::new("now")
+    )
+    .is_err());
 }
 
 #[test]
 fn matrix_sample_floor_is_not_a_measured_empty_structure() {
-    let engine = Engine::with_builtins().unwrap();
     for method in [
         EmpiricalMethod::Communities {
             threshold: 0.5,
@@ -163,20 +151,18 @@ fn matrix_sample_floor_is_not_a_measured_empty_structure() {
             max_sweeps: NonZeroUsize::new(100).unwrap(),
         },
     ] {
-        let result = engine
-            .derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now"))
-            .unwrap();
+        let result =
+            derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now")).unwrap();
         assert_eq!(result[0].measurement, DerivedId::new("a"));
         assert!(result[0].structure.is_none());
     }
-    let measured = engine
-        .derive_empirical(
-            &[input("a", -1.0)],
-            methods()[0],
-            "g",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let measured = derive_empirical(
+        &[input("a", -1.0)],
+        methods()[0],
+        "g",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert!(measured[0].structure.is_some());
 }
 
@@ -187,32 +173,26 @@ fn interpreted_measurements_cannot_be_reused_as_empirical_evidence() {
     let value = dependencies.read(&source).clone();
     let params = serde_json::json!({"model": "fixture/labeler"});
     let interpreted = InterpretationToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("interpreted/measurement"),
-            producer: PluginId::new("interpret.fixture"),
-            algorithm: "interpret.fixture".into(),
-            version: semver::Version::new(1, 0, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: None,
-            frame_version: None,
-            model: Some(ModelRef::versioned("fixture/labeler", "1")),
-        },
+        EmitMetadata::new(
+            DerivedId::new("interpreted/measurement"),
+            PluginId::new("interpret.fixture"),
+            semver::Version::new(1, 0, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("interpret.fixture")
+        .with_model(Some(ModelRef::versioned("fixture/labeler", "1"))),
         dependencies,
     )
     .emit(value);
 
-    let error = Engine::with_builtins()
-        .unwrap()
-        .derive_empirical(
-            &[Tracked::from(&interpreted)],
-            methods()[0],
-            "run",
-            Timestamp::new("now"),
-        )
-        .unwrap_err();
+    let error = derive_empirical(
+        &[Tracked::from(&interpreted)],
+        methods()[0],
+        "run",
+        Timestamp::new("now"),
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("must be calculated evidence"));
     assert_eq!(interpreted.provenance().operation, Operation::Interpreted);
 }

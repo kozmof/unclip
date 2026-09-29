@@ -1,7 +1,9 @@
 use serde_json::json;
 use std::collections::BTreeMap;
 use unclip_domain::{CandidateKind, CandidateProposal};
-use unclip_engine::{Engine, MeasurementRun};
+use unclip_engine::{
+    evaluate_null_models, evaluate_null_models_with_rankings, Engine, MeasurementRun,
+};
 use unclip_epistemic::{Calculated, DerivedId, PluginId, SourceRef, Timestamp, Tracked};
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_observe::{Observation, ObservationId, ObservedUnit, ObservedUnitId};
@@ -45,7 +47,7 @@ fn evaluate(
             ..Default::default()
         })
         .unwrap();
-    engine.evaluate_null_models(
+    evaluate_null_models(
         &plan,
         candidate,
         observations,
@@ -183,7 +185,7 @@ fn evaluate_ranking(
             ..Default::default()
         })
         .unwrap();
-    engine.evaluate_null_models_with_rankings(
+    evaluate_null_models_with_rankings(
         &plan,
         &candidate(CandidateKind::Relation, "a", "b"),
         observations,
@@ -286,7 +288,7 @@ fn evaluate_context(
             ..Default::default()
         })
         .unwrap();
-    engine.evaluate_null_models(
+    evaluate_null_models(
         &plan,
         &candidate(CandidateKind::Relation, "a", "b"),
         observations,

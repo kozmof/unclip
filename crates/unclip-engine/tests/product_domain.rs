@@ -5,7 +5,7 @@ use unclip_domain::{
     DomainId, DomainSnapshot, ProductDomainId, ProductDomainVersion, ProductInteraction, Relation,
     RelationId, Unit, UnitId, UnitKind,
 };
-use unclip_engine::Engine;
+use unclip_engine::materialize_product_domain;
 use unclip_epistemic::{DerivedId, DomainVersion, Operation, Timestamp, Tracked};
 
 fn unit(id: &str) -> Unit {
@@ -68,29 +68,26 @@ fn product_domain_materializes_only_observed_or_required_pairs() {
         &["measurement-requirement"],
     );
 
-    let engine = Engine::with_builtins().unwrap();
-    let result = engine
-        .materialize_product_domain(
-            &left,
-            &right,
-            &[required.clone(), observed.clone()],
-            ProductDomainId::new("coffee-x-photo"),
-            ProductDomainVersion::new("1"),
-            "coffee-photo",
-            Timestamp::new("now"),
-        )
-        .unwrap();
-    let replay = engine
-        .materialize_product_domain(
-            &left,
-            &right,
-            &[observed, required],
-            ProductDomainId::new("coffee-x-photo"),
-            ProductDomainVersion::new("1"),
-            "coffee-photo",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let result = materialize_product_domain(
+        &left,
+        &right,
+        &[required.clone(), observed.clone()],
+        ProductDomainId::new("coffee-x-photo"),
+        ProductDomainVersion::new("1"),
+        "coffee-photo",
+        Timestamp::new("now"),
+    )
+    .unwrap();
+    let replay = materialize_product_domain(
+        &left,
+        &right,
+        &[observed, required],
+        ProductDomainId::new("coffee-x-photo"),
+        ProductDomainVersion::new("1"),
+        "coffee-photo",
+        Timestamp::new("now"),
+    )
+    .unwrap();
 
     assert_eq!(result, replay);
     assert_eq!(result.provenance().operation, Operation::Calculated);
@@ -151,18 +148,16 @@ fn product_domain_materializes_only_observed_or_required_pairs() {
 
 #[test]
 fn product_domain_can_remain_empty_without_creating_a_cartesian_union() {
-    let result = Engine::with_builtins()
-        .unwrap()
-        .materialize_product_domain(
-            &Tracked::from_recorded(DerivedId::new("left"), domain("left", "1", &["a", "b"])),
-            &Tracked::from_recorded(DerivedId::new("right"), domain("right", "2", &["x", "y"])),
-            &[],
-            ProductDomainId::new("left-x-right"),
-            ProductDomainVersion::new("empty"),
-            "empty-product",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let result = materialize_product_domain(
+        &Tracked::from_recorded(DerivedId::new("left"), domain("left", "1", &["a", "b"])),
+        &Tracked::from_recorded(DerivedId::new("right"), domain("right", "2", &["x", "y"])),
+        &[],
+        ProductDomainId::new("left-x-right"),
+        ProductDomainVersion::new("empty"),
+        "empty-product",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert!(result.value().interactions.is_empty());
     assert_eq!(
         result.provenance().params["materialized_interactions"],
@@ -172,7 +167,6 @@ fn product_domain_can_remain_empty_without_creating_a_cartesian_union() {
 
 #[test]
 fn product_domain_rejects_unbacked_ambiguous_or_invalid_pairs() {
-    let engine = Engine::with_builtins().unwrap();
     let left = Tracked::from_recorded(
         DerivedId::new("left-input"),
         domain("left", "1", &["a", "b"]),
@@ -182,7 +176,7 @@ fn product_domain_rejects_unbacked_ambiguous_or_invalid_pairs() {
         domain("right", "1", &["x", "y"]),
     );
     let run = |interactions: &[Tracked<ProductInteraction>]| {
-        engine.materialize_product_domain(
+        materialize_product_domain(
             &left,
             &right,
             interactions,
@@ -220,17 +214,16 @@ fn product_domain_rejects_unbacked_ambiguous_or_invalid_pairs() {
         DerivedId::new("same-right-input"),
         domain("left", "2", &["x"]),
     );
-    assert!(engine
-        .materialize_product_domain(
-            &left,
-            &same_domain,
-            &[],
-            ProductDomainId::new("invalid"),
-            ProductDomainVersion::new("1"),
-            "same-domain",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(materialize_product_domain(
+        &left,
+        &same_domain,
+        &[],
+        ProductDomainId::new("invalid"),
+        ProductDomainVersion::new("1"),
+        "same-domain",
+        Timestamp::new("now"),
+    )
+    .is_err());
 
     let mut dangling = domain("dangling", "1", &["x"]);
     dangling.relations.insert(
@@ -243,15 +236,14 @@ fn product_domain_rejects_unbacked_ambiguous_or_invalid_pairs() {
             properties: BTreeMap::new(),
         },
     );
-    assert!(engine
-        .materialize_product_domain(
-            &left,
-            &Tracked::from_recorded(DerivedId::new("dangling-input"), dangling),
-            &[],
-            ProductDomainId::new("invalid"),
-            ProductDomainVersion::new("1"),
-            "dangling",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(materialize_product_domain(
+        &left,
+        &Tracked::from_recorded(DerivedId::new("dangling-input"), dangling),
+        &[],
+        ProductDomainId::new("invalid"),
+        ProductDomainVersion::new("1"),
+        "dangling",
+        Timestamp::new("now"),
+    )
+    .is_err());
 }

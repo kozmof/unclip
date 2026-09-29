@@ -2615,6 +2615,7 @@ dependencies = [
  "unclip-measure",
  "unclip-observe",
  "unclip-plugin",
+ "unclip-record",
  "unclip-sensors",
  "unclip-store",
 ]
@@ -2743,6 +2744,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "unclip-record"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "unclip-epistemic",
+ "unclip-measure",
+ "unclip-observe",
+]
+
+[[package]]
 name = "unclip-sample"
 version = "0.1.0"
 dependencies = [
@@ -2784,6 +2798,7 @@ dependencies = [
  "unclip-measure",
  "unclip-migration",
  "unclip-observe",
+ "unclip-record",
 ]
 
 [[package]]

@@ -192,7 +192,7 @@ async fn empirical_structure_round_trips_with_profile_link() {
         },
     };
 
-    repo.insert_empirical_structure(structure.clone())
+    repo.insert_unverified_structure(structure.clone())
         .await
         .unwrap();
 
@@ -255,8 +255,7 @@ fn calculated_structure(
     value: EmpiricalStructure,
 ) -> unclip_epistemic::Calculated<EmpiricalStructure> {
     use unclip_epistemic::{
-        hash_params, CalculationToken, DependencyCollector, DomainVersion, EmitMetadata, Timestamp,
-        Tracked,
+        CalculationToken, DependencyCollector, DomainVersion, EmitMetadata, Timestamp, Tracked,
     };
     let dependencies = DependencyCollector::default();
     for input in inputs {
@@ -264,19 +263,16 @@ fn calculated_structure(
     }
     let params = json!({"threshold": 0.5, "minimum_samples": 2, "tolerance": 1e-12, "max_sweeps": 100, "window": 2, "minimum_shift": 2.0, "regime_starts": [0, 2]});
     CalculationToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new(id),
-            producer: PluginId::new("structure.fixture"),
-            algorithm: value.kind.clone(),
-            version: semver::Version::new(1, 0, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
-            domain_version: Some(DomainVersion::new("domain-version")),
-            frame_version: Some(FrameVersion::new("frame-version")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new(id),
+            PluginId::new("structure.fixture"),
+            semver::Version::new(1, 0, 0),
+            &params,
+            Timestamp::new("2026-09-19T00:00:00Z"),
+        )
+        .with_algorithm(value.kind.clone())
+        .with_domain_version(DomainVersion::new("domain-version"))
+        .with_frame_version(FrameVersion::new("frame-version")),
         dependencies,
     )
     .emit(value)
@@ -454,7 +450,7 @@ async fn calculated_structure_failures_roll_back_provenance_edges_and_payload() 
         created_at: "before".into(),
         structure: payload.clone(),
     };
-    repo.insert_empirical_structure(legacy.clone())
+    repo.insert_unverified_structure(legacy.clone())
         .await
         .unwrap();
     let derived = calculated_structure("collision", &["value-prov"], payload);

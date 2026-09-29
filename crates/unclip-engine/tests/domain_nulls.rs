@@ -4,7 +4,7 @@ use unclip_domain::{
     CandidateKind, CandidateProposal, DomainId, DomainSnapshot, Relation, RelationId, Unit, UnitId,
     UnitKind,
 };
-use unclip_engine::{Engine, MeasurementRun, NullInputs};
+use unclip_engine::{evaluate_null_models_with_inputs, Engine, MeasurementRun, NullInputs};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, Timestamp, Tracked};
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -71,7 +71,7 @@ fn evaluate(
         })
         .unwrap();
     let domain = d.map(|d| Tracked::from_recorded(DerivedId::new("domain"), d));
-    engine.evaluate_null_models_with_inputs(
+    evaluate_null_models_with_inputs(
         &plan,
         &Tracked::from_recorded(DerivedId::new("candidate"), c),
         NullInputs {
@@ -183,7 +183,7 @@ fn weight_evaluate(
         })
         .unwrap();
     let domain = d.map(|d| Tracked::from_recorded(DerivedId::new("domain"), d));
-    engine.evaluate_null_models_with_inputs(
+    evaluate_null_models_with_inputs(
         &plan,
         &Tracked::from_recorded(DerivedId::new("candidate"), c),
         NullInputs {

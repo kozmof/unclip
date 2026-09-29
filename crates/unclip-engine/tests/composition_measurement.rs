@@ -6,6 +6,8 @@ use unclip_domain::{
     ProductFrameVersion, ProductInteraction, ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
+    compare_product_with_independence, create_product_frame, derive_cross_domain_deviations,
+    generate_candidates, materialize_product_domain, measure_composition, select_observations,
     CandidateInputs, CompositionMeasurementInputs, CounterfactualMeasurementInputs, Engine,
     ExperimentConstraints, HeldOutInputs, IndependenceDefinition, MeasurementInputs,
     MeasurementRun,
@@ -90,31 +92,29 @@ fn fixture(prefix: &str) -> Fixture {
             requirements: vec![],
         },
     );
-    let product = engine
-        .materialize_product_domain(
-            &left,
-            &right,
-            &[interaction],
-            ProductDomainId::new(format!("{prefix}-product")),
-            ProductDomainVersion::new("product-v6"),
-            &format!("{prefix}-materialize"),
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
-    let product_frame = engine
-        .create_product_frame(
-            &Tracked::from(&product),
-            &[ProductFrameAxis {
-                left: UnitId::new("a"),
-                right: UnitId::new("b"),
-                label: None,
-            }],
-            ProductFrameId::new(format!("{prefix}-product-frame")),
-            ProductFrameVersion::new("product-f7"),
-            &format!("{prefix}-product-frame-run"),
-            Timestamp::new("2026-09-24T00:00:00Z"),
-        )
-        .unwrap();
+    let product = materialize_product_domain(
+        &left,
+        &right,
+        &[interaction],
+        ProductDomainId::new(format!("{prefix}-product")),
+        ProductDomainVersion::new("product-v6"),
+        &format!("{prefix}-materialize"),
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
+    let product_frame = create_product_frame(
+        &Tracked::from(&product),
+        &[ProductFrameAxis {
+            left: UnitId::new("a"),
+            right: UnitId::new("b"),
+            label: None,
+        }],
+        ProductFrameId::new(format!("{prefix}-product-frame")),
+        ProductFrameVersion::new("product-f7"),
+        &format!("{prefix}-product-frame-run"),
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
 
     let plan = engine
         .plan(&EngineProfile {
@@ -192,7 +192,7 @@ fn compose(
     subject: &Fixture,
     run_id: &str,
 ) -> unclip_plugin::Result<Calculated<unclip_engine::CompositionMeasurementProfile>> {
-    subject.engine.measure_composition(
+    measure_composition(
         &subject.left,
         &subject.left_frame,
         &subject.right,
@@ -272,7 +272,7 @@ fn retains_three_separate_versioned_profiles_and_exact_dependencies() {
 #[test]
 fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
     let subject = fixture("invalid");
-    let cross_bound = subject.engine.measure_composition(
+    let cross_bound = measure_composition(
         &subject.left,
         &subject.left_frame,
         &subject.right,
@@ -293,7 +293,7 @@ fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
         .contains("exact domain and frame versions"));
 
     let other = fixture("other");
-    let stale_product = subject.engine.measure_composition(
+    let stale_product = measure_composition(
         &subject.left,
         &subject.left_frame,
         &subject.right,
@@ -313,7 +313,7 @@ fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
         .to_string()
         .contains("exact product, frame, and input-domain versions"));
 
-    let empty = subject.engine.measure_composition(
+    let empty = measure_composition(
         &subject.left,
         &subject.left_frame,
         &subject.right,
@@ -547,7 +547,7 @@ fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
     let plan = structured_comparison_plan(&fixture.engine);
     let params = BTreeMap::new();
     let compare = || {
-        fixture.engine.compare_product_with_independence(
+        compare_product_with_independence(
             &plan,
             &composition,
             &expectations,
@@ -652,19 +652,17 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         "unavailable-expectations",
     );
     let plan = structured_comparison_plan(&fixture.engine);
-    let result = fixture
-        .engine
-        .compare_product_with_independence(
-            &plan,
-            &composition,
-            &expectations,
-            MeasurementRun {
-                id: "unavailable-comparison",
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
-                params: &BTreeMap::new(),
-            },
-        )
-        .unwrap();
+    let result = compare_product_with_independence(
+        &plan,
+        &composition,
+        &expectations,
+        MeasurementRun {
+            id: "unavailable-comparison",
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    )
+    .unwrap();
     let MeasurementValue::Structured(delta) = &result.deltas[0].value().value else {
         panic!("expected structured delta")
     };
@@ -685,7 +683,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
             ..EngineProfile::default()
         })
         .unwrap();
-    let wrong_comparator = fixture.engine.compare_product_with_independence(
+    let wrong_comparator = compare_product_with_independence(
         &scalar_plan,
         &composition,
         &expectations,
@@ -702,7 +700,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
 
     let other = self::fixture("other-comparison");
     let other_composition = compose(&other, "other-composition").unwrap();
-    let foreign = fixture.engine.compare_product_with_independence(
+    let foreign = compare_product_with_independence(
         &plan,
         &other_composition,
         &expectations,
@@ -730,19 +728,17 @@ fn compare_for_candidates(
         expected,
         &format!("{prefix}-expectations"),
     );
-    fixture
-        .engine
-        .compare_product_with_independence(
-            &structured_comparison_plan(&fixture.engine),
-            composition,
-            &expectations,
-            MeasurementRun {
-                id: &format!("{prefix}-comparison"),
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
-                params: &BTreeMap::new(),
-            },
-        )
-        .unwrap()
+    compare_product_with_independence(
+        &structured_comparison_plan(&fixture.engine),
+        composition,
+        &expectations,
+        MeasurementRun {
+            id: &format!("{prefix}-comparison"),
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    )
+    .unwrap()
 }
 
 #[test]
@@ -758,7 +754,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
         "cross-domain-candidate",
     );
     let derive = || {
-        fixture.engine.derive_cross_domain_deviations(
+        derive_cross_domain_deviations(
             &comparison.profile,
             "cross-domain-candidate-derive",
             Timestamp::new("2026-09-25T00:00:00Z"),
@@ -798,7 +794,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
     ))
     .unwrap();
     let generate = || {
-        fixture.engine.generate_candidates(
+        generate_candidates(
             &plan,
             CandidateInputs {
                 domain_version_id: &target,
@@ -843,7 +839,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
     );
     assert_eq!(generate().unwrap(), candidates);
 
-    let foreign = fixture.engine.generate_candidates(
+    let foreign = generate_candidates(
         &plan,
         CandidateInputs {
             domain_version_id: "[\"foreign\",\"v1\"]",
@@ -883,15 +879,13 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
         },
         "equal-cross-domain-candidate",
     );
-    assert!(fixture
-        .engine
-        .derive_cross_domain_deviations(
-            &equal.profile,
-            "equal-cross-domain-candidate-derive",
-            Timestamp::new("2026-09-25T00:00:00Z"),
-        )
-        .unwrap()
-        .is_empty());
+    assert!(derive_cross_domain_deviations(
+        &equal.profile,
+        "equal-cross-domain-candidate-derive",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    )
+    .unwrap()
+    .is_empty());
 
     let unavailable = compare_for_candidates(
         &fixture,
@@ -902,15 +896,13 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
         },
         "unavailable-cross-domain-candidate",
     );
-    assert!(fixture
-        .engine
-        .derive_cross_domain_deviations(
-            &unavailable.profile,
-            "unavailable-cross-domain-candidate-derive",
-            Timestamp::new("2026-09-25T00:00:00Z"),
-        )
-        .unwrap()
-        .is_empty());
+    assert!(derive_cross_domain_deviations(
+        &unavailable.profile,
+        "unavailable-cross-domain-candidate-derive",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    )
+    .unwrap()
+    .is_empty());
 
     assert!(fixture
         .engine
@@ -931,14 +923,12 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
         },
         "cross-domain-pipeline",
     );
-    let structures = fixture
-        .engine
-        .derive_cross_domain_deviations(
-            &comparison.profile,
-            "cross-domain-pipeline-derive",
-            Timestamp::new("2026-09-25T00:00:00Z"),
-        )
-        .unwrap();
+    let structures = derive_cross_domain_deviations(
+        &comparison.profile,
+        "cross-domain-pipeline-derive",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    )
+    .unwrap();
     let tracked_structures = structures.iter().map(Tracked::from).collect::<Vec<_>>();
     let discovery_plan = fixture
         .engine
@@ -952,23 +942,21 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
         &composition.value().product.binding.left.version.0,
     ))
     .unwrap();
-    let candidates = fixture
-        .engine
-        .generate_candidates(
-            &discovery_plan,
-            CandidateInputs {
-                domain_version_id: &target,
-                measurements: &[],
-                observations: &[],
-                structures: &tracked_structures,
-            },
-            MeasurementRun {
-                id: "cross-domain-pipeline-generate",
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
-                params: &BTreeMap::new(),
-            },
-        )
-        .unwrap();
+    let candidates = generate_candidates(
+        &discovery_plan,
+        CandidateInputs {
+            domain_version_id: &target,
+            measurements: &[],
+            observations: &[],
+            structures: &tracked_structures,
+        },
+        MeasurementRun {
+            id: "cross-domain-pipeline-generate",
+            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            params: &BTreeMap::new(),
+        },
+    )
+    .unwrap();
     let candidate = Tracked::from(&candidates[0]);
     assert_eq!(
         candidates[0].provenance().inputs,
@@ -1062,16 +1050,14 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
             }],
         },
     );
-    let split = fixture
-        .engine
-        .select_observations(
-            &[observation],
-            &[],
-            std::slice::from_ref(&observation_id),
-            "cross-domain-pipeline-split",
-            Timestamp::new("2026-09-25T00:00:00Z"),
-        )
-        .unwrap();
+    let split = select_observations(
+        &[observation],
+        &[],
+        std::slice::from_ref(&observation_id),
+        "cross-domain-pipeline-split",
+        Timestamp::new("2026-09-25T00:00:00Z"),
+    )
+    .unwrap();
     let split = Tracked::from(&split);
     let experiment_plan = fixture
         .engine

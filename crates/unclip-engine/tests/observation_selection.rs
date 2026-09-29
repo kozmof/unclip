@@ -1,6 +1,9 @@
 use serde_json::json;
 use std::collections::BTreeMap;
-use unclip_engine::{Engine, MeasurementRun, ObservationSplit};
+use unclip_engine::{
+    observation_split_run_record, select_observations, validate_candidate_ancestry, Engine,
+    MeasurementRun, ObservationSplit,
+};
 use unclip_epistemic::{DerivedId, SourceRef, Timestamp, Tracked};
 use unclip_observe::{Observation, ObservationId};
 use unclip_plugin::EngineProfile;
@@ -32,15 +35,14 @@ async fn explicit_splits_replay_from_persisted_run_with_shared_batch_provenance(
         observation("c", "other"),
         observation("unused", "unused"),
     ];
-    let selected = engine
-        .select_observations(
-            &inputs,
-            &ids(&["b"]),
-            &ids(&["c", "a"]),
-            "run",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let selected = select_observations(
+        &inputs,
+        &ids(&["b"]),
+        &ids(&["c", "a"]),
+        "run",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert_eq!(
         selected.provenance().inputs,
         vec![
@@ -61,30 +63,28 @@ async fn explicit_splits_replay_from_persisted_run_with_shared_batch_provenance(
     let reversed = inputs.into_iter().rev().collect::<Vec<_>>();
     assert_eq!(
         selected,
-        engine
-            .select_observations(
-                &reversed,
-                &ids(&["b"]),
-                &ids(&["c", "a"]),
-                "run",
-                Timestamp::new("now")
-            )
-            .unwrap()
+        select_observations(
+            &reversed,
+            &ids(&["b"]),
+            &ids(&["c", "a"]),
+            "run",
+            Timestamp::new("now")
+        )
+        .unwrap()
     );
     let plan = engine.plan(&EngineProfile::default()).unwrap();
     let params = BTreeMap::new();
-    let record = engine
-        .observation_split_run_record(
-            &plan,
-            &selected,
-            MeasurementRun {
-                id: "run",
-                timestamp: Timestamp::new("now"),
-                params: &params,
-            },
-            json!({"purpose":"experiment"}),
-        )
-        .unwrap();
+    let record = observation_split_run_record(
+        &plan,
+        &selected,
+        MeasurementRun {
+            id: "run",
+            timestamp: Timestamp::new("now"),
+            params: &params,
+        },
+        json!({"purpose":"experiment"}),
+    )
+    .unwrap();
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let repository = SeaOrmEngineRunRepository::new(db);
     repository.insert_run(record.clone()).await.unwrap();
@@ -98,23 +98,21 @@ async fn explicit_splits_replay_from_persisted_run_with_shared_batch_provenance(
         serde_json::to_value(selected.provenance()).unwrap()
     );
     assert_eq!(restored.metadata["request"]["purpose"], "experiment");
-    assert!(engine
-        .observation_split_run_record(
-            &plan,
-            &selected,
-            MeasurementRun {
-                id: "different",
-                timestamp: Timestamp::new("now"),
-                params: &params
-            },
-            json!({})
-        )
-        .is_err());
+    assert!(observation_split_run_record(
+        &plan,
+        &selected,
+        MeasurementRun {
+            id: "different",
+            timestamp: Timestamp::new("now"),
+            params: &params
+        },
+        json!({})
+    )
+    .is_err());
 }
 
 #[test]
 fn rejects_ambiguous_missing_overlapping_or_empty_selections() {
-    let engine = Engine::with_builtins().unwrap();
     let inputs = [observation("a", "batch"), observation("b", "batch")];
     for (training, held_out) in [
         (ids(&["a"]), ids(&["a"])),
@@ -124,9 +122,10 @@ fn rejects_ambiguous_missing_overlapping_or_empty_selections() {
         (ids(&["absent"]), ids(&["b"])),
         (ids(&["a"]), ids(&[])),
     ] {
-        assert!(engine
-            .select_observations(&inputs, &training, &held_out, "run", Timestamp::new("now"))
-            .is_err());
+        assert!(
+            select_observations(&inputs, &training, &held_out, "run", Timestamp::new("now"))
+                .is_err()
+        );
     }
     for inputs in [
         vec![observation("a", "first"), observation("a", "second")],
@@ -134,42 +133,35 @@ fn rejects_ambiguous_missing_overlapping_or_empty_selections() {
         vec![observation("", "batch")],
         vec![observation("a", "run/observation-split")],
     ] {
-        assert!(engine
-            .select_observations(&inputs, &[], &ids(&["a"]), "run", Timestamp::new("now"))
-            .is_err());
+        assert!(
+            select_observations(&inputs, &[], &ids(&["a"]), "run", Timestamp::new("now")).is_err()
+        );
     }
-    assert!(engine
-        .select_observations(&inputs, &[], &ids(&["a"]), " ", Timestamp::new("now"))
-        .is_err());
-    assert!(engine
-        .select_observations(&inputs, &[], &ids(&["a"]), "run", Timestamp::new("now"))
-        .is_ok());
+    assert!(select_observations(&inputs, &[], &ids(&["a"]), " ", Timestamp::new("now")).is_err());
+    assert!(select_observations(&inputs, &[], &ids(&["a"]), "run", Timestamp::new("now")).is_ok());
 }
 
 #[test]
 fn candidate_ancestry_excludes_held_out_observations_and_inference_products() {
-    let engine = Engine::with_builtins().unwrap();
-    let selected = engine
-        .select_observations(
-            &[
-                observation("training", "training-p"),
-                observation("held", "held-p"),
-            ],
-            &ids(&["training"]),
-            &ids(&["held"]),
-            "run",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let selected = select_observations(
+        &[
+            observation("training", "training-p"),
+            observation("held", "held-p"),
+        ],
+        &ids(&["training"]),
+        &ids(&["held"]),
+        "run",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     let candidate = DerivedId::new("candidate");
-    assert!(engine
-        .validate_candidate_ancestry(
-            &candidate,
-            &[DerivedId::new("training-p")],
-            selected.value(),
-            &[DerivedId::new("held-alignment")],
-        )
-        .is_ok());
+    assert!(validate_candidate_ancestry(
+        &candidate,
+        &[DerivedId::new("training-p")],
+        selected.value(),
+        &[DerivedId::new("held-alignment")],
+    )
+    .is_ok());
     for ancestry in [
         vec![DerivedId::new("held-p")],
         vec![
@@ -177,38 +169,39 @@ fn candidate_ancestry_excludes_held_out_observations_and_inference_products() {
             DerivedId::new("held-alignment"),
         ],
     ] {
-        let error = engine
-            .validate_candidate_ancestry(
-                &candidate,
-                &ancestry,
-                selected.value(),
-                &[DerivedId::new("held-alignment")],
-            )
-            .unwrap_err();
+        let error = validate_candidate_ancestry(
+            &candidate,
+            &ancestry,
+            selected.value(),
+            &[DerivedId::new("held-alignment")],
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("held-out evidence"));
     }
 
-    let shared = engine
-        .select_observations(
-            &[
-                observation("training", "batch"),
-                observation("held", "batch"),
-            ],
-            &ids(&["training"]),
-            &ids(&["held"]),
-            "shared",
-            Timestamp::new("now"),
-        )
-        .unwrap();
-    assert!(engine
-        .validate_candidate_ancestry(&candidate, &[DerivedId::new("batch")], shared.value(), &[],)
-        .is_err());
-    assert!(engine
-        .validate_candidate_ancestry(
-            &candidate,
-            std::slice::from_ref(&candidate),
-            selected.value(),
-            &[],
-        )
-        .is_err());
+    let shared = select_observations(
+        &[
+            observation("training", "batch"),
+            observation("held", "batch"),
+        ],
+        &ids(&["training"]),
+        &ids(&["held"]),
+        "shared",
+        Timestamp::new("now"),
+    )
+    .unwrap();
+    assert!(validate_candidate_ancestry(
+        &candidate,
+        &[DerivedId::new("batch")],
+        shared.value(),
+        &[],
+    )
+    .is_err());
+    assert!(validate_candidate_ancestry(
+        &candidate,
+        std::slice::from_ref(&candidate),
+        selected.value(),
+        &[],
+    )
+    .is_err());
 }

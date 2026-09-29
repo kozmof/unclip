@@ -76,7 +76,7 @@ pub(crate) async fn measure(
         .observations
         .iter()
         .map(|record| {
-            unclip_epistemic::Tracked::from_recorded(
+            unclip_epistemic::Tracked::from_inferred(
                 record.provenance.clone(),
                 record.value.clone(),
             )
@@ -86,7 +86,7 @@ pub(crate) async fn measure(
         .alignments
         .iter()
         .map(|record| {
-            unclip_epistemic::Tracked::from_recorded(
+            unclip_epistemic::Tracked::from_inferred(
                 record.provenance.clone(),
                 record.value.clone(),
             )
@@ -96,7 +96,7 @@ pub(crate) async fn measure(
         .rankings
         .iter()
         .map(|record| {
-            unclip_epistemic::Tracked::from_recorded(
+            unclip_epistemic::Tracked::from_inferred(
                 record.provenance.clone(),
                 record.value.clone(),
             )
@@ -120,7 +120,7 @@ pub(crate) async fn measure(
     let timestamp = unclip_store::now();
     let run_id = format!("measure-{timestamp}");
     let profile_id = format!("{run_id}/profile");
-    let run_record = engine.run_record(
+    let run_record = unclip_engine::run_record(
         &plan,
         &parsed.params,
         &run_id,

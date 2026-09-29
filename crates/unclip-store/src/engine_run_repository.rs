@@ -5,45 +5,34 @@ use sea_orm::{
     sea_query::Expr, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder,
 };
-use serde::{Deserialize, Serialize};
 use unclip_entity::{
     alignments as alignment_rows, engine_runs, measurement_profiles,
     observations as observation_rows, provenance, rankings as ranking_rows, sensor_runs,
 };
 use unclip_epistemic::{ParameterHash, PluginId};
+pub use unclip_record::{
+    EngineRunRecord, EngineRunReplay, EngineRunStatus, MeasurementInputSnapshot, RecordedInference,
+};
 
 use crate::{ObservationRepository, SensorRunRecord, StoreError, StoreResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineRunStatus {
-    Planned,
-    Running,
-    Completed,
-    Failed,
+/// Read a stored status string, reporting an unrecognized one as a store error.
+fn parse_status(value: &str) -> StoreResult<EngineRunStatus> {
+    value.parse().map_err(|error| StoreError::InvalidRequest {
+        message: format!("{error}"),
+    })
 }
 
-impl EngineRunStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Planned => "planned",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
+/// Which status changes the lifecycle permits.
+///
+/// This is a store rule rather than part of the record type: the ordering exists
+/// to keep persisted rows consistent, and a caller holding an in-memory record
+/// has nothing to violate.
+trait EngineRunTransition {
+    fn can_transition_to(self, next: Self) -> bool;
+}
 
-    fn parse(value: &str) -> StoreResult<Self> {
-        match value {
-            "planned" => Ok(Self::Planned),
-            "running" => Ok(Self::Running),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            other => Err(StoreError::InvalidRequest {
-                message: format!("unknown stored engine-run status: {other}"),
-            }),
-        }
-    }
-
+impl EngineRunTransition for EngineRunStatus {
     fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
@@ -53,45 +42,6 @@ impl EngineRunStatus {
                 | (Self::Running, Self::Failed)
         )
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EngineRunRecord {
-    pub id: String,
-    pub resolved_plan: serde_json::Value,
-    pub status: EngineRunStatus,
-    pub started_at: String,
-    pub completed_at: Option<String>,
-    pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecordedInference<T> {
-    pub provenance: unclip_epistemic::DerivedId,
-    pub value: T,
-}
-
-/// Exact inference products selected by a measurement-only run. Keeping their
-/// values and provenance identities prevents later alignments or rankings from
-/// silently changing replay inputs. Sequence order is preserved as recorded.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MeasurementInputSnapshot {
-    pub observations: Vec<RecordedInference<unclip_observe::Observation>>,
-    pub alignments: Vec<RecordedInference<unclip_observe::Alignment>>,
-    pub rankings: Vec<RecordedInference<unclip_observe::PartialRanking>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EngineRunReplay {
-    pub run: EngineRunRecord,
-    pub sensor_runs: Vec<SensorRunRecord>,
-    pub provenance_ids: Vec<String>,
-    pub profile_ids: Vec<String>,
-    pub observations: Vec<RecordedInference<unclip_observe::Observation>>,
-    pub alignments: Vec<RecordedInference<unclip_observe::Alignment>>,
-    pub rankings: Vec<RecordedInference<unclip_observe::PartialRanking>>,
 }
 
 #[async_trait]
@@ -142,7 +92,7 @@ fn hydrate_run(row: engine_runs::Model) -> StoreResult<EngineRunRecord> {
         id: row.id,
         resolved_plan: serde_json::from_str(&row.resolved_plan_json)
             .map_err(anyhow::Error::from)?,
-        status: EngineRunStatus::parse(&row.status)?,
+        status: parse_status(&row.status)?,
         started_at: row.started_at,
         completed_at: row.completed_at,
         metadata: serde_json::from_str(&row.metadata_json).map_err(anyhow::Error::from)?,
@@ -208,7 +158,7 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
             .one(&self.db)
             .await?
             .ok_or_else(|| StoreError::NotFound { path: id.into() })?;
-        let current_status = EngineRunStatus::parse(&current.status)?;
+        let current_status = parse_status(&current.status)?;
         if !current_status.can_transition_to(status) {
             return Err(StoreError::Conflict { path: id.into() });
         }

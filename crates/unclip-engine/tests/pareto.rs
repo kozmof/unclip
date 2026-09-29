@@ -1,4 +1,4 @@
-use unclip_engine::{Engine, ObjectiveDirection, ParetoDimension, ParetoRelation};
+use unclip_engine::{compare_pareto, ObjectiveDirection, ParetoDimension, ParetoRelation};
 use unclip_epistemic::{DerivedId, PluginId, Timestamp, Tracked};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading};
 fn value(id: &str, reading: Reading) -> Tracked<Measurement> {
@@ -40,7 +40,6 @@ fn dimensions() -> Vec<ParetoDimension> {
 }
 #[test]
 fn preserves_dominance_equality_tradeoffs_and_missing_dimensions() {
-    let engine = Engine::with_builtins().unwrap();
     for (a, b, c, d, expected) in [
         (2., 1., 1., 2., ParetoRelation::LeftDominates),
         (1., 2., 2., 1., ParetoRelation::RightDominates),
@@ -54,9 +53,7 @@ fn preserves_dominance_equality_tradeoffs_and_missing_dimensions() {
             scalar("c", c),
             scalar("d", d),
         ];
-        let result = engine
-            .compare_pareto(&inputs, &dimensions(), "run", Timestamp::new("now"))
-            .unwrap();
+        let result = compare_pareto(&inputs, &dimensions(), "run", Timestamp::new("now")).unwrap();
         assert_eq!(result.value().relation, expected);
         assert_eq!(
             result.provenance().inputs,
@@ -66,9 +63,7 @@ fn preserves_dominance_equality_tradeoffs_and_missing_dimensions() {
         reversed.reverse();
         assert_eq!(
             result,
-            engine
-                .compare_pareto(&inputs, &reversed, "run", Timestamp::new("now"))
-                .unwrap()
+            compare_pareto(&inputs, &reversed, "run", Timestamp::new("now")).unwrap()
         );
     }
     let inputs = [
@@ -77,15 +72,12 @@ fn preserves_dominance_equality_tradeoffs_and_missing_dimensions() {
         scalar("c", 1.),
         value("d", Reading::InsufficientEvidence { have: 1, need: 2 }),
     ];
-    let result = engine
-        .compare_pareto(&inputs, &dimensions(), "run", Timestamp::new("now"))
-        .unwrap();
+    let result = compare_pareto(&inputs, &dimensions(), "run", Timestamp::new("now")).unwrap();
     assert_eq!(result.value().relation, ParetoRelation::Incomparable);
     assert_eq!(result.value().dimensions.len(), 2);
 }
 #[test]
 fn rejects_ambiguous_missing_and_nonfinite_inputs() {
-    let engine = Engine::with_builtins().unwrap();
     let inputs = [
         scalar("a", 1.),
         scalar("b", 2.),
@@ -95,19 +87,14 @@ fn rejects_ambiguous_missing_and_nonfinite_inputs() {
     let mut duplicate = dimensions();
     duplicate.push(duplicate[0].clone());
     for dims in [vec![], duplicate] {
-        assert!(engine
-            .compare_pareto(&inputs, &dims, "run", Timestamp::new("now"))
-            .is_err());
+        assert!(compare_pareto(&inputs, &dims, "run", Timestamp::new("now")).is_err());
     }
-    assert!(engine
-        .compare_pareto(&inputs[..2], &dimensions(), "run", Timestamp::new("now"))
-        .is_err());
-    assert!(engine
-        .compare_pareto(
-            &[scalar("a", f64::NAN), scalar("b", 2.)],
-            &dimensions()[..1],
-            "run",
-            Timestamp::new("now")
-        )
-        .is_err());
+    assert!(compare_pareto(&inputs[..2], &dimensions(), "run", Timestamp::new("now")).is_err());
+    assert!(compare_pareto(
+        &[scalar("a", f64::NAN), scalar("b", 2.)],
+        &dimensions()[..1],
+        "run",
+        Timestamp::new("now")
+    )
+    .is_err());
 }

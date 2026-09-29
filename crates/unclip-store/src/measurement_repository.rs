@@ -11,7 +11,7 @@ use unclip_domain::FrameId;
 use unclip_entity::{
     empirical_structures, frame_versions, measurement_profiles, measurements, sensor_runs,
 };
-use unclip_epistemic::{Calculated, DerivedId, FrameVersion, ParameterHash, PluginId};
+use unclip_epistemic::{Calculated, DerivedId, FrameVersion, PluginId};
 use unclip_measure::{
     EmpiricalStructure, Measurement, MeasurementContext, MeasurementKind, MeasurementProfile,
     MeasurementValue, Reading,
@@ -19,19 +19,7 @@ use unclip_measure::{
 
 use crate::provenance_repository::insert_provenance_in_transaction;
 use crate::{StoreError, StoreResult, StoredProvenance};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SensorRunRecord {
-    pub id: String,
-    pub engine_run_id: String,
-    pub sensor: PluginId,
-    pub sensor_version: semver::Version,
-    pub params: serde_json::Value,
-    pub params_hash: ParameterHash,
-    pub status: String,
-    pub started_at: String,
-    pub completed_at: Option<String>,
-}
+pub use unclip_record::SensorRunRecord;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,8 +69,21 @@ pub trait MeasurementRepository: Sync {
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>>;
     /// Hydrate measurements with their stored provenance identities.
     async fn get_profile_records(&self, id: &str) -> StoreResult<Option<Vec<MeasurementRecord>>>;
-    async fn insert_empirical_structure(&self, record: EmpiricalStructureRecord)
-        -> StoreResult<()>;
+    /// Store a structure that carries no calculation provenance.
+    ///
+    /// This is the import and legacy path: it writes the row without a
+    /// provenance record, so the result reads back as unverified and a caller
+    /// must restore it with [`Tracked::from_recorded`] rather than
+    /// [`Tracked::from_calculated`]. Anything this process calculated goes
+    /// through [`MeasurementRepository::insert_calculated_structure`], which
+    /// requires an emit token and writes the provenance edges with it.
+    ///
+    /// [`Tracked::from_recorded`]: unclip_epistemic::Tracked::from_recorded
+    /// [`Tracked::from_calculated`]: unclip_epistemic::Tracked::from_calculated
+    async fn insert_unverified_structure(
+        &self,
+        record: EmpiricalStructureRecord,
+    ) -> StoreResult<()>;
     /// Atomically persist calculated empirical structure, provenance, and input
     /// edges. At least one existing evidence input is required. Structure ID
     /// and creation timestamp come from the calculated value's provenance.
@@ -427,7 +428,7 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
         }
         Ok(Some(hydrated))
     }
-    async fn insert_empirical_structure(
+    async fn insert_unverified_structure(
         &self,
         record: EmpiricalStructureRecord,
     ) -> StoreResult<()> {

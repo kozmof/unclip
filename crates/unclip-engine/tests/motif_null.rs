@@ -5,7 +5,7 @@ use unclip_domain::{
     CandidateKind, CandidateProposal, DomainId, DomainSnapshot, PropertyValue, Unit, UnitId,
     UnitKind,
 };
-use unclip_engine::{Engine, MeasurementRun, NullInputs};
+use unclip_engine::{evaluate_null_models_with_inputs, Engine, MeasurementRun, NullInputs};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -103,7 +103,7 @@ fn evaluate(
         })
         .unwrap();
     let baseline = baseline.map(|value| Tracked::from_recorded(DerivedId::new("domain"), value));
-    let mut outputs = engine.evaluate_null_models_with_inputs(
+    let mut outputs = evaluate_null_models_with_inputs(
         &plan,
         &Tracked::from_recorded(DerivedId::new("candidate"), candidate),
         NullInputs {

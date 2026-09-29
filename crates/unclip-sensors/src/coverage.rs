@@ -119,8 +119,8 @@ mod tests {
         UnitKind,
     };
     use unclip_epistemic::{
-        hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion,
-        InferenceToken, ParameterHash, SourceRef, Timestamp, Tracked,
+        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion, InferenceToken,
+        ParameterHash, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{
         Alignment, AlignmentCandidate, Observation, ObservationId, ObservedRelation,
@@ -132,19 +132,13 @@ mod tests {
 
     fn metadata(id: &str, producer: &str) -> EmitMetadata {
         let params = serde_json::json!({});
-        EmitMetadata {
-            id: DerivedId::new(id),
-            producer: PluginId::new(producer),
-            algorithm: producer.into(),
-            version: Version::new(0, 1, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        }
+        EmitMetadata::new(
+            DerivedId::new(id),
+            PluginId::new(producer),
+            Version::new(0, 1, 0),
+            &params,
+            Timestamp::new("2026-09-17T00:00:00Z"),
+        )
     }
 
     #[test]

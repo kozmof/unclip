@@ -4,7 +4,7 @@ use unclip_domain::{
     CandidateKind, CandidateProposal, DomainId, DomainSnapshot, PropertyValue, Unit, UnitId,
     UnitKind,
 };
-use unclip_engine::Engine;
+use unclip_engine::{generate_candidates, Engine};
 use unclip_epistemic::{DependencyCollector, DerivedId, DomainVersion, Timestamp, Tracked};
 fn domain() -> DomainSnapshot {
     DomainSnapshot {
@@ -372,25 +372,24 @@ fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
             value: template.value["evidence"]["result"].clone(),
         },
     )];
-    let candidates = engine
-        .generate_candidates(
-            &plan,
-            CandidateInputs {
-                domain_version_id: &template.domain_version_id,
-                measurements: &[],
-                observations: &[],
-                structures: &structures,
-            },
-            MeasurementRun {
-                id: "generation",
-                timestamp: Timestamp::new("now"),
-                params: &BTreeMap::from([(
-                    PluginId::new("generate.community"),
-                    json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}),
-                )]),
-            },
-        )
-        .unwrap();
+    let candidates = generate_candidates(
+        &plan,
+        CandidateInputs {
+            domain_version_id: &template.domain_version_id,
+            measurements: &[],
+            observations: &[],
+            structures: &structures,
+        },
+        MeasurementRun {
+            id: "generation",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(
+                PluginId::new("generate.community"),
+                json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}),
+            )]),
+        },
+    )
+    .unwrap();
     assert_eq!(candidates.len(), 1);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
     let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
@@ -471,25 +470,24 @@ fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
             value: template.value["evidence"]["result"].clone(),
         },
     )];
-    let candidates = engine
-        .generate_candidates(
-            &plan,
-            CandidateInputs {
-                domain_version_id: &template.domain_version_id,
-                measurements: &[],
-                observations: &[],
-                structures: &structures,
-            },
-            MeasurementRun {
-                id: "generation",
-                timestamp: Timestamp::new("now"),
-                params: &BTreeMap::from([(
-                    PluginId::new("generate.latent-axis"),
-                    template.value["selection"].clone(),
-                )]),
-            },
-        )
-        .unwrap();
+    let candidates = generate_candidates(
+        &plan,
+        CandidateInputs {
+            domain_version_id: &template.domain_version_id,
+            measurements: &[],
+            observations: &[],
+            structures: &structures,
+        },
+        MeasurementRun {
+            id: "generation",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(
+                PluginId::new("generate.latent-axis"),
+                template.value["selection"].clone(),
+            )]),
+        },
+    )
+    .unwrap();
     assert_eq!(candidates.len(), 2);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
     for generated in candidates {
@@ -592,25 +590,24 @@ fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
             },
         )];
         let template = coupling_proposal();
-        let candidates = engine
-            .generate_candidates(
-                &plan,
-                CandidateInputs {
-                    domain_version_id: &template.domain_version_id,
-                    measurements: &inputs,
-                    observations: &[],
-                    structures: &[],
-                },
-                MeasurementRun {
-                    id: metric,
-                    timestamp: Timestamp::new("now"),
-                    params: &BTreeMap::from([(
-                        PluginId::new("generate.pairwise-coupling"),
-                        json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
-                    )]),
-                },
-            )
-            .unwrap();
+        let candidates = generate_candidates(
+            &plan,
+            CandidateInputs {
+                domain_version_id: &template.domain_version_id,
+                measurements: &inputs,
+                observations: &[],
+                structures: &[],
+            },
+            MeasurementRun {
+                id: metric,
+                timestamp: Timestamp::new("now"),
+                params: &BTreeMap::from([(
+                    PluginId::new("generate.pairwise-coupling"),
+                    json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
+                )]),
+            },
+        )
+        .unwrap();
         assert_eq!(candidates.len(), 1);
         let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
         let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
@@ -705,25 +702,24 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
             context: serde_json::from_value(template.value["evidence"]["context"].clone()).unwrap(),
         },
     )];
-    let candidates = engine
-        .generate_candidates(
-            &plan,
-            CandidateInputs {
-                domain_version_id: &template.domain_version_id,
-                measurements: &inputs,
-                observations: &[],
-                structures: &[],
-            },
-            MeasurementRun {
-                id: "temporal",
-                timestamp: Timestamp::new("now"),
-                params: &BTreeMap::from([(
-                    PluginId::new("generate.temporal-coupling"),
-                    template.value["selection"].clone(),
-                )]),
-            },
-        )
-        .unwrap();
+    let candidates = generate_candidates(
+        &plan,
+        CandidateInputs {
+            domain_version_id: &template.domain_version_id,
+            measurements: &inputs,
+            observations: &[],
+            structures: &[],
+        },
+        MeasurementRun {
+            id: "temporal",
+            timestamp: Timestamp::new("now"),
+            params: &BTreeMap::from([(
+                PluginId::new("generate.temporal-coupling"),
+                template.value["selection"].clone(),
+            )]),
+        },
+    )
+    .unwrap();
     assert_eq!(candidates.len(), 1);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
     let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());

@@ -7,8 +7,8 @@ use serde_json::Value;
 use unclip_domain::{DomainId, DomainSnapshot};
 use unclip_engine::{ConstraintStatus, CounterfactualEvidence, RelationBindings};
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Operation,
-    PluginId, Timestamp, Tracked,
+    DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Operation, PluginId, Timestamp,
+    Tracked,
 };
 use unclip_store::{
     CandidateInterpretationRepository, CandidateRepository, DomainReader, DomainRevision,
@@ -224,19 +224,15 @@ pub(crate) async fn run(
         "reason":reason,
     });
     let revision = ExperimentToken::from_harness(
-        EmitMetadata {
-            id: revision_id.clone(),
-            producer: PluginId::new("revision.apply"),
-            algorithm: "immutable_candidate_promotion".into(),
-            version: "0.1.0".parse().expect("valid revision producer version"),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new(timestamp),
-            domain_version: Some(target_version),
-            frame_version: None,
-            model: None,
-        },
+        EmitMetadata::new(
+            revision_id.clone(),
+            PluginId::new("revision.apply"),
+            "0.1.0".parse().expect("valid revision producer version"),
+            &params,
+            Timestamp::new(timestamp),
+        )
+        .with_algorithm("immutable_candidate_promotion")
+        .with_domain_version(target_version),
         dependencies,
     )
     .emit(DomainRevision {

@@ -767,19 +767,14 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         dependencies.read(&unclip_epistemic::Tracked::from_recorded(input, ()));
         let params = serde_json::json!({"fixture":true});
         unclip_epistemic::CalculationToken::from_harness(
-            unclip_epistemic::EmitMetadata {
-                id: unclip_epistemic::DerivedId::new(id),
-                producer: unclip_epistemic::PluginId::new("generate.fixture"),
-                algorithm: "generate.fixture".into(),
-                version: "0.1.0".parse().unwrap(),
-                params_hash: unclip_epistemic::hash_params(&params),
-                params,
-                source: None,
-                timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
-                domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
-                frame_version: None,
-                model: None,
-            },
+            unclip_epistemic::EmitMetadata::new(
+                unclip_epistemic::DerivedId::new(id),
+                unclip_epistemic::PluginId::new("generate.fixture"),
+                "0.1.0".parse().unwrap(),
+                &params,
+                unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
+            )
+            .with_domain_version(unclip_epistemic::DomainVersion::new("7")),
             dependencies,
         )
         .emit(proposal.clone())
@@ -2382,19 +2377,15 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
     ));
     let candidate_params = serde_json::json!({"fixture":"interpretation"});
     let candidate = CalculationToken::from_harness(
-        EmitMetadata {
-            id: candidate_id.clone(),
-            producer: PluginId::new("generate.fixture"),
-            algorithm: "generate.fixture".into(),
-            version: "0.1.0".parse().unwrap(),
-            params_hash: hash_params(&candidate_params),
-            params: candidate_params,
-            source: None,
-            timestamp: Timestamp::new("2026-09-23T00:00:00Z"),
-            domain_version: Some(domain.version.clone()),
-            frame_version: None,
-            model: None,
-        },
+        EmitMetadata::new(
+            candidate_id.clone(),
+            PluginId::new("generate.fixture"),
+            "0.1.0".parse().unwrap(),
+            &candidate_params,
+            Timestamp::new("2026-09-23T00:00:00Z"),
+        )
+        .with_algorithm("generate.fixture")
+        .with_domain_version(domain.version.clone()),
         dependencies,
     )
     .emit(unclip_store::CandidateProposal {

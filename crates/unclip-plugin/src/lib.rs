@@ -73,10 +73,12 @@
 
 mod candidate;
 mod comparison;
-pub use comparison::CompareCtx;
 mod null;
+mod schema;
 pub use candidate::CandidateCtx;
+pub use comparison::CompareCtx;
 pub use null::NullCtx;
+pub use schema::{check_schema, validate_params, MalformedSchema, SchemaViolation};
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -424,6 +426,15 @@ pub fn classify_sensor(
 ) -> SensorDecision {
     if !scheduled {
         return SensorDecision::Record(Reading::NotMeasured);
+    }
+    // The descriptor's schema is checked before the sensor sees its parameters,
+    // so it constrains third-party sensors on the same terms as first-party ones
+    // rather than relying on each to re-validate its own contract. A violation is
+    // recorded like any other reason a selected sensor produced nothing.
+    if let Err(violation) = validate_params(sensor.descriptor().params_schema, ctx.params()) {
+        return SensorDecision::Record(Reading::NotApplicable {
+            reason: format!("parameters do not satisfy the declared schema: {violation}"),
+        });
     }
     if let Applicability::NotApplicable { reason } = sensor.applies_to(ctx) {
         return SensorDecision::Record(Reading::NotApplicable { reason });
@@ -1214,6 +1225,14 @@ mod tests {
     }
 
     fn sensor_with(evidence: &'static [EvidenceRequirement], applicable: bool) -> Arc<dyn Sensor> {
+        sensor_with_schema(evidence, applicable, "{}")
+    }
+
+    fn sensor_with_schema(
+        evidence: &'static [EvidenceRequirement],
+        applicable: bool,
+        params_schema: &'static str,
+    ) -> Arc<dyn Sensor> {
         Arc::new(StubSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.stub"),
@@ -1222,7 +1241,7 @@ mod tests {
                 applicability: &[],
                 evidence,
                 produces: &[],
-                params_schema: "{}",
+                params_schema,
             },
             applicable,
         })
@@ -1372,10 +1391,65 @@ mod tests {
     }
 
     #[test]
+    fn a_sensor_is_not_invoked_with_parameters_its_schema_rejects() {
+        use std::collections::BTreeMap;
+        use unclip_domain::{DomainId, FrameId};
+        use unclip_epistemic::{DomainVersion, FrameVersion};
+
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("1"),
+            axes: Vec::new(),
+        };
+        const SCHEMA: &str = r#"{"type":"object","additionalProperties":false,
+            "required":["left"],"properties":{"left":{"type":"string","minLength":1}}}"#;
+
+        // A key the schema does not declare: recorded, not passed to the sensor.
+        let params = serde_json::json!({"left": "a", "typo": 1});
+        let ctx = MeasureCtx::new(
+            &domain,
+            &frame,
+            &[],
+            &[],
+            &[],
+            &params,
+            DependencyCollector::default(),
+        );
+        let SensorDecision::Record(Reading::NotApplicable { reason }) =
+            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx, true)
+        else {
+            panic!("a schema violation must be recorded rather than run");
+        };
+        assert!(reason.contains("unknown key `typo`"), "got: {reason}");
+
+        // Satisfying the same schema leaves the decision to run.
+        let params = serde_json::json!({"left": "a"});
+        let ctx = MeasureCtx::new(
+            &domain,
+            &frame,
+            &[],
+            &[],
+            &[],
+            &params,
+            DependencyCollector::default(),
+        );
+        assert_eq!(
+            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx, true),
+            SensorDecision::Run
+        );
+    }
+
+    #[test]
     fn planner_preserves_sparse_reading_states() {
         use std::collections::BTreeMap;
         use unclip_domain::{DomainId, FrameId};
-        use unclip_epistemic::{DerivedId, DomainVersion, FrameVersion, ParameterHash, Timestamp};
+        use unclip_epistemic::{DerivedId, DomainVersion, FrameVersion, Timestamp};
 
         let domain = DomainSnapshot {
             id: DomainId::new("test"),
@@ -1423,19 +1497,16 @@ mod tests {
         );
 
         let derived = ctx
-            .calculation_token(EmitMetadata {
-                id: DerivedId::new("measurement-1"),
-                producer: PluginId::new("sensor.stub"),
-                algorithm: "stub".into(),
-                version: Version::new(0, 1, 0),
-                params: serde_json::json!({}),
-                params_hash: ParameterHash::new("hash"),
-                source: None,
-                timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            })
+            .calculation_token(
+                EmitMetadata::new(
+                    DerivedId::new("measurement-1"),
+                    PluginId::new("sensor.stub"),
+                    Version::new(0, 1, 0),
+                    &serde_json::json!({}),
+                    Timestamp::new("2026-09-17T00:00:00Z"),
+                )
+                .with_algorithm("stub"),
+            )
             .emit(());
         assert_eq!(
             derived.provenance().domain_version,
@@ -1451,9 +1522,7 @@ mod tests {
     fn conformance_accepts_a_deterministic_scalar_sensor() {
         use std::collections::BTreeMap;
         use unclip_domain::{DomainId, FrameId};
-        use unclip_epistemic::{
-            DerivedId, DomainVersion, EmitMetadata, FrameVersion, ParameterHash, Timestamp,
-        };
+        use unclip_epistemic::{DerivedId, DomainVersion, EmitMetadata, FrameVersion, Timestamp};
         use unclip_measure::{MeasurementContext, MeasurementValue};
 
         struct ScalarSensor(SensorDescriptor);
@@ -1517,19 +1586,16 @@ mod tests {
         conformance::assert_sensor(&sensor, |plugin| {
             plugin.measure(
                 &ctx,
-                ctx.calculation_token(EmitMetadata {
-                    id: DerivedId::new("measurement"),
-                    producer: PluginId::new("sensor.scalar"),
-                    algorithm: "scalar".into(),
-                    version: Version::new(0, 1, 0),
-                    params: serde_json::json!({}),
-                    params_hash: ParameterHash::new("hash"),
-                    source: None,
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
-                    domain_version: None,
-                    frame_version: None,
-                    model: None,
-                }),
+                ctx.calculation_token(
+                    EmitMetadata::new(
+                        DerivedId::new("measurement"),
+                        PluginId::new("sensor.scalar"),
+                        Version::new(0, 1, 0),
+                        &serde_json::json!({}),
+                        Timestamp::new("2026-09-17T00:00:00Z"),
+                    )
+                    .with_algorithm("scalar"),
+                ),
             )
         });
     }

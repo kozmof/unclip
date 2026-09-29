@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken,
-    Experimental, PluginId, Timestamp, Tracked,
+    Calculated, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Experimental,
+    PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{PluginError, Result};
@@ -81,51 +81,112 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
     let evidence: AtomicRevisionEvidence =
         serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
             .map_err(|error| invalid(error.to_string()))?;
-    if evidence.pattern.matching != "exact_observed_label"
-        || evidence.pattern.observed_label.trim().is_empty()
-        || evidence.observation_count < 2
-        || evidence.observation_count != evidence.observations.len()
-        || evidence
-            .observations
-            .iter()
-            .any(|observation| observation.0.trim().is_empty())
-        || evidence
-            .observations
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        || evidence.examples.len() < evidence.observation_count
+    // Each condition reports itself. A single combined message used to name
+    // every requirement at once, which left a caller whose observation list was
+    // merely unsorted reading about four things that were not wrong.
+    if evidence.pattern.matching != "exact_observed_label" {
+        return Err(invalid(format!(
+            "Delta V pattern matching must be `exact_observed_label`, found `{}`",
+            evidence.pattern.matching
+        )));
+    }
+    if evidence.pattern.observed_label.trim().is_empty() {
+        return Err(invalid("Delta V pattern observed label must not be empty"));
+    }
+    if evidence.observation_count < 2 {
+        return Err(invalid(format!(
+            "Delta V requires at least two supporting observations, declared {}",
+            evidence.observation_count
+        )));
+    }
+    if evidence.observation_count != evidence.observations.len() {
+        return Err(invalid(format!(
+            "Delta V declared {} supporting observations but listed {}",
+            evidence.observation_count,
+            evidence.observations.len()
+        )));
+    }
+    if let Some(blank) = evidence
+        .observations
+        .iter()
+        .position(|observation| observation.0.trim().is_empty())
     {
-        return Err(invalid(
-            "Delta V requires a nonempty exact-label pattern supported by at least two ordered distinct observations",
-        ));
+        return Err(invalid(format!(
+            "Delta V supporting observation at index {blank} has an empty ID"
+        )));
+    }
+    if let Some(unordered) = evidence
+        .observations
+        .windows(2)
+        .position(|pair| pair[0] >= pair[1])
+    {
+        return Err(invalid(format!(
+            "Delta V supporting observations must be strictly ordered and distinct; \
+             `{}` at index {unordered} is not before `{}`",
+            evidence.observations[unordered].0,
+            evidence.observations[unordered + 1].0
+        )));
+    }
+    if evidence.examples.len() < evidence.observation_count {
+        return Err(invalid(format!(
+            "Delta V needs at least one residual example per supporting observation: \
+             {} example(s) for {} observation(s)",
+            evidence.examples.len(),
+            evidence.observation_count
+        )));
     }
     let selected = evidence.observations.iter().collect::<BTreeSet<_>>();
     let mut covered = BTreeSet::new();
     let mut examples = BTreeSet::new();
-    for example in &evidence.examples {
-        if !selected.contains(&example.observation)
-            || example.unit.0.trim().is_empty()
-            || example.measurements.is_empty()
-            || example
-                .measurements
-                .iter()
-                .any(|measurement| measurement.0.trim().is_empty())
-            || example
-                .measurements
-                .windows(2)
-                .any(|pair| pair[0] >= pair[1])
-            || !examples.insert((&example.observation, &example.unit))
+    for (index, example) in evidence.examples.iter().enumerate() {
+        let example_invalid = |reason: &str| {
+            invalid(format!(
+                "Delta V residual example at index {index} ({}/{}) {reason}",
+                example.observation.0, example.unit.0
+            ))
+        };
+        if !selected.contains(&example.observation) {
+            return Err(example_invalid("names an observation that is not selected"));
+        }
+        if example.unit.0.trim().is_empty() {
+            return Err(example_invalid("has an empty unit ID"));
+        }
+        if example.measurements.is_empty() {
+            return Err(example_invalid("retains no measurement evidence"));
+        }
+        if let Some(blank) = example
+            .measurements
+            .iter()
+            .position(|measurement| measurement.0.trim().is_empty())
         {
-            return Err(invalid(
-                "Delta V residual examples must be unique, selected, and retain ordered measurement evidence",
-            ));
+            return Err(example_invalid(&format!(
+                "has an empty measurement ID at index {blank}"
+            )));
+        }
+        if let Some(unordered) = example
+            .measurements
+            .windows(2)
+            .position(|pair| pair[0] >= pair[1])
+        {
+            return Err(example_invalid(&format!(
+                "has measurement evidence that is not strictly ordered at index {unordered}"
+            )));
+        }
+        if !examples.insert((&example.observation, &example.unit)) {
+            return Err(example_invalid("duplicates an earlier example"));
         }
         covered.insert(&example.observation);
     }
     if covered != selected {
-        return Err(invalid(
-            "Delta V residual examples must cover every supporting observation",
-        ));
+        let missing = selected
+            .difference(&covered)
+            .map(|observation| observation.0.as_str())
+            .collect::<Vec<_>>();
+        return Err(invalid(format!(
+            "Delta V residual examples must cover every supporting observation; \
+             missing {}",
+            missing.join(", ")
+        )));
     }
     Ok(proposal
         .value
@@ -340,19 +401,16 @@ fn emit_attempt(
         "reason": reason,
     });
     let token = ExperimentToken::from_harness(
-        EmitMetadata {
-            id: output_id,
-            producer: PluginId::new("experiment.revision-ladder"),
-            algorithm: algorithm.into(),
+        EmitMetadata::new(
+            output_id,
+            PluginId::new("experiment.revision-ladder"),
             version,
-            params_hash: hash_params(&params),
-            params,
-            source: None,
+            &params,
             timestamp,
-            domain_version: experiment.provenance().domain_version.clone(),
-            frame_version: experiment.provenance().frame_version.clone(),
-            model: None,
-        },
+        )
+        .with_algorithm(algorithm)
+        .with_domain_version(experiment.provenance().domain_version.clone())
+        .with_frame_version(experiment.provenance().frame_version.clone()),
         dependencies,
     );
     Ok(token.emit(RevisionAttempt {
@@ -422,470 +480,464 @@ impl crate::Engine {
             timestamp,
         )
     }
+}
 
-    /// Record the first minimal-revision step after a held-out counterfactual test.
-    ///
-    /// The caller supplies the explicit sufficiency verdict and reason. Typed
-    /// deltas, null evidence, Pareto relations, and constraints stay separate;
-    /// this method never turns them into a score.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_delta_w_test(
-        &self,
-        candidate: &Tracked<CandidateProposal>,
-        counterfactual: &Calculated<CounterfactualSnapshot>,
-        experiment: &Experimental<CounterfactualEvidence>,
-        outcome: RevisionTestOutcome,
-        reason: &str,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Experimental<RevisionAttempt>> {
-        let reason = reason.trim();
-        let proposal = validate_experiment(
-            "Delta W",
-            candidate,
-            counterfactual,
-            experiment,
-            outcome,
-            reason,
-            run_id,
-        )?;
-        if proposal.kind != CandidateKind::WeightRevision {
-            return Err(invalid(
-                "Delta W can test only an explicit numeric-property weight revision",
-            ));
-        }
-        let snapshot = counterfactual.value();
-        if !snapshot.added_units.is_empty()
-            || !snapshot.added_relations.is_empty()
-            || snapshot.property_changes.len() != 1
-        {
-            return Err(invalid(
-                "Delta W must change exactly one existing numeric property",
-            ));
-        }
-        if !has_measured_null(
-            experiment.value(),
-            "null.weight-change",
-            "retain_existing_numeric_property",
-        ) {
-            return Err(invalid(
-                "Delta W requires a measured null.weight-change result",
-            ));
-        }
-        emit_attempt(
-            candidate,
-            counterfactual,
-            experiment,
-            None,
-            RevisionStep::DeltaW,
-            outcome,
-            reason,
-            run_id,
-            timestamp,
-        )
+/// Record the first minimal-revision step after a held-out counterfactual test.
+///
+/// The caller supplies the explicit sufficiency verdict and reason. Typed
+/// deltas, null evidence, Pareto relations, and constraints stay separate;
+/// this method never turns them into a score.
+#[allow(clippy::too_many_arguments)]
+pub fn record_delta_w_test(
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let reason = reason.trim();
+    let proposal = validate_experiment(
+        "Delta W",
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+    )?;
+    if proposal.kind != CandidateKind::WeightRevision {
+        return Err(invalid(
+            "Delta W can test only an explicit numeric-property weight revision",
+        ));
     }
-
-    /// Record a relation revision test after Delta W was explicitly insufficient.
-    ///
-    /// The relation counterfactual must add exactly one explicitly bound edge and
-    /// must compete with the existing-relation null. A sufficient earlier weight
-    /// revision stops the ladder before this method can emit an attempt.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_delta_e_test(
-        &self,
-        prior: &Experimental<RevisionAttempt>,
-        candidate: &Tracked<CandidateProposal>,
-        counterfactual: &Calculated<CounterfactualSnapshot>,
-        experiment: &Experimental<CounterfactualEvidence>,
-        outcome: RevisionTestOutcome,
-        reason: &str,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Experimental<RevisionAttempt>> {
-        let reason = reason.trim();
-        let proposal = validate_experiment(
-            "Delta E",
-            candidate,
-            counterfactual,
-            experiment,
-            outcome,
-            reason,
-            run_id,
-        )?;
-        validate_prior(prior, RevisionStep::DeltaW, experiment)?;
-        if proposal.kind != CandidateKind::Relation {
-            return Err(invalid(
-                "Delta E can test only an explicit relation revision",
-            ));
-        }
-        let snapshot = counterfactual.value();
-        if !snapshot.added_units.is_empty()
-            || snapshot.added_relations.len() != 1
-            || !snapshot.property_changes.is_empty()
-        {
-            return Err(invalid(
-                "Delta E must add exactly one relation without changing units or properties",
-            ));
-        }
-        let relation = snapshot
-            .domain
-            .relations
-            .get(&snapshot.added_relations[0])
-            .ok_or_else(|| invalid("Delta E added relation is absent from the counterfactual"))?;
-        let bindings = counterfactual
-            .provenance()
-            .params
-            .get("relation_bindings")
-            .ok_or_else(|| invalid("Delta E requires explicit relation bindings"))?;
-        if bindings.get("source").and_then(serde_json::Value::as_str) != Some(&relation.source.0)
-            || bindings.get("target").and_then(serde_json::Value::as_str)
-                != Some(&relation.target.0)
-        {
-            return Err(invalid(
-                "Delta E relation endpoints must match the explicit bindings",
-            ));
-        }
-        if !has_measured_null(
-            experiment.value(),
-            "null.existing-relation",
-            "existing_domain_exact_match",
-        ) {
-            return Err(invalid(
-                "Delta E requires a measured null.existing-relation result",
-            ));
-        }
-        emit_attempt(
-            candidate,
-            counterfactual,
-            experiment,
-            Some(prior),
-            RevisionStep::DeltaE,
-            outcome,
-            reason,
-            run_id,
-            timestamp,
-        )
+    let snapshot = counterfactual.value();
+    if !snapshot.added_units.is_empty()
+        || !snapshot.added_relations.is_empty()
+        || snapshot.property_changes.len() != 1
+    {
+        return Err(invalid(
+            "Delta W must change exactly one existing numeric property",
+        ));
     }
-
-    /// Record a dynamic-coupling test after Delta E was explicitly insufficient.
-    ///
-    /// The counterfactual must add exactly one anonymous, explicitly non-causal
-    /// coupling and must compete with the zero-association baseline diagnostic.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_dynamic_coupling_test(
-        &self,
-        prior: &Experimental<RevisionAttempt>,
-        candidate: &Tracked<CandidateProposal>,
-        counterfactual: &Calculated<CounterfactualSnapshot>,
-        experiment: &Experimental<CounterfactualEvidence>,
-        outcome: RevisionTestOutcome,
-        reason: &str,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Experimental<RevisionAttempt>> {
-        let reason = reason.trim();
-        let proposal = validate_experiment(
-            "dynamic coupling",
-            candidate,
-            counterfactual,
-            experiment,
-            outcome,
-            reason,
-            run_id,
-        )?;
-        validate_prior(prior, RevisionStep::DeltaE, experiment)?;
-        if proposal.kind != CandidateKind::DynamicCoupling {
-            return Err(invalid(
-                "dynamic coupling can test only an explicit coupling revision",
-            ));
-        }
-        let matching = proposal
-            .value
-            .get("pattern")
-            .and_then(|pattern| pattern.get("matching"))
-            .and_then(serde_json::Value::as_str);
-        if !matches!(
-            matching,
-            Some("thresholded_pairwise_association" | "lagged_directional_association")
-        ) {
-            return Err(invalid("dynamic coupling pattern is not supported"));
-        }
-        let snapshot = counterfactual.value();
-        if snapshot.added_units.len() != 1
-            || !snapshot.added_relations.is_empty()
-            || !snapshot.property_changes.is_empty()
-        {
-            return Err(invalid(
-                "dynamic coupling must add exactly one unit without changing relations or properties",
-            ));
-        }
-        let unit = snapshot
-            .domain
-            .units
-            .get(&snapshot.added_units[0])
-            .ok_or_else(|| invalid("dynamic coupling unit is absent from the counterfactual"))?;
-        if unit.kind != unclip_domain::UnitKind::DynamicCoupling
-            || unit.label.is_some()
-            || unit.properties.get("causal_claim")
-                != Some(&unclip_domain::PropertyValue::Boolean(false))
-            || unit.properties.get("candidate_evidence")
-                != Some(&unclip_domain::PropertyValue::Structured(
-                    serde_json::Value::Object(proposal.value.clone()),
-                ))
-        {
-            return Err(invalid(
-                "dynamic coupling must remain anonymous, non-causal, and retain its candidate evidence",
-            ));
-        }
-        if !has_measured_null(
-            experiment.value(),
-            "null.coupling-zero",
-            "zero_association_baseline",
-        ) {
-            return Err(invalid(
-                "dynamic coupling requires a measured null.coupling-zero result",
-            ));
-        }
-        emit_attempt(
-            candidate,
-            counterfactual,
-            experiment,
-            Some(prior),
-            RevisionStep::DynamicCoupling,
-            outcome,
-            reason,
-            run_id,
-            timestamp,
-        )
+    if !has_measured_null(
+        experiment.value(),
+        "null.weight-change",
+        "retain_existing_numeric_property",
+    ) {
+        return Err(invalid(
+            "Delta W requires a measured null.weight-change result",
+        ));
     }
+    emit_attempt(
+        candidate,
+        counterfactual,
+        experiment,
+        None,
+        RevisionStep::DeltaW,
+        outcome,
+        reason,
+        run_id,
+        timestamp,
+    )
+}
 
-    /// Record a motif, semantic-role, or transformation test after coupling was insufficient.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_structural_test(
-        &self,
-        prior: &Experimental<RevisionAttempt>,
-        candidate: &Tracked<CandidateProposal>,
-        counterfactual: &Calculated<CounterfactualSnapshot>,
-        experiment: &Experimental<CounterfactualEvidence>,
-        outcome: RevisionTestOutcome,
-        reason: &str,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Experimental<RevisionAttempt>> {
-        let reason = reason.trim();
-        let proposal = validate_experiment(
-            "structural revision",
-            candidate,
-            counterfactual,
-            experiment,
-            outcome,
-            reason,
-            run_id,
-        )?;
-        validate_prior(prior, RevisionStep::DynamicCoupling, experiment)?;
-        let snapshot = counterfactual.value();
-        if snapshot.added_units.len() != 1
-            || !snapshot.added_relations.is_empty()
-            || !snapshot.property_changes.is_empty()
-        {
-            return Err(invalid(
-                "structural revision must add exactly one unit without changing relations or properties",
-            ));
-        }
-        let unit = snapshot
-            .domain
-            .units
-            .get(&snapshot.added_units[0])
-            .ok_or_else(|| invalid("structural unit is absent from the counterfactual"))?;
-        let pattern = proposal
-            .value
-            .get("pattern")
-            .ok_or_else(|| invalid("structural candidate requires a pattern"))?;
-        let common_evidence = unit.properties.get("candidate_evidence")
-            == Some(&unclip_domain::PropertyValue::Structured(
+/// Record a relation revision test after Delta W was explicitly insufficient.
+///
+/// The relation counterfactual must add exactly one explicitly bound edge and
+/// must compete with the existing-relation null. A sufficient earlier weight
+/// revision stops the ladder before this method can emit an attempt.
+#[allow(clippy::too_many_arguments)]
+pub fn record_delta_e_test(
+    prior: &Experimental<RevisionAttempt>,
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let reason = reason.trim();
+    let proposal = validate_experiment(
+        "Delta E",
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+    )?;
+    validate_prior(prior, RevisionStep::DeltaW, experiment)?;
+    if proposal.kind != CandidateKind::Relation {
+        return Err(invalid(
+            "Delta E can test only an explicit relation revision",
+        ));
+    }
+    let snapshot = counterfactual.value();
+    if !snapshot.added_units.is_empty()
+        || snapshot.added_relations.len() != 1
+        || !snapshot.property_changes.is_empty()
+    {
+        return Err(invalid(
+            "Delta E must add exactly one relation without changing units or properties",
+        ));
+    }
+    let relation = snapshot
+        .domain
+        .relations
+        .get(&snapshot.added_relations[0])
+        .ok_or_else(|| invalid("Delta E added relation is absent from the counterfactual"))?;
+    let bindings = counterfactual
+        .provenance()
+        .params
+        .get("relation_bindings")
+        .ok_or_else(|| invalid("Delta E requires explicit relation bindings"))?;
+    if bindings.get("source").and_then(serde_json::Value::as_str) != Some(&relation.source.0)
+        || bindings.get("target").and_then(serde_json::Value::as_str) != Some(&relation.target.0)
+    {
+        return Err(invalid(
+            "Delta E relation endpoints must match the explicit bindings",
+        ));
+    }
+    if !has_measured_null(
+        experiment.value(),
+        "null.existing-relation",
+        "existing_domain_exact_match",
+    ) {
+        return Err(invalid(
+            "Delta E requires a measured null.existing-relation result",
+        ));
+    }
+    emit_attempt(
+        candidate,
+        counterfactual,
+        experiment,
+        Some(prior),
+        RevisionStep::DeltaE,
+        outcome,
+        reason,
+        run_id,
+        timestamp,
+    )
+}
+
+/// Record a dynamic-coupling test after Delta E was explicitly insufficient.
+///
+/// The counterfactual must add exactly one anonymous, explicitly non-causal
+/// coupling and must compete with the zero-association baseline diagnostic.
+#[allow(clippy::too_many_arguments)]
+pub fn record_dynamic_coupling_test(
+    prior: &Experimental<RevisionAttempt>,
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let reason = reason.trim();
+    let proposal = validate_experiment(
+        "dynamic coupling",
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+    )?;
+    validate_prior(prior, RevisionStep::DeltaE, experiment)?;
+    if proposal.kind != CandidateKind::DynamicCoupling {
+        return Err(invalid(
+            "dynamic coupling can test only an explicit coupling revision",
+        ));
+    }
+    let matching = proposal
+        .value
+        .get("pattern")
+        .and_then(|pattern| pattern.get("matching"))
+        .and_then(serde_json::Value::as_str);
+    if !matches!(
+        matching,
+        Some("thresholded_pairwise_association" | "lagged_directional_association")
+    ) {
+        return Err(invalid("dynamic coupling pattern is not supported"));
+    }
+    let snapshot = counterfactual.value();
+    if snapshot.added_units.len() != 1
+        || !snapshot.added_relations.is_empty()
+        || !snapshot.property_changes.is_empty()
+    {
+        return Err(invalid(
+            "dynamic coupling must add exactly one unit without changing relations or properties",
+        ));
+    }
+    let unit = snapshot
+        .domain
+        .units
+        .get(&snapshot.added_units[0])
+        .ok_or_else(|| invalid("dynamic coupling unit is absent from the counterfactual"))?;
+    if unit.kind != unclip_domain::UnitKind::DynamicCoupling
+        || unit.label.is_some()
+        || unit.properties.get("causal_claim")
+            != Some(&unclip_domain::PropertyValue::Boolean(false))
+        || unit.properties.get("candidate_evidence")
+            != Some(&unclip_domain::PropertyValue::Structured(
                 serde_json::Value::Object(proposal.value.clone()),
-            ));
-        match proposal.kind {
-            CandidateKind::GraphMotif => {
-                if unit.kind != unclip_domain::UnitKind::GraphMotif
-                    || unit.label.is_some()
-                    || unit.properties.get("graph_pattern")
-                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
-                    || !common_evidence
-                {
-                    return Err(invalid(
-                        "graph motif must remain anonymous and retain its exact pattern and candidate evidence",
-                    ));
-                }
-                if !has_measured_null(
-                    experiment.value(),
-                    "null.existing-motif",
-                    "existing_motif_exact_pattern",
-                ) {
-                    return Err(invalid(
-                        "graph-motif revision requires a measured null.existing-motif result",
-                    ));
-                }
-            }
-            CandidateKind::SemanticRole => {
-                crate::role_application::validate(proposal, &snapshot.domain)?;
-                if unit.kind != unclip_domain::UnitKind::SemanticRole
-                    || unit.label.is_some()
-                    || unit.properties.get("role_pattern")
-                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
-                    || !common_evidence
-                {
-                    return Err(invalid(
-                        "semantic role must remain anonymous and retain its exact pattern and candidate evidence",
-                    ));
-                }
-                if !has_measured_null(
-                    experiment.value(),
-                    "null.existing-role",
-                    "existing_role_exact_pattern",
-                ) {
-                    return Err(invalid(
-                        "semantic-role revision requires a measured null.existing-role result",
-                    ));
-                }
-            }
-            CandidateKind::Transformation => {
-                crate::transformation_application::validate(proposal, &snapshot.domain)?;
-                if unit.kind != unclip_domain::UnitKind::Transformation
-                    || unit.label.is_some()
-                    || unit.properties.get("transformation_pattern")
-                        != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
-                    || unit.properties.get("causal_claim")
-                        != Some(&unclip_domain::PropertyValue::Boolean(false))
-                    || !common_evidence
-                {
-                    return Err(invalid(
-                        "transformation must remain anonymous and non-causal and retain its exact pattern and candidate evidence",
-                    ));
-                }
-                if !has_measured_null(
-                    experiment.value(),
-                    "null.existing-transformation",
-                    "existing_transformation_exact_pattern",
-                ) {
-                    return Err(invalid(
-                        "transformation revision requires a measured null.existing-transformation result",
-                    ));
-                }
-            }
-            _ => {
+            ))
+    {
+        return Err(invalid(
+            "dynamic coupling must remain anonymous, non-causal, and retain its candidate evidence",
+        ));
+    }
+    if !has_measured_null(
+        experiment.value(),
+        "null.coupling-zero",
+        "zero_association_baseline",
+    ) {
+        return Err(invalid(
+            "dynamic coupling requires a measured null.coupling-zero result",
+        ));
+    }
+    emit_attempt(
+        candidate,
+        counterfactual,
+        experiment,
+        Some(prior),
+        RevisionStep::DynamicCoupling,
+        outcome,
+        reason,
+        run_id,
+        timestamp,
+    )
+}
+
+/// Record a motif, semantic-role, or transformation test after coupling was insufficient.
+#[allow(clippy::too_many_arguments)]
+pub fn record_structural_test(
+    prior: &Experimental<RevisionAttempt>,
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let reason = reason.trim();
+    let proposal = validate_experiment(
+        "structural revision",
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+    )?;
+    validate_prior(prior, RevisionStep::DynamicCoupling, experiment)?;
+    let snapshot = counterfactual.value();
+    if snapshot.added_units.len() != 1
+        || !snapshot.added_relations.is_empty()
+        || !snapshot.property_changes.is_empty()
+    {
+        return Err(invalid(
+            "structural revision must add exactly one unit without changing relations or properties",
+        ));
+    }
+    let unit = snapshot
+        .domain
+        .units
+        .get(&snapshot.added_units[0])
+        .ok_or_else(|| invalid("structural unit is absent from the counterfactual"))?;
+    let pattern = proposal
+        .value
+        .get("pattern")
+        .ok_or_else(|| invalid("structural candidate requires a pattern"))?;
+    let common_evidence = unit.properties.get("candidate_evidence")
+        == Some(&unclip_domain::PropertyValue::Structured(
+            serde_json::Value::Object(proposal.value.clone()),
+        ));
+    match proposal.kind {
+        CandidateKind::GraphMotif => {
+            if unit.kind != unclip_domain::UnitKind::GraphMotif
+                || unit.label.is_some()
+                || unit.properties.get("graph_pattern")
+                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                || !common_evidence
+            {
                 return Err(invalid(
-                    "structural revision supports calculated graph-motif, semantic-role, or transformation evidence",
+                    "graph motif must remain anonymous and retain its exact pattern and candidate evidence",
+                ));
+            }
+            if !has_measured_null(
+                experiment.value(),
+                "null.existing-motif",
+                "existing_motif_exact_pattern",
+            ) {
+                return Err(invalid(
+                    "graph-motif revision requires a measured null.existing-motif result",
                 ));
             }
         }
-        emit_attempt(
-            candidate,
-            counterfactual,
-            experiment,
-            Some(prior),
-            RevisionStep::Structural,
-            outcome,
-            reason,
-            run_id,
-            timestamp,
-        )
+        CandidateKind::SemanticRole => {
+            crate::role_application::validate(proposal, &snapshot.domain)?;
+            if unit.kind != unclip_domain::UnitKind::SemanticRole
+                || unit.label.is_some()
+                || unit.properties.get("role_pattern")
+                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                || !common_evidence
+            {
+                return Err(invalid(
+                    "semantic role must remain anonymous and retain its exact pattern and candidate evidence",
+                ));
+            }
+            if !has_measured_null(
+                experiment.value(),
+                "null.existing-role",
+                "existing_role_exact_pattern",
+            ) {
+                return Err(invalid(
+                    "semantic-role revision requires a measured null.existing-role result",
+                ));
+            }
+        }
+        CandidateKind::Transformation => {
+            crate::transformation_application::validate(proposal, &snapshot.domain)?;
+            if unit.kind != unclip_domain::UnitKind::Transformation
+                || unit.label.is_some()
+                || unit.properties.get("transformation_pattern")
+                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                || unit.properties.get("causal_claim")
+                    != Some(&unclip_domain::PropertyValue::Boolean(false))
+                || !common_evidence
+            {
+                return Err(invalid(
+                    "transformation must remain anonymous and non-causal and retain its exact pattern and candidate evidence",
+                ));
+            }
+            if !has_measured_null(
+                experiment.value(),
+                "null.existing-transformation",
+                "existing_transformation_exact_pattern",
+            ) {
+                return Err(invalid(
+                    "transformation revision requires a measured null.existing-transformation result",
+                ));
+            }
+        }
+        _ => {
+            return Err(invalid(
+                "structural revision supports calculated graph-motif, semantic-role, or transformation evidence",
+            ));
+        }
     }
+    emit_attempt(
+        candidate,
+        counterfactual,
+        experiment,
+        Some(prior),
+        RevisionStep::Structural,
+        outcome,
+        reason,
+        run_id,
+        timestamp,
+    )
+}
 
-    /// Record an atomic membership revision after structural change was insufficient.
-    ///
-    /// The new unit stays anonymous and retains the exact calculated residual
-    /// evidence. Semantic naming remains a later interpretation operation.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_delta_v_test(
-        &self,
-        prior: &Experimental<RevisionAttempt>,
-        candidate: &Tracked<CandidateProposal>,
-        counterfactual: &Calculated<CounterfactualSnapshot>,
-        experiment: &Experimental<CounterfactualEvidence>,
-        outcome: RevisionTestOutcome,
-        reason: &str,
-        run_id: &str,
-        timestamp: Timestamp,
-    ) -> Result<Experimental<RevisionAttempt>> {
-        let reason = reason.trim();
-        let proposal = validate_experiment(
-            "Delta V",
-            candidate,
-            counterfactual,
-            experiment,
-            outcome,
-            reason,
-            run_id,
-        )?;
-        validate_prior(prior, RevisionStep::Structural, experiment)?;
-        if counterfactual
-            .provenance()
-            .params
-            .get("revision_step")
-            .and_then(serde_json::Value::as_str)
-            != Some("delta_v")
-        {
-            return Err(invalid(
-                "Delta V counterfactual must be created through the ordered application gate",
-            ));
-        }
-        if proposal.kind != CandidateKind::AtomicMeaning {
-            return Err(invalid(
-                "Delta V currently supports only calculated atomic-meaning residual evidence",
-            ));
-        }
-        let pattern = validate_atomic_revision(proposal)?;
-        let snapshot = counterfactual.value();
-        if snapshot.added_units.len() != 1
-            || !snapshot.added_relations.is_empty()
-            || !snapshot.property_changes.is_empty()
-        {
-            return Err(invalid(
-                "Delta V must add exactly one unit without changing relations or properties",
-            ));
-        }
-        let unit = snapshot
-            .domain
-            .units
-            .get(&snapshot.added_units[0])
-            .ok_or_else(|| invalid("Delta V unit is absent from the counterfactual"))?;
-        if unit.kind != unclip_domain::UnitKind::AtomicMeaning
-            || unit.label.is_some()
-            || unit.properties.get("candidate_id")
-                != Some(&unclip_domain::PropertyValue::Text(
-                    candidate.id().0.clone(),
-                ))
-            || unit.properties.get("candidate_pattern")
-                != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
-            || unit.properties.get("candidate_evidence")
-                != Some(&unclip_domain::PropertyValue::Structured(
-                    serde_json::Value::Object(proposal.value.clone()),
-                ))
-        {
-            return Err(invalid(
-                "Delta V unit must remain anonymous and retain its exact candidate identity, pattern, and evidence",
-            ));
-        }
-        if !has_measured_null(
-            experiment.value(),
-            "null.existing-unit",
-            "existing_domain_exact_match",
-        ) {
-            return Err(invalid(
-                "Delta V requires a measured null.existing-unit result",
-            ));
-        }
-        emit_attempt(
-            candidate,
-            counterfactual,
-            experiment,
-            Some(prior),
-            RevisionStep::DeltaV,
-            outcome,
-            reason,
-            run_id,
-            timestamp,
-        )
+/// Record an atomic membership revision after structural change was insufficient.
+///
+/// The new unit stays anonymous and retains the exact calculated residual
+/// evidence. Semantic naming remains a later interpretation operation.
+#[allow(clippy::too_many_arguments)]
+pub fn record_delta_v_test(
+    prior: &Experimental<RevisionAttempt>,
+    candidate: &Tracked<CandidateProposal>,
+    counterfactual: &Calculated<CounterfactualSnapshot>,
+    experiment: &Experimental<CounterfactualEvidence>,
+    outcome: RevisionTestOutcome,
+    reason: &str,
+    run_id: &str,
+    timestamp: Timestamp,
+) -> Result<Experimental<RevisionAttempt>> {
+    let reason = reason.trim();
+    let proposal = validate_experiment(
+        "Delta V",
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+    )?;
+    validate_prior(prior, RevisionStep::Structural, experiment)?;
+    if counterfactual
+        .provenance()
+        .params
+        .get("revision_step")
+        .and_then(serde_json::Value::as_str)
+        != Some("delta_v")
+    {
+        return Err(invalid(
+            "Delta V counterfactual must be created through the ordered application gate",
+        ));
     }
+    if proposal.kind != CandidateKind::AtomicMeaning {
+        return Err(invalid(
+            "Delta V currently supports only calculated atomic-meaning residual evidence",
+        ));
+    }
+    let pattern = validate_atomic_revision(proposal)?;
+    let snapshot = counterfactual.value();
+    if snapshot.added_units.len() != 1
+        || !snapshot.added_relations.is_empty()
+        || !snapshot.property_changes.is_empty()
+    {
+        return Err(invalid(
+            "Delta V must add exactly one unit without changing relations or properties",
+        ));
+    }
+    let unit = snapshot
+        .domain
+        .units
+        .get(&snapshot.added_units[0])
+        .ok_or_else(|| invalid("Delta V unit is absent from the counterfactual"))?;
+    if unit.kind != unclip_domain::UnitKind::AtomicMeaning
+        || unit.label.is_some()
+        || unit.properties.get("candidate_id")
+            != Some(&unclip_domain::PropertyValue::Text(
+                candidate.id().0.clone(),
+            ))
+        || unit.properties.get("candidate_pattern")
+            != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+        || unit.properties.get("candidate_evidence")
+            != Some(&unclip_domain::PropertyValue::Structured(
+                serde_json::Value::Object(proposal.value.clone()),
+            ))
+    {
+        return Err(invalid(
+            "Delta V unit must remain anonymous and retain its exact candidate identity, pattern, and evidence",
+        ));
+    }
+    if !has_measured_null(
+        experiment.value(),
+        "null.existing-unit",
+        "existing_domain_exact_match",
+    ) {
+        return Err(invalid(
+            "Delta V requires a measured null.existing-unit result",
+        ));
+    }
+    emit_attempt(
+        candidate,
+        counterfactual,
+        experiment,
+        Some(prior),
+        RevisionStep::DeltaV,
+        outcome,
+        reason,
+        run_id,
+        timestamp,
+    )
 }

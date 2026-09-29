@@ -1,4 +1,5 @@
 //! Baseline sensor execution over a frozen, explicitly selected held-out split.
+use crate::profile_comparison::compare_profiles;
 use std::collections::BTreeSet;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{Calculated, DependencyCollector, Tracked};
@@ -285,7 +286,7 @@ impl super::Engine {
             .iter()
             .map(|value| Tracked::from_derived(value, value.value().clone()))
             .collect::<Vec<_>>();
-        let comparison = self.compare_profiles(
+        let comparison = compare_profiles(
             plan,
             &before,
             &after,

@@ -5,13 +5,13 @@ use unclip_domain::{
     CandidateKind, CandidateProposal, DomainId, DomainSnapshot, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
-    ComparisonPair, ConstraintAssessment, ConstraintStatus, CounterfactualEvidence, DeltaProfile,
-    Engine, ExperimentConstraint, NullEvidence, ProfileDelta, RevisionAttempt, RevisionStep,
-    RevisionTestOutcome,
+    record_structural_test, ComparisonPair, ConstraintAssessment, ConstraintStatus,
+    CounterfactualEvidence, DeltaProfile, Engine, ExperimentConstraint, NullEvidence, ProfileDelta,
+    RevisionAttempt, RevisionStep, RevisionTestOutcome,
 };
 use unclip_epistemic::{
-    hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
-    Experimental, FrameVersion, PluginId, Timestamp, Tracked,
+    DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken, Experimental,
+    FrameVersion, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Delta, MeasurementValue, Reading};
 
@@ -87,19 +87,16 @@ fn prior(outcome: RevisionTestOutcome, step: RevisionStep) -> Experimental<Revis
     }
     let params = json!({"fixture": "prior"});
     ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
-            producer: PluginId::new("experiment.revision-ladder"),
-            algorithm: "minimal_revision_dynamic_coupling".into(),
-            version: semver::Version::new(0, 1, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
+            PluginId::new("experiment.revision-ladder"),
+            semver::Version::new(0, 1, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("minimal_revision_dynamic_coupling")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(RevisionAttempt {
@@ -172,7 +169,6 @@ fn fixture(
     include_null: bool,
     constraint_status: Option<ConstraintStatus>,
 ) -> (
-    Engine,
     Tracked<CandidateProposal>,
     unclip_epistemic::Calculated<unclip_engine::CounterfactualSnapshot>,
     Experimental<CounterfactualEvidence>,
@@ -202,19 +198,16 @@ fn fixture(
     }
     let params = json!({"fixture": "motif"});
     let experiment = ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("motif-experiment"),
-            producer: PluginId::new("experiment.counterfactual"),
-            algorithm: "held_out_counterfactual_comparison".into(),
-            version: semver::Version::new(0, 5, 0),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("motif-experiment"),
+            PluginId::new("experiment.counterfactual"),
+            semver::Version::new(0, 5, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("held_out_counterfactual_comparison")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(CounterfactualEvidence {
@@ -236,7 +229,7 @@ fn fixture(
         pareto_assessment: None,
         pareto: None,
     });
-    (engine, candidate, counterfactual, experiment)
+    (candidate, counterfactual, experiment)
 }
 
 #[test]
@@ -245,21 +238,19 @@ fn graph_motif_records_the_ordered_structural_attempt() {
         RevisionTestOutcome::Insufficient,
         RevisionStep::DynamicCoupling,
     );
-    let (engine, candidate, counterfactual, experiment) =
-        fixture(true, Some(ConstraintStatus::Satisfied));
+    let (candidate, counterfactual, experiment) = fixture(true, Some(ConstraintStatus::Satisfied));
     let record = || {
-        engine
-            .record_structural_test(
-                &prior,
-                &candidate,
-                &counterfactual,
-                &experiment,
-                RevisionTestOutcome::Sufficient,
-                "the recurring motif explains held-out evidence after coupling failed",
-                "structural-ladder",
-                Timestamp::new("now"),
-            )
-            .unwrap()
+        record_structural_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Sufficient,
+            "the recurring motif explains held-out evidence after coupling failed",
+            "structural-ladder",
+            Timestamp::new("now"),
+        )
+        .unwrap()
     };
     let attempt = record();
     assert_eq!(attempt, record());
@@ -278,7 +269,7 @@ fn graph_motif_records_the_ordered_structural_attempt() {
 
 #[test]
 fn structural_step_rejects_sufficient_or_out_of_order_prior_attempts() {
-    let (engine, candidate, counterfactual, experiment) = fixture(true, None);
+    let (candidate, counterfactual, experiment) = fixture(true, None);
     for prior in [
         prior(
             RevisionTestOutcome::Sufficient,
@@ -286,18 +277,17 @@ fn structural_step_rejects_sufficient_or_out_of_order_prior_attempts() {
         ),
         prior(RevisionTestOutcome::Insufficient, RevisionStep::DeltaE),
     ] {
-        assert!(engine
-            .record_structural_test(
-                &prior,
-                &candidate,
-                &counterfactual,
-                &experiment,
-                RevisionTestOutcome::Insufficient,
-                "reviewed",
-                "structural-ladder",
-                Timestamp::new("now"),
-            )
-            .is_err());
+        assert!(record_structural_test(
+            &prior,
+            &candidate,
+            &counterfactual,
+            &experiment,
+            RevisionTestOutcome::Insufficient,
+            "reviewed",
+            "structural-ladder",
+            Timestamp::new("now"),
+        )
+        .is_err());
     }
 }
 
@@ -307,59 +297,54 @@ fn structural_step_requires_motif_null_constraints_and_supported_kind() {
         RevisionTestOutcome::Insufficient,
         RevisionStep::DynamicCoupling,
     );
-    let (engine, candidate, counterfactual, experiment) = fixture(false, None);
-    assert!(engine
-        .record_structural_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "structural-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    let (candidate, counterfactual, experiment) = fixture(false, None);
+    assert!(record_structural_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "structural-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 
-    let (engine, candidate, counterfactual, experiment) =
-        fixture(true, Some(ConstraintStatus::Violated));
-    assert!(engine
-        .record_structural_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "reviewed",
-            "structural-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
-    assert!(engine
-        .record_structural_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "structural-ladder",
-            Timestamp::new("now"),
-        )
-        .is_ok());
+    let (candidate, counterfactual, experiment) = fixture(true, Some(ConstraintStatus::Violated));
+    assert!(record_structural_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Sufficient,
+        "reviewed",
+        "structural-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
+    assert!(record_structural_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "structural-ladder",
+        Timestamp::new("now"),
+    )
+    .is_ok());
 
     let mut unsupported = proposal();
     unsupported.kind = CandidateKind::CrossDomainStructure;
-    assert!(engine
-        .record_structural_test(
-            &prior,
-            &Tracked::from_recorded(DerivedId::new("motif-candidate"), unsupported),
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "structural-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    assert!(record_structural_test(
+        &prior,
+        &Tracked::from_recorded(DerivedId::new("motif-candidate"), unsupported),
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "structural-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 }

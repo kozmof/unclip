@@ -6,12 +6,13 @@ use unclip_domain::{
     RelationId, Unit, UnitId, UnitKind,
 };
 use unclip_engine::{
-    ComparisonPair, CounterfactualEvidence, DeltaProfile, Engine, MeasurementRun, NullEvidence,
-    NullInputs, ProfileDelta, RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    evaluate_null_models_with_inputs, record_structural_test, ComparisonPair,
+    CounterfactualEvidence, DeltaProfile, Engine, MeasurementRun, NullEvidence, NullInputs,
+    ProfileDelta, RevisionAttempt, RevisionStep, RevisionTestOutcome,
 };
 use unclip_epistemic::{
-    hash_params, Calculated, DependencyCollector, DerivedId, DomainVersion, EmitMetadata,
-    ExperimentToken, Experimental, FrameVersion, PluginId, Timestamp, Tracked,
+    Calculated, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
+    Experimental, FrameVersion, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Delta, MeasurementValue, Reading};
 use unclip_plugin::{EngineProfile, PluginSelection};
@@ -113,7 +114,7 @@ fn evaluate_null(
         ..Default::default()
     })?;
     let baseline = baseline.map(|value| Tracked::from_recorded(DerivedId::new("baseline"), value));
-    let mut results = engine.evaluate_null_models_with_inputs(
+    let mut results = evaluate_null_models_with_inputs(
         &plan,
         &Tracked::from_recorded(DerivedId::new("role-candidate"), candidate),
         NullInputs {
@@ -221,19 +222,16 @@ fn prior() -> Experimental<RevisionAttempt> {
     }
     let params = json!({"fixture":"semantic-role-prior"});
     ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
-            producer: PluginId::new("experiment.revision-ladder"),
-            algorithm: "minimal_revision_dynamic_coupling".into(),
-            version: "0.1.0".parse().unwrap(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
+            PluginId::new("experiment.revision-ladder"),
+            "0.1.0".parse().unwrap(),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("minimal_revision_dynamic_coupling")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(RevisionAttempt {
@@ -273,7 +271,6 @@ fn comparison() -> DeltaProfile {
 fn structural_fixture(
     include_role_null: bool,
 ) -> (
-    Engine,
     Tracked<CandidateProposal>,
     Calculated<unclip_engine::CounterfactualSnapshot>,
     Experimental<CounterfactualEvidence>,
@@ -307,19 +304,16 @@ fn structural_fixture(
     }
     let params = json!({"fixture":"semantic-role"});
     let experiment = ExperimentToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("role-experiment"),
-            producer: PluginId::new("experiment.counterfactual"),
-            algorithm: "held_out_counterfactual_comparison".into(),
-            version: "0.5.0".parse().unwrap(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: Some(DomainVersion::new("1")),
-            frame_version: Some(FrameVersion::new("1")),
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new("role-experiment"),
+            PluginId::new("experiment.counterfactual"),
+            "0.5.0".parse().unwrap(),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("held_out_counterfactual_comparison")
+        .with_domain_version(DomainVersion::new("1"))
+        .with_frame_version(FrameVersion::new("1")),
         dependencies,
     )
     .emit(CounterfactualEvidence {
@@ -352,25 +346,24 @@ fn structural_fixture(
         pareto_assessment: None,
         pareto: None,
     });
-    (engine, candidate, counterfactual, experiment)
+    (candidate, counterfactual, experiment)
 }
 
 #[test]
 fn semantic_role_records_only_with_exact_structural_null_evidence() {
     let prior = prior();
-    let (engine, candidate, counterfactual, experiment) = structural_fixture(true);
-    let attempt = engine
-        .record_structural_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "the exact role signature explains held-out evidence after coupling failed",
-            "role-ladder",
-            Timestamp::new("now"),
-        )
-        .unwrap();
+    let (candidate, counterfactual, experiment) = structural_fixture(true);
+    let attempt = record_structural_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Sufficient,
+        "the exact role signature explains held-out evidence after coupling failed",
+        "role-ladder",
+        Timestamp::new("now"),
+    )
+    .unwrap();
     assert_eq!(attempt.value().step, RevisionStep::Structural);
     assert_eq!(attempt.value().prior, Some(prior.id().clone()));
     assert_eq!(
@@ -388,17 +381,16 @@ fn semantic_role_records_only_with_exact_structural_null_evidence() {
         ])
     );
 
-    let (_, candidate, counterfactual, experiment) = structural_fixture(false);
-    assert!(engine
-        .record_structural_test(
-            &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "role-ladder",
-            Timestamp::new("now"),
-        )
-        .is_err());
+    let (candidate, counterfactual, experiment) = structural_fixture(false);
+    assert!(record_structural_test(
+        &prior,
+        &candidate,
+        &counterfactual,
+        &experiment,
+        RevisionTestOutcome::Insufficient,
+        "reviewed",
+        "role-ladder",
+        Timestamp::new("now"),
+    )
+    .is_err());
 }

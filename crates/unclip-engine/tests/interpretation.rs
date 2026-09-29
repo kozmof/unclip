@@ -79,7 +79,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         .await
         .unwrap();
     measurements
-        .insert_empirical_structure(EmpiricalStructureRecord {
+        .insert_unverified_structure(EmpiricalStructureRecord {
             id: source_id.0.clone(),
             profile_id: None,
             provenance: source_id.clone(),
@@ -223,22 +223,18 @@ async fn rejects_missing_run_or_sources_and_duplicate_source_ids() {
 async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
     let params = interpreter_params();
     let interpreted = InterpretationToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new("interpreted/structure"),
-            producer: PluginId::new("interpret.fixture"),
-            algorithm: "interpret.fixture".into(),
-            version: semver::Version::new(1, 0, 0),
-            params_hash: hash_params(&params),
-            params: params.clone(),
-            source: None,
-            timestamp: Timestamp::new("now"),
-            domain_version: None,
-            frame_version: None,
-            model: Some(ModelRef::versioned(
-                "fixture/semantic-labeler",
-                "2026-09-23",
-            )),
-        },
+        EmitMetadata::new(
+            DerivedId::new("interpreted/structure"),
+            PluginId::new("interpret.fixture"),
+            semver::Version::new(1, 0, 0),
+            &params,
+            Timestamp::new("now"),
+        )
+        .with_algorithm("interpret.fixture")
+        .with_model(Some(ModelRef::versioned(
+            "fixture/semantic-labeler",
+            "2026-09-23",
+        ))),
         DependencyCollector::default(),
     )
     .emit(EmpiricalStructure {

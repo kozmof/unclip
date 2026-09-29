@@ -3,8 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
 };
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_observe::Observation;
@@ -143,76 +142,69 @@ pub struct NullInputs<'a> {
     pub rankings: &'a [Tracked<unclip_observe::PartialRanking>],
     pub domain: Option<&'a Tracked<unclip_domain::DomainSnapshot>>,
 }
-impl super::Engine {
-    /// Evaluate explicitly selected nulls on the caller's evidence split.
-    pub fn evaluate_null_models(
-        &self,
-        plan: &RunPlan,
-        candidate: &Tracked<CandidateProposal>,
-        observations: &[Tracked<Observation>],
-        run: super::MeasurementRun<'_>,
-    ) -> Result<Vec<Calculated<Reading>>> {
-        self.evaluate_null_models_with_rankings(plan, candidate, observations, &[], run)
-    }
-    pub fn evaluate_null_models_with_rankings(
-        &self,
-        plan: &RunPlan,
-        candidate: &Tracked<CandidateProposal>,
-        observations: &[Tracked<Observation>],
-        rankings: &[Tracked<unclip_observe::PartialRanking>],
-        run: super::MeasurementRun<'_>,
-    ) -> Result<Vec<Calculated<Reading>>> {
-        self.evaluate_null_models_with_inputs(
-            plan,
+
+pub fn evaluate_null_models_with_inputs(
+    plan: &RunPlan,
+    candidate: &Tracked<CandidateProposal>,
+    inputs: NullInputs<'_>,
+    run: super::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<Reading>>> {
+    let mut models = plan.null_models.iter().collect::<Vec<_>>();
+    models.sort_by_key(|model| &model.descriptor().id);
+    let mut results = Vec::new();
+    let empty = serde_json::json!({});
+    for model in models {
+        let descriptor = model.descriptor();
+        let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        let ctx = NullCtx::new(
             candidate,
-            NullInputs {
-                observations,
-                rankings,
-                domain: None,
-            },
-            run,
+            inputs.observations,
+            params,
+            DependencyCollector::default(),
         )
+        .with_rankings(inputs.rankings)
+        .with_domain(inputs.domain);
+        let token = ctx.calculation_token(EmitMetadata::new(
+            DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
+            descriptor.id.clone(),
+            descriptor.version.clone(),
+            params,
+            run.timestamp.clone(),
+        ));
+        results.push(model.evaluate(&ctx, token)?);
     }
-    pub fn evaluate_null_models_with_inputs(
-        &self,
-        plan: &RunPlan,
-        candidate: &Tracked<CandidateProposal>,
-        inputs: NullInputs<'_>,
-        run: super::MeasurementRun<'_>,
-    ) -> Result<Vec<Calculated<Reading>>> {
-        let mut models = plan.null_models.iter().collect::<Vec<_>>();
-        models.sort_by_key(|model| &model.descriptor().id);
-        let mut results = Vec::new();
-        let empty = serde_json::json!({});
-        for model in models {
-            let descriptor = model.descriptor();
-            let params = run.params.get(&descriptor.id).unwrap_or(&empty);
-            let ctx = NullCtx::new(
-                candidate,
-                inputs.observations,
-                params,
-                DependencyCollector::default(),
-            )
-            .with_rankings(inputs.rankings)
-            .with_domain(inputs.domain);
-            let token = ctx.calculation_token(EmitMetadata {
-                id: DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
-                producer: descriptor.id.clone(),
-                algorithm: descriptor.id.0.clone(),
-                version: descriptor.version.clone(),
-                params: params.clone(),
-                params_hash: hash_params(params),
-                source: None,
-                timestamp: run.timestamp.clone(),
-                domain_version: None,
-                frame_version: None,
-                model: None,
-            });
-            results.push(model.evaluate(&ctx, token)?);
-        }
-        Ok(results)
-    }
+    Ok(results)
 }
+
+pub fn evaluate_null_models_with_rankings(
+    plan: &RunPlan,
+    candidate: &Tracked<CandidateProposal>,
+    observations: &[Tracked<Observation>],
+    rankings: &[Tracked<unclip_observe::PartialRanking>],
+    run: super::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<Reading>>> {
+    evaluate_null_models_with_inputs(
+        plan,
+        candidate,
+        NullInputs {
+            observations,
+            rankings,
+            domain: None,
+        },
+        run,
+    )
+}
+
+/// Evaluate explicitly selected nulls on the caller's evidence split.
+pub fn evaluate_null_models(
+    plan: &RunPlan,
+    candidate: &Tracked<CandidateProposal>,
+    observations: &[Tracked<Observation>],
+    run: super::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<Reading>>> {
+    evaluate_null_models_with_rankings(plan, candidate, observations, &[], run)
+}
+
 #[cfg(test)]
 mod tests {
     use super::overlap_tail;

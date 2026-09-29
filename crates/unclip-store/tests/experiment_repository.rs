@@ -4,7 +4,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use serde_json::json;
 use unclip_domain::{DomainId, DomainSnapshot, PropertyValue, Unit, UnitId, UnitKind};
 use unclip_epistemic::{
-    hash_params, ops, DependencyCollector, Derived, DerivedId, EmitMetadata, EmitToken, Operation,
+    ops, DependencyCollector, Derived, DerivedId, EmitMetadata, EmitToken, Operation,
     OperationKind, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Delta, MeasurementValue};
@@ -29,19 +29,14 @@ fn derived<T, O: OperationKind>(
     }
     let params = json!({"fixture":true});
     EmitToken::from_harness(
-        EmitMetadata {
-            id: DerivedId::new(id),
-            producer: PluginId::new(producer),
-            algorithm: producer.into(),
-            version: "0.1.0".parse().unwrap(),
-            params_hash: hash_params(&params),
-            params,
-            source: None,
-            timestamp: Timestamp::new("done"),
-            domain_version: None,
-            frame_version: None,
-            model: None,
-        },
+        EmitMetadata::new(
+            DerivedId::new(id),
+            PluginId::new(producer),
+            "0.1.0".parse().unwrap(),
+            &params,
+            Timestamp::new("done"),
+        )
+        .with_algorithm(producer),
         dependencies,
     )
     .emit(value)
