@@ -3,7 +3,12 @@
 //! the validation edges) that the per-crate unit tests do not reach.
 //!
 //! No extra dev-dependencies: the binary is located via `CARGO_BIN_EXE_unclip`
-//! (set by Cargo for integration tests) and each test uses its own temp DB.
+//! and scratch directories are created under `CARGO_TARGET_TMPDIR` (both set by
+//! Cargo for integration tests), so each test uses its own temp DB inside the
+//! target directory rather than the system temp directory. Sandboxed and
+//! hardened CI environments frequently deny writes to the system temp
+//! directory; keeping scratch state under `target/` makes these tests depend
+//! only on the directory Cargo is already writing to.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -18,7 +23,7 @@ impl TempDb {
     fn new() -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
             "unclip-cli-test-{}-{}-{}",
             std::process::id(),
             n,
