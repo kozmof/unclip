@@ -35,7 +35,12 @@ impl Default for SpectrumComparator {
                 id: PluginId::new("compare.spectrum"),
                 version: semver::Version::new(0, 1, 0),
                 supports: &[MeasurementKind::Matrix],
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["minimum_samples","tolerance","max_sweeps"],"properties":{"minimum_samples":{"type":"integer","minimum":2},"tolerance":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1},"max_sweeps":{"type":"integer","minimum":1}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["minimum_samples","tolerance","max_sweeps"],
+                    "properties":{"minimum_samples":{"type":"integer","minimum":2},"tolerance":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1},"max_sweeps":{"type":"integer","minimum":1}}
+                }"#,
             },
         }
     }

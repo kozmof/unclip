@@ -43,7 +43,12 @@ impl Default for ChangePointAlignmentComparator {
                 id: PluginId::new("compare.change-point-alignment"),
                 version: semver::Version::new(0, 1, 0),
                 supports: &[MeasurementKind::Events],
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["max_shift_steps"],"properties":{"max_shift_steps":{"type":"integer","minimum":0}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["max_shift_steps"],
+                    "properties":{"max_shift_steps":{"type":"integer","minimum":0}}
+                }"#,
             },
         }
     }

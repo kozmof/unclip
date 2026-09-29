@@ -17,7 +17,12 @@ const EVIDENCE: &[EvidenceRequirement] = &[
     EvidenceRequirement::MinSamples(2),
 ];
 const PRODUCES: &[MeasurementKind] = &[MeasurementKind::Structured];
-const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["mappings","minimum_transitions"],"properties":{"mappings":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["source_left","source_right","target_left","target_right"],"properties":{"source_left":{"type":"string","minLength":1},"source_right":{"type":"string","minLength":1},"target_left":{"type":"string","minLength":1},"target_right":{"type":"string","minLength":1}}}},"minimum_transitions":{"type":"integer","minimum":1}}}"#;
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["mappings","minimum_transitions"],
+    "properties":{"mappings":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["source_left","source_right","target_left","target_right"],"properties":{"source_left":{"type":"string","minLength":1},"source_right":{"type":"string","minLength":1},"target_left":{"type":"string","minLength":1},"target_right":{"type":"string","minLength":1}}}},"minimum_transitions":{"type":"integer","minimum":1}}
+}"#;
 
 pub struct CrossProductTransferSensor {
     descriptor: SensorDescriptor,

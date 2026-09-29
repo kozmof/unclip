@@ -14,7 +14,12 @@ impl Default for WeightChangeNull {
             descriptor: PluginDescriptor {
                 id: PluginId::new("null.weight-change"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["absolute_tolerance"],"properties":{"absolute_tolerance":{"type":"number","minimum":0}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["absolute_tolerance"],
+                    "properties":{"absolute_tolerance":{"type":"number","minimum":0}}
+                }"#,
             },
         }
     }

@@ -23,7 +23,12 @@ impl Default for PairwiseCouplingGenerator {
             descriptor: PluginDescriptor {
                 id: PluginId::new("generate.pairwise-coupling"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["metric","threshold","minimum_samples"],"properties":{"metric":{"enum":["relative_rank_variance","spearman","kendall","mutual_information"]},"threshold":{"type":"number"},"minimum_samples":{"type":"integer","minimum":2}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["metric","threshold","minimum_samples"],
+                    "properties":{"metric":{"enum":["relative_rank_variance","spearman","kendall","mutual_information"]},"threshold":{"type":"number"},"minimum_samples":{"type":"integer","minimum":2}}
+                }"#,
             },
         }
     }

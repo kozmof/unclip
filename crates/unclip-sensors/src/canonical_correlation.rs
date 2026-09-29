@@ -16,7 +16,12 @@ use unclip_plugin::{
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain];
 const EVIDENCE: &[EvidenceRequirement] = &[EvidenceRequirement::MinSamples(2)];
 const PRODUCES: &[MeasurementKind] = &[MeasurementKind::Structured];
-const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["minimum_samples","regularization","tolerance","max_sweeps"],"properties":{"minimum_samples":{"type":"integer","minimum":2},"regularization":{"type":"number","minimum":0},"tolerance":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1},"max_sweeps":{"type":"integer","minimum":1}}}"#;
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["minimum_samples","regularization","tolerance","max_sweeps"],
+    "properties":{"minimum_samples":{"type":"integer","minimum":2},"regularization":{"type":"number","minimum":0},"tolerance":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1},"max_sweeps":{"type":"integer","minimum":1}}
+}"#;
 
 pub struct CanonicalCorrelationSensor {
     descriptor: SensorDescriptor,

@@ -54,7 +54,12 @@ impl SelectedPairSensor {
             SelectedPairStatistic::CoForeground => (
                 "sensor.co-foreground",
                 &[EvidenceRequirement::MinSamples(1)],
-                r#"{"type":"object","additionalProperties":false,"required":["left","right","foreground_rank"],"properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"foreground_rank":{"type":"integer","minimum":1}}}"#,
+                r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["left","right","foreground_rank"],
+                    "properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"foreground_rank":{"type":"integer","minimum":1}}
+                }"#,
             ),
             SelectedPairStatistic::ConditionalMutualInformation => (
                 "sensor.conditional-mutual-information",
@@ -92,7 +97,12 @@ impl SelectedPairSensor {
     }
 }
 
-const CONDITIONAL_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["left","right"],"properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"conditioning_variables":{"type":"array","items":{"type":"string","minLength":1},"maxItems":1,"uniqueItems":true,"default":[]}}}"#;
+const CONDITIONAL_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["left","right"],
+    "properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"conditioning_variables":{"type":"array","items":{"type":"string","minLength":1},"maxItems":1,"uniqueItems":true,"default":[]}}
+}"#;
 
 fn invalid(message: impl Into<String>) -> PluginError {
     PluginError::Message(message.into())

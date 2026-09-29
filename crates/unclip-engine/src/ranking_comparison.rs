@@ -54,7 +54,12 @@ impl Default for RboComparator {
                 id: PluginId::new("compare.rbo"),
                 version: semver::Version::new(0, 1, 0),
                 supports: &[MeasurementKind::Ranking],
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["p"],"properties":{"p":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["p"],
+                    "properties":{"p":{"type":"number","exclusiveMinimum":0,"exclusiveMaximum":1}}
+                }"#,
             },
         }
     }

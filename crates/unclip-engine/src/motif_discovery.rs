@@ -14,7 +14,12 @@ impl Default for RecurringMotifGenerator {
             descriptor: PluginDescriptor {
                 id: PluginId::new("generate.recurring-motif"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["minimum_observations"],"properties":{"minimum_observations":{"type":"integer","minimum":2}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["minimum_observations"],
+                    "properties":{"minimum_observations":{"type":"integer","minimum":2}}
+                }"#,
             },
         }
     }

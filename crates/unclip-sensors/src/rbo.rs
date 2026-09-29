@@ -28,7 +28,11 @@ impl Default for RboSensor {
                 applicability: APPLICABILITY,
                 evidence: &[],
                 produces: PRODUCES,
-                params_schema: r#"{"type":"object","properties":{"p":{"type":"number","exclusiveMinimum":0.0,"exclusiveMaximum":1.0,"default":0.9}},"additionalProperties":false}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "properties":{"p":{"type":"number","exclusiveMinimum":0.0,"exclusiveMaximum":1.0,"default":0.9}},
+                    "additionalProperties":false
+                }"#,
             },
         }
     }

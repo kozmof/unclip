@@ -46,7 +46,12 @@ impl Default for PairwiseMatrixComparator {
                 id: PluginId::new("compare.pairwise-matrix"),
                 version: semver::Version::new(0, 1, 0),
                 supports: &[MeasurementKind::Matrix],
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["minimum_samples"],"properties":{"minimum_samples":{"type":"integer","minimum":2}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["minimum_samples"],
+                    "properties":{"minimum_samples":{"type":"integer","minimum":2}}
+                }"#,
             },
         }
     }

@@ -14,7 +14,12 @@ use unclip_plugin::{
 // to the model provider untouched, so its keys are the provider's vocabulary and
 // not this plugin's. Saying so explicitly distinguishes "free-form by design"
 // from a sub-schema nobody constrained.
-const PARAMS_SCHEMA: &str = r#"{"type":"object","required":["model","model_version"],"properties":{"model":{"type":"string","minLength":1},"model_version":{"type":"string","minLength":1},"context":{"type":"string"},"generation":{"type":"object","additionalProperties":true}},"additionalProperties":false}"#;
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "required":["model","model_version"],
+    "properties":{"model":{"type":"string","minLength":1},"model_version":{"type":"string","minLength":1},"context":{"type":"string"},"generation":{"type":"object","additionalProperties":true}},
+    "additionalProperties":false
+}"#;
 const INSTRUCTIONS: &str = "Assign a concise provisional semantic label and explanation to the supplied validated empirical structure. Treat the structure as the primary evidence. The label is a secondary annotation and must not replace or modify that structure. Return only JSON matching the supplied response schema. Do not present the interpretation as measurement evidence.";
 
 #[derive(Debug, Deserialize)]

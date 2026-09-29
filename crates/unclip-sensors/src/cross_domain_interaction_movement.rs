@@ -18,7 +18,12 @@ const EVIDENCE: &[EvidenceRequirement] = &[
     EvidenceRequirement::MinSamples(2),
 ];
 const PRODUCES: &[MeasurementKind] = &[MeasurementKind::Structured];
-const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["minimum_transitions","sequence"],"properties":{"minimum_transitions":{"type":"integer","minimum":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}}"#;
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["minimum_transitions","sequence"],
+    "properties":{"minimum_transitions":{"type":"integer","minimum":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}
+}"#;
 
 pub struct CrossDomainInteractionMovementSensor {
     descriptor: SensorDescriptor,

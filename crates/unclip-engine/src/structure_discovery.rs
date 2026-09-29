@@ -33,7 +33,12 @@ impl Default for CommunityCandidateGenerator {
             descriptor: PluginDescriptor {
                 id: PluginId::new("generate.community"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["metric","minimum_samples","minimum_members"],"properties":{"metric":{"enum":["spearman","kendall","mutual_information","relative_rank_variance"]},"minimum_samples":{"type":"integer","minimum":2},"minimum_members":{"type":"integer","minimum":2}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["metric","minimum_samples","minimum_members"],
+                    "properties":{"metric":{"enum":["spearman","kendall","mutual_information","relative_rank_variance"]},"minimum_samples":{"type":"integer","minimum":2},"minimum_members":{"type":"integer","minimum":2}}
+                }"#,
             },
         }
     }
@@ -44,7 +49,12 @@ impl Default for LatentAxisGenerator {
             descriptor: PluginDescriptor {
                 id: PluginId::new("generate.latent-axis"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["metric","minimum_samples","minimum_absolute_eigenvalue"],"properties":{"metric":{"enum":["spearman","kendall","mutual_information","relative_rank_variance"]},"minimum_samples":{"type":"integer","minimum":2},"minimum_absolute_eigenvalue":{"type":"number","exclusiveMinimum":0}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["metric","minimum_samples","minimum_absolute_eigenvalue"],
+                    "properties":{"metric":{"enum":["spearman","kendall","mutual_information","relative_rank_variance"]},"minimum_samples":{"type":"integer","minimum":2},"minimum_absolute_eigenvalue":{"type":"number","exclusiveMinimum":0}}
+                }"#,
             },
         }
     }

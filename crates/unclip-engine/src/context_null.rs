@@ -16,7 +16,12 @@ impl Default for ContextualCooccurrenceNull {
             descriptor: PluginDescriptor {
                 id: PluginId::new("null.contextual-cooccurrence"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["strata","minimum_observations"],"properties":{"minimum_observations":{"type":"integer","minimum":2},"strata":{"type":"array","minItems":1,"uniqueItems":true,"items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["field"],"properties":{"field":{"const":"source"}}},{"type":"object","additionalProperties":false,"required":["field","key"],"properties":{"field":{"const":"context"},"key":{"type":"string","minLength":1}}}]}}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["strata","minimum_observations"],
+                    "properties":{"minimum_observations":{"type":"integer","minimum":2},"strata":{"type":"array","minItems":1,"uniqueItems":true,"items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["field"],"properties":{"field":{"const":"source"}}},{"type":"object","additionalProperties":false,"required":["field","key"],"properties":{"field":{"const":"context"},"key":{"type":"string","minLength":1}}}]}}}
+                }"#,
             },
         }
     }

@@ -122,9 +122,24 @@ impl TemporalSensor {
     }
 }
 
-const LAG_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["source","target","lag"],"properties":{"source":{"type":"string","minLength":1},"target":{"type":"string","minLength":1},"lag":{"type":"integer","minimum":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}}"#;
-const DTW_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["left","right"],"properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}}"#;
-const CHANGE_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["unit","window","minimum_shift"],"properties":{"unit":{"type":"string","minLength":1},"window":{"type":"integer","minimum":1},"minimum_shift":{"type":"number","exclusiveMinimum":0},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}}"#;
+const LAG_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["source","target","lag"],
+    "properties":{"source":{"type":"string","minLength":1},"target":{"type":"string","minLength":1},"lag":{"type":"integer","minimum":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}
+}"#;
+const DTW_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["left","right"],
+    "properties":{"left":{"type":"string","minLength":1},"right":{"type":"string","minLength":1},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}
+}"#;
+const CHANGE_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["unit","window","minimum_shift"],
+    "properties":{"unit":{"type":"string","minLength":1},"window":{"type":"integer","minimum":1},"minimum_shift":{"type":"number","exclusiveMinimum":0},"sequence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["observation","position"],"properties":{"observation":{"type":"string"},"position":{"type":"integer"}}}}}
+}"#;
 
 fn invalid(error: impl std::fmt::Display) -> PluginError {
     PluginError::Message(error.to_string())

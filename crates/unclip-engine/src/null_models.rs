@@ -18,7 +18,12 @@ impl Default for RandomCooccurrenceNull {
             descriptor: PluginDescriptor {
                 id: PluginId::new("null.random-cooccurrence"),
                 version: semver::Version::new(0, 1, 0),
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["minimum_observations"],"properties":{"minimum_observations":{"type":"integer","minimum":2}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["minimum_observations"],
+                    "properties":{"minimum_observations":{"type":"integer","minimum":2}}
+                }"#,
             },
         }
     }

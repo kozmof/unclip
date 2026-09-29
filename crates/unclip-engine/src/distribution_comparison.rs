@@ -41,7 +41,12 @@ impl Default for JensenShannonComparator {
                 id: PluginId::new("compare.jensen-shannon"),
                 version: semver::Version::new(0, 1, 0),
                 supports: &[MeasurementKind::Distribution],
-                params_schema: r#"{"type":"object","additionalProperties":false,"required":["normalization"],"properties":{"normalization":{"enum":["probability","mass"]}}}"#,
+                params_schema: r#"{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["normalization"],
+                    "properties":{"normalization":{"enum":["probability","mass"]}}
+                }"#,
             },
         }
     }

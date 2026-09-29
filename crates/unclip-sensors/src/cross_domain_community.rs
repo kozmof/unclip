@@ -15,7 +15,12 @@ use unclip_plugin::{
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain];
 const EVIDENCE: &[EvidenceRequirement] = &[EvidenceRequirement::MinSamples(2)];
 const PRODUCES: &[MeasurementKind] = &[MeasurementKind::Structured];
-const PARAMS_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["minimum_mutual_information_bits","minimum_samples"],"properties":{"minimum_mutual_information_bits":{"type":"number","minimum":0},"minimum_samples":{"type":"integer","minimum":2}}}"#;
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "additionalProperties":false,
+    "required":["minimum_mutual_information_bits","minimum_samples"],
+    "properties":{"minimum_mutual_information_bits":{"type":"number","minimum":0},"minimum_samples":{"type":"integer","minimum":2}}
+}"#;
 
 pub struct CrossDomainCommunitySensor {
     descriptor: SensorDescriptor,
