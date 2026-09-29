@@ -5,23 +5,9 @@
 //! coordinates without copying either input domain's units or relations.
 
 use serde::{Deserialize, Serialize};
-use unclip_epistemic::{DerivedId, DomainVersion};
+use unclip_epistemic::{string_id, DerivedId, DomainVersion};
 
 use crate::{DomainId, UnitId};
-
-macro_rules! string_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(pub String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-    };
-}
 
 string_id!(ProductDomainId);
 string_id!(ProductDomainVersion);

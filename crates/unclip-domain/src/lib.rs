@@ -14,21 +14,7 @@ pub use product::{
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use unclip_epistemic::{DomainVersion, FrameVersion};
-
-macro_rules! string_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(pub String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-    };
-}
+use unclip_epistemic::{string_id, DomainVersion, FrameVersion};
 
 string_id!(DomainId);
 string_id!(UnitId);

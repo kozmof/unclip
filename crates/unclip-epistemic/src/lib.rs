@@ -27,7 +27,6 @@
 
 use std::{
     collections::BTreeSet,
-    fmt,
     marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -90,9 +89,31 @@ fn write_canonical_json(value: &serde_json::Value, output: &mut String) {
     }
 }
 
+/// Declare a transparent string newtype used as a stable identifier.
+///
+/// Identifiers across the workspace share one shape: an ordered, hashable
+/// wrapper that serializes as a bare string and displays as its contents.
+/// Declaring them through one macro keeps that contract identical in every
+/// crate rather than re-deriving it per module.
+///
+/// ```
+/// unclip_epistemic::string_id!(
+///     /// A branch coordinate.
+///     ExampleId
+/// );
+///
+/// let id = ExampleId::new("example");
+/// assert_eq!(id.to_string(), "example");
+/// assert_eq!(serde_json::to_string(&id).unwrap(), "\"example\"");
+/// ```
+#[macro_export]
 macro_rules! string_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(
+            Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash,
+            ::serde::Serialize, ::serde::Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -102,8 +123,8 @@ macro_rules! string_id {
             }
         }
 
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 f.write_str(&self.0)
             }
         }

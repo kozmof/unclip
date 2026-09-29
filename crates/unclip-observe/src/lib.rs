@@ -6,21 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
-use unclip_epistemic::SourceRef;
-
-macro_rules! string_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(pub String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-    };
-}
+use unclip_epistemic::{string_id, SourceRef};
 
 string_id!(ObservationId);
 string_id!(ObservedUnitId);
