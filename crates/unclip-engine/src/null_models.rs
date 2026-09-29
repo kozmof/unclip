@@ -74,17 +74,16 @@ impl NullModel for RandomCooccurrenceNull {
         }
         let candidate = ctx.candidate();
         let pattern = candidate.value.get("pattern");
-        if candidate.kind != CandidateKind::Relation
-            || pattern
+        let applicable = candidate.kind == CandidateKind::Relation
+            && pattern
                 .and_then(|p| p.get("matching"))
                 .and_then(|v| v.as_str())
-                != Some("exact_directed_observed_relation")
-        {
+                == Some("exact_directed_observed_relation");
+        let Some(pattern) = pattern.filter(|_| applicable) else {
             return Ok(token.emit(Reading::NotApplicable {
                 reason: "requires an exact observed-label relation proposal".into(),
             }));
-        }
-        let pattern = pattern.unwrap();
+        };
         let left = pattern
             .get("source_label")
             .and_then(|v| v.as_str())

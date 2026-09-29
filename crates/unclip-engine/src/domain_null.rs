@@ -85,17 +85,16 @@ fn evaluate(
         "exact_directed_observed_relation"
     };
     let pattern = candidate.value.get("pattern");
-    if candidate.kind != kind
-        || pattern
+    let applicable = candidate.kind == kind
+        && pattern
             .and_then(|p| p.get("matching"))
             .and_then(|v| v.as_str())
-            != Some(matching)
-    {
+            == Some(matching);
+    let Some(pattern) = pattern.filter(|_| applicable) else {
         return Ok(token.emit(Reading::NotApplicable {
             reason: format!("requires {matching} candidate evidence"),
         }));
-    }
-    let pattern = pattern.unwrap();
+    };
     // Validate supported candidate shapes even when the baseline is unavailable.
     let labels = if kind == CandidateKind::AtomicMeaning {
         vec![label(pattern, "observed_label")?]

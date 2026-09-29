@@ -70,16 +70,16 @@ impl NullModel for WeightChangeNull {
         }
         let candidate = ctx.candidate();
         let raw = candidate.value.get("pattern");
-        if candidate.kind != CandidateKind::WeightRevision
-            || raw.and_then(|p| p.get("matching")).and_then(|v| v.as_str())
-                != Some("numeric_property_revision")
-        {
+        let applicable = candidate.kind == CandidateKind::WeightRevision
+            && raw.and_then(|p| p.get("matching")).and_then(|v| v.as_str())
+                == Some("numeric_property_revision");
+        let Some(raw) = raw.filter(|_| applicable) else {
             return Ok(token.emit(Reading::NotApplicable {
                 reason: "requires an explicit numeric-property weight revision".into(),
             }));
-        }
-        let pattern: Pattern = serde_json::from_value(raw.unwrap().clone())
-            .map_err(|e| PluginError::Message(e.to_string()))?;
+        };
+        let pattern: Pattern =
+            serde_json::from_value(raw.clone()).map_err(|e| PluginError::Message(e.to_string()))?;
         if pattern.property.trim().is_empty() {
             return Err(invalid("weight property must be explicit and nonempty"));
         }
@@ -133,7 +133,7 @@ impl NullModel for WeightChangeNull {
         }
         Ok(token.emit(Reading::Value {value:MeasurementValue::Structured(serde_json::json!({
             "model":"retain_existing_numeric_property","domain_version_id":key,"matching":pattern.matching,
-            "target":raw.unwrap()["target"],"property":pattern.property,"baseline_value":baseline,"proposed_value":proposed,
+            "target":raw["target"],"property":pattern.property,"baseline_value":baseline,"proposed_value":proposed,
             "difference":difference,"absolute_tolerance":params.absolute_tolerance,"within_tolerance":difference.abs()<=params.absolute_tolerance,
             "scope":"numeric distance from retained baseline only; explanatory improvement requires held-out experiments",
             "decision":"no automatic candidate acceptance or rejection"
