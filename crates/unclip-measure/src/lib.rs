@@ -1,6 +1,15 @@
 //! Typed, sparse measurement profiles that preserve sensor disagreement.
 //!
-//! Profiles intentionally have no scalar conversion.
+//! A profile has no scalar conversion and no total order. Collapsing one to a
+//! single number, or ranking two of them, would discard the sensor
+//! disagreement the type exists to retain, so neither is implemented.
+//!
+//! These doctests show the rejected shapes. They assert only that the code
+//! fails to compile, not why — rustdoc treats an error code after
+//! `compile_fail` as advisory. The binding assertion is
+//! `absent_conversions::profile_implements_neither_scalar_conversion_nor_total_order`,
+//! which queries the trait bounds directly and so does not depend on compiler
+//! diagnostics at all.
 //!
 //! ```compile_fail
 //! use unclip_measure::MeasurementProfile;
@@ -17,6 +26,8 @@
 
 #![forbid(unsafe_code)]
 mod empirical;
+mod error;
+pub use error::MeasureError;
 mod independence;
 pub use independence::{
     ExpectedIndependentBehavior, IndependentMatrix, InvalidIndependentBehavior,
@@ -184,7 +195,13 @@ pub struct ScalarStatistic {
     pub sample_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Two trajectories disagree about which observation occupies a position.
+///
+/// `left` and `right` retain the observation each side had at `index` (`None`
+/// where a side ran out), so a caller can report the divergence rather than
+/// guess at it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("trajectories are not aligned at index {index}")]
 pub struct TrajectoryAlignmentError {
     pub index: usize,
     pub left: Option<ObservationId>,
@@ -1485,5 +1502,76 @@ mod tests {
             MeasurementValue::Partition(vec![]).kind(),
             MeasurementKind::Partition
         );
+    }
+}
+
+/// Assertions that `MeasurementProfile` does *not* implement certain traits.
+///
+/// A `compile_fail` doctest only proves that *some* error occurred, and a
+/// `trybuild` expectation that pins the rendered diagnostic breaks whenever the
+/// standard library's `From` impl list changes. This module asks the type
+/// system the question directly instead, so it is both precise and independent
+/// of compiler diagnostics.
+///
+/// Each probe relies on inherent impls taking precedence over trait impls when
+/// resolving an associated constant: `IMPLEMENTED` resolves to the inherent
+/// `true` only when the type actually satisfies the bound, and otherwise falls
+/// back to the blanket trait impl's `false`.
+#[cfg(test)]
+mod absent_conversions {
+    use super::MeasurementProfile;
+    use std::marker::PhantomData;
+
+    trait Absent {
+        const IMPLEMENTED: bool = false;
+    }
+
+    struct ScalarProbe<T>(PhantomData<T>);
+    impl<T> Absent for ScalarProbe<T> {}
+    impl<T: Into<f64>> ScalarProbe<T> {
+        const IMPLEMENTED: bool = true;
+    }
+
+    struct OrderProbe<T>(PhantomData<T>);
+    impl<T> Absent for OrderProbe<T> {}
+    impl<T: Ord> OrderProbe<T> {
+        const IMPLEMENTED: bool = true;
+    }
+
+    // These resolve at compile time, so they are `const` assertions: a
+    // violation fails the build rather than a test run.
+
+    /// The probes must report `true` for types that really do implement the
+    /// bound, or the negative assertions below would prove nothing.
+    #[test]
+    fn the_probes_detect_types_that_do_implement_the_bounds() {
+        const {
+            assert!(
+                <ScalarProbe<f32>>::IMPLEMENTED,
+                "scalar probe failed to detect a real Into<f64> impl"
+            )
+        };
+        const {
+            assert!(
+                <OrderProbe<u8>>::IMPLEMENTED,
+                "order probe failed to detect a real Ord impl"
+            )
+        };
+    }
+
+    #[test]
+    fn profile_implements_neither_scalar_conversion_nor_total_order() {
+        const {
+            assert!(
+                !<ScalarProbe<MeasurementProfile>>::IMPLEMENTED,
+                "MeasurementProfile gained an Into<f64> impl; a profile must not collapse to one number"
+            )
+        };
+        const {
+            assert!(
+                !<OrderProbe<MeasurementProfile>>::IMPLEMENTED,
+                "MeasurementProfile gained an Ord impl; profiles carry disagreement and are not ranked"
+            )
+        };
     }
 }

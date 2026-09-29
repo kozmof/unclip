@@ -44,24 +44,16 @@ struct MatrixData {
     cells: Vec<Vec<MatrixCell>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PairwiseMatrixError {
+    #[error("unit {0} appears more than once in the matrix frame")]
     DuplicateUnit(UnitId),
+    #[error("duplicate observation at index {index}")]
     DuplicateObservation { index: usize },
-    Alignment(TrajectoryAlignmentError),
+    #[error(transparent)]
+    Alignment(#[from] TrajectoryAlignmentError),
+    #[error("matrix must be square, symmetric, and ordered by unit id")]
     InvalidMatrix,
-}
-
-impl std::fmt::Display for PairwiseMatrixError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid pairwise matrix: {self:?}")
-    }
-}
-impl std::error::Error for PairwiseMatrixError {}
-impl From<TrajectoryAlignmentError> for PairwiseMatrixError {
-    fn from(error: TrajectoryAlignmentError) -> Self {
-        Self::Alignment(error)
-    }
 }
 
 impl TryFrom<MatrixData> for PairwiseMatrix {

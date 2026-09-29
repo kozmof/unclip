@@ -70,27 +70,13 @@ pub enum CrossDomainCommunityOutcome {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CrossDomainCommunityError {
+    #[error("cross-domain communities require a finite nonnegative MI threshold and at least two samples")]
     InvalidConfiguration,
+    #[error("cross-domain community input is malformed or ambiguous")]
     InvalidInteractionEvidence,
 }
-
-impl std::fmt::Display for CrossDomainCommunityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidConfiguration => write!(
-                f,
-                "cross-domain communities require a finite nonnegative MI threshold and at least two samples"
-            ),
-            Self::InvalidInteractionEvidence => {
-                write!(f, "cross-domain community input is malformed or ambiguous")
-            }
-        }
-    }
-}
-
-impl std::error::Error for CrossDomainCommunityError {}
 
 /// Find deterministic connected components in a thresholded bipartite MI graph.
 ///

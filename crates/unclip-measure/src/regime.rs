@@ -19,15 +19,9 @@ struct RegimeData {
     starts: Vec<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("regime partition requires a nonempty sequence and increasing in-range starts beginning at zero")]
 pub struct InvalidRegimePartition;
-
-impl std::fmt::Display for InvalidRegimePartition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "regime partition requires a nonempty sequence and increasing in-range starts beginning at zero")
-    }
-}
-impl std::error::Error for InvalidRegimePartition {}
 
 impl RegimePartition {
     /// Starts are zero-based sequence indexes, including zero. Every observation

@@ -93,69 +93,27 @@ pub enum CrossDomainMutualInformationOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CrossDomainMutualInformationError {
+    #[error("cross-domain MI requires at least two complete samples and at most 1024 bins")]
     InvalidConfiguration,
-    InvalidAxis {
-        left: UnitId,
-        right: UnitId,
-    },
-    DuplicateAxis {
-        left: UnitId,
-        right: UnitId,
-    },
+    #[error("cross-domain MI axis has an empty unit: {left} x {right}")]
+    InvalidAxis { left: UnitId, right: UnitId },
+    #[error("duplicate cross-domain MI axis: {left} x {right}")]
+    DuplicateAxis { left: UnitId, right: UnitId },
+    #[error("duplicate cross-domain MI observation {0}")]
     DuplicateObservation(ObservationId),
+    #[error("cross-domain MI observation {0} contains an invalid value")]
     InvalidSample(ObservationId),
+    #[error("cross-domain MI observation {observation} contains unexpected {side} unit {unit}")]
     UnexpectedUnit {
         observation: ObservationId,
         side: &'static str,
         unit: UnitId,
     },
+    #[error("cross-domain MI produced a non-finite result")]
     NonFiniteResult,
 }
-
-impl std::fmt::Display for CrossDomainMutualInformationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidConfiguration => {
-                write!(
-                    f,
-                    "cross-domain MI requires at least two complete samples and at most 1024 bins"
-                )
-            }
-            Self::InvalidAxis { left, right } => write!(
-                f,
-                "cross-domain MI axis has an empty unit: {} x {}",
-                left.0, right.0
-            ),
-            Self::DuplicateAxis { left, right } => write!(
-                f,
-                "duplicate cross-domain MI axis: {} x {}",
-                left.0, right.0
-            ),
-            Self::DuplicateObservation(observation) => {
-                write!(f, "duplicate cross-domain MI observation {}", observation.0)
-            }
-            Self::InvalidSample(observation) => write!(
-                f,
-                "cross-domain MI observation {} contains an invalid value",
-                observation.0
-            ),
-            Self::UnexpectedUnit {
-                observation,
-                side,
-                unit,
-            } => write!(
-                f,
-                "cross-domain MI observation {} contains unexpected {side} unit {}",
-                observation.0, unit.0
-            ),
-            Self::NonFiniteResult => write!(f, "cross-domain MI produced a non-finite result"),
-        }
-    }
-}
-
-impl std::error::Error for CrossDomainMutualInformationError {}
 
 /// Estimate per-axis discrete mutual information after explicit equal-width binning.
 ///

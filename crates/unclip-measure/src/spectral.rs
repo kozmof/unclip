@@ -29,31 +29,15 @@ pub struct SpectralDecomposition {
     pub sweeps: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SpectralError {
+    #[error("spectral tolerance must be finite and strictly between zero and one")]
     InvalidTolerance,
+    #[error("spectral decomposition did not converge after {sweeps} sweeps")]
     DidNotConverge { sweeps: usize },
+    #[error("spectral eigenvalue is outside the finite numeric range")]
     NonFiniteResult,
 }
-
-impl std::fmt::Display for SpectralError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidTolerance => write!(
-                f,
-                "spectral tolerance must be finite and strictly between zero and one"
-            ),
-            Self::DidNotConverge { sweeps } => write!(
-                f,
-                "spectral decomposition did not converge after {sweeps} sweeps"
-            ),
-            Self::NonFiniteResult => {
-                write!(f, "spectral eigenvalue is outside the finite numeric range")
-            }
-        }
-    }
-}
-impl std::error::Error for SpectralError {}
 
 /// Cyclic Jacobi eigendecomposition with fixed pivot and reduction order.
 /// `None` means empty input, an undefined/sparse cell, or a cell below the

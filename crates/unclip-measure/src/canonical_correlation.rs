@@ -91,60 +91,27 @@ pub enum CanonicalCorrelationOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CanonicalCorrelationError {
+    #[error("CCA requires at least two samples, nonnegative finite regularization, and a finite tolerance strictly between zero and one")]
     InvalidConfiguration,
-    DuplicateUnit {
-        side: &'static str,
-        unit: UnitId,
-    },
+    #[error("duplicate {side} CCA unit {unit}")]
+    DuplicateUnit { side: &'static str, unit: UnitId },
+    #[error("duplicate CCA observation {0}")]
     DuplicateObservation(ObservationId),
+    #[error("CCA observation {0} contains an invalid value")]
     InvalidSample(ObservationId),
+    #[error("CCA observation {observation} contains unexpected {side} unit {unit}")]
     UnexpectedUnit {
         observation: ObservationId,
         side: &'static str,
         unit: UnitId,
     },
-    DidNotConverge {
-        sweeps: usize,
-    },
+    #[error("CCA eigensolver did not converge after {sweeps} sweeps")]
+    DidNotConverge { sweeps: usize },
+    #[error("CCA produced a non-finite numeric result")]
     NonFiniteResult,
 }
-
-impl std::fmt::Display for CanonicalCorrelationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidConfiguration => write!(
-                f,
-                "CCA requires at least two samples, nonnegative finite regularization, and a finite tolerance strictly between zero and one"
-            ),
-            Self::DuplicateUnit { side, unit } => {
-                write!(f, "duplicate {side} CCA unit {}", unit.0)
-            }
-            Self::DuplicateObservation(observation) => {
-                write!(f, "duplicate CCA observation {}", observation.0)
-            }
-            Self::InvalidSample(observation) => {
-                write!(f, "CCA observation {} contains an invalid value", observation.0)
-            }
-            Self::UnexpectedUnit {
-                observation,
-                side,
-                unit,
-            } => write!(
-                f,
-                "CCA observation {} contains unexpected {side} unit {}",
-                observation.0, unit.0
-            ),
-            Self::DidNotConverge { sweeps } => {
-                write!(f, "CCA eigensolver did not converge after {sweeps} sweeps")
-            }
-            Self::NonFiniteResult => write!(f, "CCA produced a non-finite numeric result"),
-        }
-    }
-}
-
-impl std::error::Error for CanonicalCorrelationError {}
 
 /// Calculate regularized canonical correlations in fixed iteration order.
 ///

@@ -22,34 +22,17 @@ pub struct OrderedObservation {
 #[serde(try_from = "Vec<OrderedObservation>", into = "Vec<OrderedObservation>")]
 pub struct ObservationSequence(Vec<OrderedObservation>);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TemporalError {
+    #[error("change threshold must be finite and strictly positive")]
     InvalidChangeThreshold,
+    #[error("sequence position must increase at index {index}")]
     NonIncreasingPosition { index: usize },
+    #[error("duplicate observation at index {index}")]
     DuplicateObservation { index: usize },
+    #[error("trajectory does not match sequence at index {index}")]
     TrajectoryMismatch { index: usize },
 }
-
-impl std::fmt::Display for TemporalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidChangeThreshold => {
-                write!(f, "change threshold must be finite and strictly positive")
-            }
-            Self::NonIncreasingPosition { index } => {
-                write!(f, "sequence position must increase at index {index}")
-            }
-            Self::DuplicateObservation { index } => {
-                write!(f, "duplicate observation at index {index}")
-            }
-            Self::TrajectoryMismatch { index } => {
-                write!(f, "trajectory does not match sequence at index {index}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for TemporalError {}
 
 impl ObservationSequence {
     pub fn new(observations: Vec<OrderedObservation>) -> Result<Self, TemporalError> {

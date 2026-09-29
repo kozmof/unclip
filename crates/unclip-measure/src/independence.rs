@@ -54,32 +54,17 @@ pub enum ExpectedIndependentBehavior {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidIndependentBehavior {
+    #[error("independence values must be finite")]
     NonFiniteValue,
+    #[error("independence matrices must be rectangular")]
     RaggedMatrix,
+    #[error("independence distributions require unique nonempty categories and finite nonnegative values")]
     InvalidDistribution,
+    #[error("undefined independence behavior requires a nonempty reason")]
     EmptyReason,
 }
-
-impl std::fmt::Display for InvalidIndependentBehavior {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteValue => write!(formatter, "independence values must be finite"),
-            Self::RaggedMatrix => write!(formatter, "independence matrices must be rectangular"),
-            Self::InvalidDistribution => write!(
-                formatter,
-                "independence distributions require unique nonempty categories and finite nonnegative values"
-            ),
-            Self::EmptyReason => write!(
-                formatter,
-                "undefined independence behavior requires a nonempty reason"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for InvalidIndependentBehavior {}
 
 impl ExpectedIndependentBehavior {
     pub fn kind(&self) -> MeasurementKind {

@@ -80,52 +80,24 @@ pub enum CrossDomainInteractionMovementOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CrossDomainInteractionMovementError {
+    #[error("cross-domain interaction movement requires valid product binding and a nonzero transition floor")]
     InvalidConfiguration,
-    InvalidAxis {
-        left: UnitId,
-        right: UnitId,
-    },
+    #[error("invalid or duplicate product axis {left} x {right}")]
+    InvalidAxis { left: UnitId, right: UnitId },
+    #[error("duplicate cross-domain sample {0}")]
     DuplicateObservation(ObservationId),
+    #[error("cross-domain samples must exactly match the explicit observation sequence")]
     SequenceMismatch,
+    #[error("cross-domain sample contains unexpected unit {0}")]
     UnexpectedUnit(UnitId),
+    #[error("cross-domain sample {observation} contains a nonfinite value for {unit}")]
     NonFiniteValue {
         observation: ObservationId,
         unit: UnitId,
     },
 }
-
-impl std::fmt::Display for CrossDomainInteractionMovementError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidConfiguration => write!(
-                f,
-                "cross-domain interaction movement requires valid product binding and a nonzero transition floor"
-            ),
-            Self::InvalidAxis { left, right } => {
-                write!(f, "invalid or duplicate product axis {} x {}", left.0, right.0)
-            }
-            Self::DuplicateObservation(observation) => {
-                write!(f, "duplicate cross-domain sample {}", observation.0)
-            }
-            Self::SequenceMismatch => write!(
-                f,
-                "cross-domain samples must exactly match the explicit observation sequence"
-            ),
-            Self::UnexpectedUnit(unit) => {
-                write!(f, "cross-domain sample contains unexpected unit {}", unit.0)
-            }
-            Self::NonFiniteValue { observation, unit } => write!(
-                f,
-                "cross-domain sample {} contains a nonfinite value for {}",
-                observation.0, unit.0
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CrossDomainInteractionMovementError {}
 
 /// Measure direction agreement on every explicit product-frame interaction.
 ///

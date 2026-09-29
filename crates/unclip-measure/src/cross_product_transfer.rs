@@ -77,32 +77,15 @@ pub enum CrossProductTransferOutcome {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CrossProductTransferError {
+    #[error("cross-product transfer requires distinct product evidence, explicit one-to-one mappings, and a nonzero transition floor")]
     InvalidConfiguration,
+    #[error("cross-product transfer movement evidence is malformed")]
     InvalidMovementEvidence,
+    #[error("cross-product transfer mapping is empty, ambiguous, or does not name materialized movement axes")]
     InvalidMapping,
 }
-
-impl std::fmt::Display for CrossProductTransferError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidConfiguration => write!(
-                f,
-                "cross-product transfer requires distinct product evidence, explicit one-to-one mappings, and a nonzero transition floor"
-            ),
-            Self::InvalidMovementEvidence => {
-                write!(f, "cross-product transfer movement evidence is malformed")
-            }
-            Self::InvalidMapping => write!(
-                f,
-                "cross-product transfer mapping is empty, ambiguous, or does not name materialized movement axes"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CrossProductTransferError {}
 
 /// Compare signed movement concordance across explicitly mapped product axes.
 ///

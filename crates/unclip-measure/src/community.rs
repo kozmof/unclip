@@ -34,18 +34,9 @@ pub struct CommunityDetection {
     pub unassessed: Vec<UnassessedPair>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("community threshold must be finite and within the metric's range")]
 pub struct InvalidCommunityThreshold;
-
-impl std::fmt::Display for InvalidCommunityThreshold {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "community threshold must be finite and within the metric's range"
-        )
-    }
-}
-impl std::error::Error for InvalidCommunityThreshold {}
 
 /// Finds deterministic connected components of a thresholded pairwise graph.
 /// For Spearman, Kendall, and mutual information an edge qualifies at or above
