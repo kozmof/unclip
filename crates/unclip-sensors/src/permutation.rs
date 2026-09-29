@@ -9,6 +9,7 @@ use unclip_measure::{
 use unclip_observe::{ObservationId, ObservedUnitId};
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, Result, Sensor, SensorDescriptor,
+    SensorStage,
 };
 
 const APPLICABILITY: &[Capability] = &[Capability::Alignment, Capability::RankingValue];
@@ -25,6 +26,7 @@ impl Default for PermutationSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.permutation"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,

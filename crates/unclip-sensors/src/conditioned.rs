@@ -14,7 +14,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, PluginError, Result, Sensor,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 use crate::multi_observation::batch_states;
@@ -77,6 +77,7 @@ impl SelectedPairSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new(id),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[
                     Capability::MultiObservation,
                     Capability::RankingValue,

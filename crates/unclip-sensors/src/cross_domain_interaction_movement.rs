@@ -9,7 +9,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Capability, EvidenceRequirement, PluginError, ProductMeasureCtx, ProductSensor, Result,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain, Capability::Ordered];
@@ -30,6 +30,7 @@ impl Default for CrossDomainInteractionMovementSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.cross-domain-interaction-movement"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,
@@ -54,7 +55,7 @@ impl ProductSensor for CrossDomainInteractionMovementSensor {
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
         let config: CrossDomainInteractionMovementConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
+            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
         let product = ctx.product();
         let frame = ctx.frame();
         if frame.product != product.id
@@ -84,7 +85,7 @@ impl ProductSensor for CrossDomainInteractionMovementSensor {
             &samples,
             config,
         )
-        .map_err(invalid)?;
+        .map_err(crate::support::calculation)?;
 
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossDomainInteractionMovementOutcome::Value { movement } => {

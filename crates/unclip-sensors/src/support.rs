@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use unclip_domain::UnitId;
 use unclip_observe::{ObservationId, ObservedUnitId};
-use unclip_plugin::MeasureCtx;
+use unclip_plugin::{MeasureCtx, PluginError};
 
 pub(crate) struct SupportAnalysis {
     pub observed_nodes: usize,
@@ -78,4 +78,23 @@ pub(crate) fn analyze(ctx: &MeasureCtx<'_>) -> SupportAnalysis {
     }
 
     analysis
+}
+
+/// Carry a measurement calculation's own error across the plugin boundary.
+///
+/// The calculations in `unclip-measure` report precisely what failed. Rendering
+/// them to a string here would collapse "the solver did not converge" and "the
+/// input was too sparse" into the same opaque `PluginError::Message`, so they
+/// are wrapped instead and stay matchable by the engine.
+pub(crate) fn calculation(error: impl Into<unclip_measure::MeasureError>) -> PluginError {
+    PluginError::Measure(error.into())
+}
+
+/// Report plugin parameters that do not match the sensor's declared schema.
+///
+/// Bad configuration and a failed calculation are different problems with
+/// different fixes, so they get different variants rather than one opaque
+/// message.
+pub(crate) fn invalid_params(error: serde_json::Error) -> PluginError {
+    PluginError::InvalidParams(error.to_string())
 }

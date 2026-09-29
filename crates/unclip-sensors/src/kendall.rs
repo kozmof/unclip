@@ -5,7 +5,7 @@ use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{Measurement, MeasurementContext, MeasurementKind, MeasurementValue, Reading};
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, PluginError, Result, Sensor,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 use crate::permutation::{alignment_index, ranked_state};
@@ -24,6 +24,7 @@ impl Default for KendallSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.kendall"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,

@@ -8,7 +8,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Capability, CrossProductMeasureCtx, CrossProductSensor, EvidenceRequirement, PluginError,
-    Result, SensorDescriptor,
+    Result, SensorDescriptor, SensorStage,
 };
 
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain, Capability::Ordered];
@@ -29,6 +29,7 @@ impl Default for CrossProductTransferSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.cross-product-transfer"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,
@@ -92,7 +93,7 @@ impl CrossProductSensor for CrossProductTransferSensor {
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
         let config: CrossProductTransferConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
+            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
         let source_product = ctx.source_product();
         let source_frame = ctx.source_frame();
         let source_movement = ctx.source_movement();
@@ -109,8 +110,8 @@ impl CrossProductSensor for CrossProductTransferSensor {
             ));
         }
 
-        let outcome =
-            cross_product_transfer(source_movement, target_movement, config).map_err(invalid)?;
+        let outcome = cross_product_transfer(source_movement, target_movement, config)
+            .map_err(crate::support::calculation)?;
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossProductTransferOutcome::Value { transfer } => {
                 let unassessed = transfer.unassessed_transfers.clone();

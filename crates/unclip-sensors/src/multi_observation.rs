@@ -11,7 +11,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, PluginError, Result, Sensor,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 use crate::permutation::{alignment_index, ranked_state};
@@ -57,6 +57,7 @@ impl MultiObservationSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new(id),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[
                     Capability::MultiObservation,
                     Capability::RankingValue,
@@ -103,8 +104,7 @@ impl Sensor for MultiObservationSensor {
         let (frame_units, states) = batch_states(ctx)?;
         let ranks = construct_rank_trajectories(&frame_units, &states);
         let reading = if let Some(metric) = self.metric {
-            let matrix = pairwise_matrix(&ranks, metric)
-                .map_err(|error| PluginError::Message(error.to_string()))?;
+            let matrix = pairwise_matrix(&ranks, metric).map_err(crate::support::calculation)?;
             Reading::Value {
                 value: MeasurementValue::PairwiseMatrix(matrix),
             }

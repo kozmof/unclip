@@ -10,7 +10,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Capability, EvidenceRequirement, PluginError, ProductMeasureCtx, ProductSensor, Result,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain];
@@ -28,6 +28,7 @@ impl Default for CanonicalCorrelationSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.canonical-correlation"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,
@@ -79,15 +80,15 @@ impl ProductSensor for CanonicalCorrelationSensor {
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
         let config: CanonicalCorrelationConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
+            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
         let (left_units, right_units) = frame_units(ctx)?;
         let samples = ctx
             .samples()
             .iter()
             .map(|sample| ctx.read(sample).clone())
             .collect::<Vec<_>>();
-        let outcome =
-            canonical_correlation(&left_units, &right_units, &samples, config).map_err(invalid)?;
+        let outcome = canonical_correlation(&left_units, &right_units, &samples, config)
+            .map_err(crate::support::calculation)?;
 
         let (reading, sample_count, excluded, status) = match outcome {
             CanonicalCorrelationOutcome::Value { analysis } => {

@@ -1,5 +1,40 @@
 //! Plugin contracts, capability-aware contexts, and explicit runtime registry.
 //!
+//! # Writing a plugin
+//!
+//! Every plugin family follows the same three-part shape.
+//!
+//! 1. **A descriptor** states the plugin's identity, version, parameter schema,
+//!    and — for sensors — its stage, the inputs it understands
+//!    ([`Capability`]), the evidence it needs ([`EvidenceRequirement`]), and
+//!    the measurement kinds it produces. The engine reads the descriptor to
+//!    decide whether to call the plugin at all.
+//! 2. **A context** (`MeasureCtx`, `InferCtx`, `CompareCtx`, `CandidateCtx`,
+//!    `NullCtx`, `InterpretCtx`) hands over exactly the inputs that family may
+//!    see. Contexts expose their inputs only through methods, and those methods
+//!    record each read, so a plugin cannot consume an input without that input
+//!    appearing in the result's provenance.
+//! 3. **An emit token** is the only way to construct the plugin's return value.
+//!    A `Calculated<T>` cannot be built by hand, and an `Inferred<T>` cannot be
+//!    relabeled as `Calculated<T>`, so the operation recorded against a value
+//!    is always the operation that actually produced it.
+//!
+//! Which token a family receives is the family's epistemic claim, and it is not
+//! negotiable: sensors and comparators calculate, inferrers infer, interpreters
+//! interpret, experimenters test. Pick the family that matches the claim you
+//! can actually support.
+//!
+//! Register implementations on a [`Registry`], which rejects a plugin id that
+//! is already taken by any family, then select them by id and version in an
+//! `EngineProfile`. Recorded plans pin the resolved version and parameter hash,
+//! which is what lets `unclip level verify` re-run a calculation stage against
+//! its stored result.
+//!
+//! [`conformance`] provides reusable assertions for a sensor's side of this
+//! contract; first-party and third-party sensors are held to the same checks.
+//!
+//! # Type-level boundaries
+//!
 //! Interpreter implementations must return an epistemically typed value. A raw
 //! model response does not satisfy the contract.
 //!
@@ -58,7 +93,7 @@ use unclip_epistemic::{
 };
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainMutualInformation, CrossDomainSample, Delta,
-    EmpiricalStructure, Measurement, MeasurementKind, Reading,
+    EmpiricalStructure, MeasureError, Measurement, MeasurementKind, Reading,
 };
 use unclip_observe::{Alignment, Observation, PartialRanking};
 
@@ -81,28 +116,68 @@ pub enum PluginError {
         plugin: PluginId,
         kind: MeasurementKind,
     },
+    /// A measurement calculation failed, with the calculation's own error
+    /// retained.
+    ///
+    /// Sensors drive `unclip-measure` calculations that report precisely what
+    /// went wrong — which solver failed to converge, which sequence index broke
+    /// ordering. Converting those to `Message` at the plugin boundary would
+    /// leave a caller unable to tell "input was too sparse" from "the solver
+    /// diverged", so they cross the boundary intact.
+    #[error(transparent)]
+    Measure(#[from] MeasureError),
+    /// A plugin's parameters could not be deserialized against its schema.
+    ///
+    /// `serde_json::Error` is neither `Clone` nor `PartialEq`, so the rendered
+    /// message is retained rather than the error itself; the separate variant
+    /// still lets a caller distinguish bad configuration from a failed
+    /// calculation.
+    #[error("invalid plugin parameters: {0}")]
+    InvalidParams(String),
+    /// A failure with no more specific variant, carrying its own message.
     #[error("{0}")]
     Message(String),
 }
 
 pub type Result<T> = std::result::Result<T, PluginError>;
 
+/// An input shape a sensor is able to work with.
+///
+/// Declared in `SensorDescriptor::applicability`. This says what a sensor
+/// *understands*, independent of whether enough of it is present — that is
+/// [`EvidenceRequirement`]'s job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
+    /// Reads observations directly.
     Observation,
+    /// Reads observed-to-domain alignments.
     Alignment,
+    /// Reads ranked values.
     RankingValue,
+    /// Reads graph-shaped values.
     GraphValue,
+    /// Reads several observations together rather than one at a time.
     MultiObservation,
+    /// Requires inputs in a caller-established order.
     Ordered,
+    /// Operates on a product of two domains rather than a single domain.
     ProductDomain,
 }
 
+/// A precondition the engine checks before invoking a sensor.
+///
+/// Declared in `SensorDescriptor::evidence`. When a requirement is unmet the
+/// engine records a sparse [`Reading`] instead of calling the sensor, so a
+/// sensor is never asked to produce a number it has no basis for. These are
+/// necessary conditions, not sufficient ones: a sensor still validates the
+/// specific data it receives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvidenceRequirement {
+    /// Rankings must be total — no ties and no unknown tail.
     TotalOrder,
     /// Minimum input observations; sensors must also check complete usable samples.
     MinSamples(usize),
+    /// Inputs must carry a caller-established order.
     Ordered,
     /// An explicitly configured observation sequence; the sensor validates its contents.
     ExplicitOrder,
@@ -112,16 +187,46 @@ pub enum EvidenceRequirement {
     MinConditioningVariables(usize),
 }
 
+/// Whether a sensor can run against the inputs it was offered.
+///
+/// `NotApplicable` carries a reason because it is recorded, not discarded: a
+/// run states why a selected sensor produced nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Applicability {
     Applicable,
     NotApplicable { reason: String },
 }
 
+/// Where a sensor runs in the calculation pipeline.
+///
+/// The stages form a dependency chain and execute in `Ord` order. An
+/// explanation sensor establishes what the domain already accounts for; a
+/// residual sensor reads that to report what it does not; measurement sensors
+/// calculate over the result. `Engine::execute` also collects each stage's
+/// output into its own field of `PipelineResults`.
+///
+/// Stage is declared here, on the descriptor, rather than inferred from the
+/// plugin id. Inferring it would silently reclassify a renamed sensor and
+/// would make the explanation and residual stages unreachable for any sensor
+/// outside this workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum SensorStage {
+    /// Establishes what the domain accounts for. Runs first.
+    Explanation,
+    /// Reports what the explanation stage left unaccounted for.
+    Residual,
+    /// Calculates over established evidence. The default.
+    #[default]
+    Measurement,
+}
+
 #[derive(Debug, Clone)]
 pub struct SensorDescriptor {
     pub id: PluginId,
     pub version: Version,
+    /// Pipeline stage. See [`SensorStage`]; most sensors are
+    /// [`SensorStage::Measurement`].
+    pub stage: SensorStage,
     pub applicability: &'static [Capability],
     pub evidence: &'static [EvidenceRequirement],
     pub produces: &'static [MeasurementKind],
@@ -358,13 +463,58 @@ pub enum InferenceOutput {
 }
 
 #[async_trait]
+/// The boundary to an external model for the inference stage.
+///
+/// This is the one place a model provider is contacted during inference. It is
+/// a separate trait from [`Inferrer`] so the nondeterministic call is isolated
+/// from the logic that interprets its response, which keeps that logic
+/// testable against recorded responses.
+#[async_trait]
 pub trait InferenceIo: Send + Sync {
+    /// Request raw output for one source. The response is untrusted input and
+    /// must be validated by the calling [`Inferrer`].
     async fn request(&self, source: &SourceRef, params: &Params) -> Result<serde_json::Value>;
 }
 
+/// A deterministic calculation over established evidence.
+///
+/// Sensors are the workhorse plugin. The engine calls [`applies_to`] first and
+/// records a sparse [`Reading`] rather than invoking a sensor whose evidence
+/// requirements are unmet, so a sensor never has to invent a result for input
+/// it cannot handle.
+///
+/// # Implementor contract
+///
+/// - **Be deterministic.** The same inputs must produce the same output, byte
+///   for byte. The built-in sensor crate has no clock, RNG, or network
+///   dependency, and CI enforces that; a third-party sensor is expected to hold
+///   the same line.
+/// - **Read inputs through the context.** `MeasureCtx::read` records each
+///   input's identity in the emitted provenance. A value obtained another way
+///   is missing from provenance and breaks verification.
+/// - **Emit only through the token.** [`CalculationToken`] is the sole
+///   constructor for `Calculated<T>`, which is what makes the result's
+///   operation label trustworthy.
+/// - **Declare what you produce.** Every emitted measurement must carry the
+///   descriptor's own id and version, and its value kind must appear in
+///   `SensorDescriptor::produces`. [`conformance::assert_sensor`] checks all
+///   three.
+/// - **Distinguish absence from zero.** Report sparse evidence as
+///   [`Reading::InsufficientEvidence`], [`Reading::NotApplicable`], or
+///   [`Reading::NotMeasured`] — never as a measured value.
+///
+/// [`applies_to`]: Sensor::applies_to
 pub trait Sensor: Send + Sync {
     fn descriptor(&self) -> &SensorDescriptor;
+
+    /// Whether this sensor can run against the given inputs at all.
+    ///
+    /// This is a capability question, not an evidence-volume question: the
+    /// engine checks `SensorDescriptor::evidence` separately.
     fn applies_to(&self, ctx: &MeasureCtx<'_>) -> Applicability;
+
+    /// Calculate measurements. One call may emit several; the token assigns
+    /// each a distinct derived id.
     fn measure(
         &self,
         ctx: &MeasureCtx<'_>,
@@ -536,6 +686,22 @@ pub trait CrossProductSensor: Send + Sync {
     ) -> Result<Calculated<Measurement>>;
 }
 
+/// Turns a source into observations, alignments, or rankings using a model.
+///
+/// This is the only stage whose output is labeled [`Inferred`]. That label is
+/// permanent and deliberately cannot be converted to `Calculated`: everything
+/// downstream can therefore tell model-derived evidence from computed
+/// evidence, and `unclip level verify` knows not to claim it can reproduce
+/// this stage.
+///
+/// # Implementor contract
+///
+/// - Reach the model through [`InferCtx`]'s [`InferenceIo`], not directly, so
+///   the request is recorded.
+/// - Validate the response before emitting. A model response is untrusted
+///   input.
+/// - Emit through the supplied [`InferenceToken`]; it stamps the source and
+///   model identity into provenance.
 #[async_trait]
 pub trait Inferrer: Send + Sync {
     fn descriptor(&self) -> &InferrerDescriptor;
@@ -546,6 +712,19 @@ pub trait Inferrer: Send + Sync {
     ) -> Result<Inferred<InferenceOutput>>;
 }
 
+/// Computes the difference between two measurements of the same kind.
+///
+/// A comparator declares the measurement kinds it understands in
+/// `ComparatorDescriptor::supports`; the engine rejects a profile that points
+/// one at a kind it does not, rather than letting it produce a meaningless
+/// delta.
+///
+/// # Implementor contract
+///
+/// Comparison is a calculation, so the same determinism and provenance rules
+/// as [`Sensor`] apply. A pair that cannot be meaningfully compared — a sparse
+/// reading on either side, say — is reported as such rather than as a zero
+/// delta.
 pub trait Comparator: Send + Sync {
     fn descriptor(&self) -> &ComparatorDescriptor;
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>>;
@@ -561,6 +740,12 @@ pub struct InterpretationRequest {
     pub response_schema: Params,
 }
 
+/// The boundary to an external model for the interpretation stage.
+///
+/// Kept separate from [`Interpreter`] for the same reason [`InferenceIo`] is
+/// separate from [`Inferrer`]: the nondeterministic call is isolated so the
+/// surrounding logic can be tested against a recorded response. The CLI treats
+/// that recorded response file as the reproducible boundary to the provider.
 #[async_trait]
 pub trait InterpretationIo: Send + Sync {
     async fn request(&self, request: &InterpretationRequest) -> Result<serde_json::Value>;
@@ -629,6 +814,12 @@ pub trait Interpreter: Send + Sync {
     ) -> Result<Interpreted<serde_json::Value>>;
 }
 
+/// Tests a candidate revision against held-out evidence.
+///
+/// Output is labeled [`Experimental`], which is what the apply stage requires:
+/// a candidate can only be promoted through a completed experiment that
+/// actually tested it. The type prevents a candidate from being promoted on
+/// the strength of the measurements that suggested it in the first place.
 pub trait Experimenter: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
     fn experiment(
@@ -638,6 +829,19 @@ pub trait Experimenter: Send + Sync {
     ) -> Result<Experimental<serde_json::Value>>;
 }
 
+/// Proposes candidate revisions from residual or measured evidence.
+///
+/// # Implementor contract
+///
+/// - **Propose, never apply.** A generator does not modify the domain; it
+///   emits proposals for the experiment and apply stages to judge.
+/// - **Stay anonymous.** Proposals carry structure and evidence, not semantic
+///   labels. Naming is the interpretation stage's job, and its output cannot
+///   be consumed as measurement evidence.
+/// - **Retain evidence.** Each proposal keeps the observations and
+///   measurements that support it, so a reviewer can check the claim.
+/// - **Stay silent on sparse input.** Too little evidence means no proposal,
+///   not a weak one.
 pub trait CandidateGenerator: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
     fn generate(
@@ -647,6 +851,21 @@ pub trait CandidateGenerator: Send + Sync {
     ) -> Result<Vec<Calculated<unclip_domain::CandidateProposal>>>;
 }
 
+/// Evaluates a candidate against an explicit alternative explanation.
+///
+/// A null model answers "what would this evidence look like if the candidate
+/// were not true?" for one specific alternative. It is a diagnostic, not a
+/// verdict.
+///
+/// # Implementor contract
+///
+/// - **Never accept or reject.** Return the evidence; the decision belongs to
+///   the operator.
+/// - **Return [`Reading::NotApplicable`]** for a candidate shape this null
+///   cannot speak to, rather than a misleading number.
+/// - **State assumptions** in the emitted value. A null that assumes
+///   exchangeable observations, or that tests co-presence rather than
+///   direction, says so in its result.
 pub trait NullModel: Send + Sync {
     fn descriptor(&self) -> &PluginDescriptor;
     fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>>;
@@ -744,20 +963,46 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        if self.product_sensors.contains_key(&id) || self.cross_product_sensors.contains_key(&id) {
+    /// Is this id already taken by any plugin family?
+    ///
+    /// A `PluginId` names one plugin for the whole registry, not one per
+    /// family. `EngineProfile` selects plugins by bare id, and `resolve`
+    /// rejects a profile that names the same id twice, so a registry that
+    /// allowed one id to mean two different plugins could only ever expose
+    /// one of them. Registration rejects the collision instead.
+    fn contains(&self, id: &PluginId) -> bool {
+        self.sensors.contains_key(id)
+            || self.product_sensors.contains_key(id)
+            || self.cross_product_sensors.contains_key(id)
+            || self.inferrers.contains_key(id)
+            || self.comparators.contains_key(id)
+            || self.interpreters.contains_key(id)
+            || self.generators.contains_key(id)
+            || self.null_models.contains_key(id)
+    }
+
+    /// Claim an id across every family, then insert into the family's own map.
+    fn register<T: ?Sized>(
+        &mut self,
+        id: PluginId,
+        plugin: Arc<T>,
+        family: impl FnOnce(&mut Self) -> &mut BTreeMap<PluginId, Arc<T>>,
+    ) -> Result<()> {
+        if self.contains(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
-        insert_unique(&mut self.sensors, id, plugin)
+        family(self).insert(id, plugin);
+        Ok(())
+    }
+
+    pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
+        let id = plugin.descriptor().id.clone();
+        self.register(id, plugin, |r| &mut r.sensors)
     }
 
     pub fn register_product_sensor(&mut self, plugin: Arc<dyn ProductSensor>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        if self.sensors.contains_key(&id) || self.cross_product_sensors.contains_key(&id) {
-            return Err(PluginError::DuplicatePlugin(id));
-        }
-        insert_unique(&mut self.product_sensors, id, plugin)
+        self.register(id, plugin, |r| &mut r.product_sensors)
     }
 
     pub fn register_cross_product_sensor(
@@ -765,35 +1010,32 @@ impl Registry {
         plugin: Arc<dyn CrossProductSensor>,
     ) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        if self.sensors.contains_key(&id) || self.product_sensors.contains_key(&id) {
-            return Err(PluginError::DuplicatePlugin(id));
-        }
-        insert_unique(&mut self.cross_product_sensors, id, plugin)
+        self.register(id, plugin, |r| &mut r.cross_product_sensors)
     }
 
     pub fn register_inferrer(&mut self, plugin: Arc<dyn Inferrer>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        insert_unique(&mut self.inferrers, id, plugin)
+        self.register(id, plugin, |r| &mut r.inferrers)
     }
 
     pub fn register_comparator(&mut self, plugin: Arc<dyn Comparator>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        insert_unique(&mut self.comparators, id, plugin)
+        self.register(id, plugin, |r| &mut r.comparators)
     }
 
     pub fn register_interpreter(&mut self, plugin: Arc<dyn Interpreter>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        insert_unique(&mut self.interpreters, id, plugin)
+        self.register(id, plugin, |r| &mut r.interpreters)
     }
 
     pub fn register_generator(&mut self, plugin: Arc<dyn CandidateGenerator>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        insert_unique(&mut self.generators, id, plugin)
+        self.register(id, plugin, |r| &mut r.generators)
     }
 
     pub fn register_null_model(&mut self, plugin: Arc<dyn NullModel>) -> Result<()> {
         let id = plugin.descriptor().id.clone();
-        insert_unique(&mut self.null_models, id, plugin)
+        self.register(id, plugin, |r| &mut r.null_models)
     }
 
     pub fn sensors(&self) -> impl Iterator<Item = &Arc<dyn Sensor>> {
@@ -874,18 +1116,6 @@ impl Registry {
             })?,
         })
     }
-}
-
-fn insert_unique<T: ?Sized>(
-    entries: &mut BTreeMap<PluginId, Arc<T>>,
-    id: PluginId,
-    plugin: Arc<T>,
-) -> Result<()> {
-    if entries.contains_key(&id) {
-        return Err(PluginError::DuplicatePlugin(id));
-    }
-    entries.insert(id, plugin);
-    Ok(())
 }
 
 fn resolve_ids<T: ?Sized>(
@@ -988,6 +1218,7 @@ mod tests {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.stub"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[],
                 evidence,
                 produces: &[],
@@ -1020,6 +1251,7 @@ mod tests {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.stub"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[Capability::ProductDomain],
                 evidence: &[],
                 produces: &[MeasurementKind::Structured],
@@ -1051,6 +1283,7 @@ mod tests {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.stub"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[Capability::ProductDomain],
                 evidence: &[],
                 produces: &[MeasurementKind::Structured],
@@ -1254,6 +1487,7 @@ mod tests {
         let sensor = ScalarSensor(SensorDescriptor {
             id: PluginId::new("sensor.scalar"),
             version: Version::new(0, 1, 0),
+            stage: SensorStage::Measurement,
             applicability: &[],
             evidence: &[],
             produces: &[MeasurementKind::Scalar],
@@ -1304,6 +1538,62 @@ mod tests {
     fn conformance_accepts_a_deterministic_empty_sensor() {
         let sensor = sensor();
         conformance::assert_sensor(sensor.as_ref(), |_| Ok(Vec::new()));
+    }
+
+    struct StubGenerator {
+        descriptor: PluginDescriptor,
+    }
+
+    impl CandidateGenerator for StubGenerator {
+        fn descriptor(&self) -> &PluginDescriptor {
+            &self.descriptor
+        }
+
+        fn generate(
+            &self,
+            _ctx: &CandidateCtx<'_>,
+            _token: CalculationToken,
+        ) -> Result<Vec<Calculated<unclip_domain::CandidateProposal>>> {
+            unreachable!("registration fixture is never executed")
+        }
+    }
+
+    fn generator() -> Arc<dyn CandidateGenerator> {
+        Arc::new(StubGenerator {
+            descriptor: PluginDescriptor {
+                id: PluginId::new("sensor.stub"),
+                version: Version::new(0, 1, 0),
+                params_schema: "{}",
+            },
+        })
+    }
+
+    struct StubNullModel {
+        descriptor: PluginDescriptor,
+    }
+
+    impl NullModel for StubNullModel {
+        fn descriptor(&self) -> &PluginDescriptor {
+            &self.descriptor
+        }
+
+        fn evaluate(
+            &self,
+            _ctx: &NullCtx<'_>,
+            _token: CalculationToken,
+        ) -> Result<Calculated<Reading>> {
+            unreachable!("registration fixture is never executed")
+        }
+    }
+
+    fn null_model() -> Arc<dyn NullModel> {
+        Arc::new(StubNullModel {
+            descriptor: PluginDescriptor {
+                id: PluginId::new("sensor.stub"),
+                version: Version::new(0, 1, 0),
+                params_schema: "{}",
+            },
+        })
     }
 
     #[test]
@@ -1366,6 +1656,45 @@ mod tests {
             cross_product_first
                 .register_cross_product_sensor(cross_product_sensor())
                 .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+    }
+
+    /// One id names one plugin registry-wide, not one per family.
+    ///
+    /// `resolve` already rejects a profile naming the same id in two lists, so
+    /// a generator and a null model sharing an id could never both be selected.
+    /// Registration rejects the ambiguity up front instead.
+    #[test]
+    fn registration_rejects_ids_reused_across_plugin_families() {
+        let mut generator_first = Registry::default();
+        generator_first.register_generator(generator()).unwrap();
+        assert_eq!(
+            generator_first
+                .register_null_model(null_model())
+                .unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            generator_first.register_sensor(sensor()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+
+        let mut null_first = Registry::default();
+        null_first.register_null_model(null_model()).unwrap();
+        assert_eq!(
+            null_first.register_generator(generator()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+
+        let mut sensor_first = Registry::default();
+        sensor_first.register_sensor(sensor()).unwrap();
+        assert_eq!(
+            sensor_first.register_generator(generator()).unwrap_err(),
+            PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
+        );
+        assert_eq!(
+            sensor_first.register_null_model(null_model()).unwrap_err(),
             PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
         );
     }

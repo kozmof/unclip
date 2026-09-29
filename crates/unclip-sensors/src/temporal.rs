@@ -13,7 +13,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Applicability, Capability, EvidenceRequirement, MeasureCtx, PluginError, Result, Sensor,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 use crate::multi_observation::batch_states;
@@ -106,6 +106,7 @@ impl TemporalSensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new(id),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: &[
                     Capability::MultiObservation,
                     Capability::RankingValue,
@@ -159,15 +160,18 @@ impl Sensor for TemporalSensor {
         token: CalculationToken,
     ) -> Result<Vec<Calculated<Measurement>>> {
         let params = match self.statistic {
-            TemporalStatistic::LaggedDependency => {
-                Parameters::Lag(serde_json::from_value(ctx.params().clone()).map_err(invalid)?)
-            }
-            TemporalStatistic::DynamicTimeWarping => {
-                Parameters::Dtw(serde_json::from_value(ctx.params().clone()).map_err(invalid)?)
-            }
-            TemporalStatistic::ChangePoints => {
-                Parameters::Change(serde_json::from_value(ctx.params().clone()).map_err(invalid)?)
-            }
+            TemporalStatistic::LaggedDependency => Parameters::Lag(
+                serde_json::from_value(ctx.params().clone())
+                    .map_err(crate::support::invalid_params)?,
+            ),
+            TemporalStatistic::DynamicTimeWarping => Parameters::Dtw(
+                serde_json::from_value(ctx.params().clone())
+                    .map_err(crate::support::invalid_params)?,
+            ),
+            TemporalStatistic::ChangePoints => Parameters::Change(
+                serde_json::from_value(ctx.params().clone())
+                    .map_err(crate::support::invalid_params)?,
+            ),
         };
         let mut context = BTreeMap::new();
         let Some(sequence) = params.sequence() else {
@@ -217,7 +221,9 @@ impl Sensor for TemporalSensor {
                     "evidence".into(),
                     serde_json::json!("directional association, not causality"),
                 );
-                let reading = match lagged_dependency(sequence, x, y, p.lag).map_err(invalid)? {
+                let reading = match lagged_dependency(sequence, x, y, p.lag)
+                    .map_err(crate::support::calculation)?
+                {
                     Some(value) => Reading::Value {
                         value: MeasurementValue::Scalar(value.coefficient),
                     },
@@ -249,16 +255,17 @@ impl Sensor for TemporalSensor {
                     "distance".into(),
                     serde_json::json!("unnormalized absolute rank cost"),
                 );
-                let reading =
-                    match dynamic_time_warping(sequence, x, sequence, y).map_err(invalid)? {
-                        Some(value) => Reading::Value {
-                            value: MeasurementValue::Scalar(value),
-                        },
-                        None => Reading::InsufficientEvidence {
-                            have: count,
-                            need: states.len().max(1),
-                        },
-                    };
+                let reading = match dynamic_time_warping(sequence, x, sequence, y)
+                    .map_err(crate::support::calculation)?
+                {
+                    Some(value) => Reading::Value {
+                        value: MeasurementValue::Scalar(value),
+                    },
+                    None => Reading::InsufficientEvidence {
+                        have: count,
+                        need: states.len().max(1),
+                    },
+                };
                 (reading, count)
             }
             Parameters::Change(p) => {
@@ -277,7 +284,7 @@ impl Sensor for TemporalSensor {
                 context.insert("window".into(), serde_json::json!(p.window));
                 context.insert("minimum_shift".into(), serde_json::json!(p.minimum_shift));
                 let reading = match detect_change_points(sequence, x, p.window, p.minimum_shift)
-                    .map_err(invalid)?
+                    .map_err(crate::support::calculation)?
                 {
                     Some(result) => {
                         context.insert(

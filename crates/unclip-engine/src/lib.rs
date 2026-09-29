@@ -123,7 +123,7 @@ use unclip_measure::{EmpiricalStructure, Measurement, MeasurementContext};
 use unclip_observe::{Alignment, Observation, PartialRanking};
 use unclip_plugin::{
     classify_sensor, EngineProfile, InterpretCtx, MeasureCtx, Registry, Result, RunPlan,
-    SensorDecision,
+    SensorDecision, SensorStage,
 };
 
 /// Construct the runtime registry using explicit first-party registration.
@@ -246,14 +246,6 @@ pub struct PipelineResults {
     pub explanations: Vec<Calculated<Measurement>>,
     pub residuals: Vec<Calculated<Measurement>>,
     pub measurements: Vec<Calculated<Measurement>>,
-}
-
-fn calculation_stage(plugin: &PluginId) -> u8 {
-    match plugin.0.as_str() {
-        "sensor.coverage" => 0,
-        "sensor.residual" => 1,
-        _ => 2,
-    }
 }
 
 /// Require measurement evidence produced by calculation. Values restored through a
@@ -590,14 +582,29 @@ impl Engine {
             measurement_run,
         )?;
 
+        // Each measurement is filed under the stage its own sensor declares, so
+        // a renamed or third-party sensor lands in the stage it asked for.
+        let stages = plan
+            .sensors
+            .iter()
+            .map(|sensor| {
+                let descriptor = sensor.descriptor();
+                (descriptor.id.clone(), descriptor.stage)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+
         let mut explanations = Vec::new();
         let mut residuals = Vec::new();
         let mut measurements = Vec::new();
         for value in calculated {
-            match calculation_stage(&value.value().sensor) {
-                0 => explanations.push(value),
-                1 => residuals.push(value),
-                _ => measurements.push(value),
+            let stage = stages
+                .get(&value.value().sensor)
+                .copied()
+                .unwrap_or_default();
+            match stage {
+                SensorStage::Explanation => explanations.push(value),
+                SensorStage::Residual => residuals.push(value),
+                SensorStage::Measurement => measurements.push(value),
             }
         }
         Ok(PipelineResults {
@@ -632,8 +639,8 @@ impl Engine {
         sensors.sort_by(|left, right| {
             let left = left.descriptor();
             let right = right.descriptor();
-            calculation_stage(&left.id)
-                .cmp(&calculation_stage(&right.id))
+            left.stage
+                .cmp(&right.stage)
                 .then_with(|| left.id.cmp(&right.id))
         });
 

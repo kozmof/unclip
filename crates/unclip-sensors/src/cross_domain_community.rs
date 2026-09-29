@@ -9,7 +9,7 @@ use unclip_measure::{
 };
 use unclip_plugin::{
     Capability, EvidenceRequirement, PluginError, ProductMeasureCtx, ProductSensor, Result,
-    SensorDescriptor,
+    SensorDescriptor, SensorStage,
 };
 
 const APPLICABILITY: &[Capability] = &[Capability::ProductDomain];
@@ -27,6 +27,7 @@ impl Default for CrossDomainCommunitySensor {
             descriptor: SensorDescriptor {
                 id: PluginId::new("sensor.cross-domain-communities"),
                 version: Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
                 applicability: APPLICABILITY,
                 evidence: EVIDENCE,
                 produces: PRODUCES,
@@ -51,7 +52,7 @@ impl ProductSensor for CrossDomainCommunitySensor {
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
         let config: CrossDomainCommunityConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid)?;
+            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
         let product = ctx.product();
         let frame = ctx.frame();
         let profile = ctx.mutual_information().ok_or_else(|| {
@@ -95,7 +96,8 @@ impl ProductSensor for CrossDomainCommunitySensor {
             ));
         }
 
-        let outcome = detect_cross_domain_communities(profile, config).map_err(invalid)?;
+        let outcome = detect_cross_domain_communities(profile, config)
+            .map_err(crate::support::calculation)?;
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossDomainCommunityOutcome::Value { detection } => {
                 let unassessed = detection.unassessed_interactions.clone();
