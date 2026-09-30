@@ -12,7 +12,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet};
 use std::rc::Rc;
 
 use rand::rngs::StdRng;
@@ -111,15 +112,79 @@ pub fn score(
 /// depends only on the candidate sequence, not on page boundaries.
 pub struct Reservoir {
     take: usize,
-    /// `(key, branch)` pairs; keys are `u^(1/score)` with `u ~ U(0,1)`.
-    kept: Vec<(f64, Branch)>,
+    /// Kept candidates as a min-heap on the reservoir key, so the one the next
+    /// candidate must beat is always at the top.
+    ///
+    /// This was a `Vec` scanned linearly for its minimum on every offer, which
+    /// made a full pass `O(candidates × take)`; the heap makes it
+    /// `O(candidates × log take)`. See [`Keyed`] for the one behaviour that is
+    /// specified rather than inherited.
+    kept: BinaryHeap<Keyed>,
+    /// How many offers have been accepted, stamped onto each kept candidate to
+    /// break key ties by arrival.
+    accepted: u64,
+}
+
+/// One kept candidate, ordered smallest-key-first so a max-heap yields the
+/// candidate a new offer has to beat.
+///
+/// # Ties
+///
+/// Equal keys are broken by arrival: among several equally-smallest keys, the
+/// one accepted earliest is evicted first. A heap's own choice among equal
+/// elements is unspecified, so without this rule a seeded run would not be
+/// reproducible at all.
+///
+/// This *states* a rule the previous implementation only had by accident. That
+/// one scanned a `Vec` with `min_by`, which returns the first of several equal
+/// minima — first by vector index, and a replacement wrote the incoming
+/// candidate into the evicted slot, so index order stopped matching arrival
+/// order after the first eviction. Both rules are arbitrary among tied keys and
+/// neither changes the sampling distribution: A-Res depends only on retaining
+/// the `take` largest keys, and exactly-equal keys are interchangeable in that
+/// set. But they can pick different branches, so a seed that produced a packet
+/// containing a tied candidate may now produce its twin. Ties are rare by
+/// construction — [`MAX_SCORE`] exists to keep keys distinct — and require two
+/// `u^(1/score)` draws to collide bit-for-bit.
+struct Keyed {
+    key: f64,
+    /// Acceptance order, not offer order: a rejected offer never takes a number,
+    /// so this counts only candidates that have occupied a slot.
+    sequence: u64,
+    branch: Branch,
+}
+
+impl PartialEq for Keyed {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for Keyed {}
+
+impl Ord for Keyed {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reversed on both fields: smallest key on top, and among equal keys
+        // the earliest arrival on top.
+        other
+            .key
+            .total_cmp(&self.key)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl PartialOrd for Keyed {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl Reservoir {
     pub fn new(take: usize) -> Self {
         Self {
             take,
-            kept: Vec::with_capacity(take),
+            kept: BinaryHeap::with_capacity(take),
+            accepted: 0,
         }
     }
 
@@ -133,26 +198,44 @@ impl Reservoir {
             return;
         }
         let key = u.powf(1.0 / score);
+        let sequence = self.accepted;
         if self.kept.len() < self.take {
-            self.kept.push((key, branch));
+            self.accepted += 1;
+            self.kept.push(Keyed {
+                key,
+                sequence,
+                branch,
+            });
             return;
         }
-        let (min_index, min_key) = self
+        let mut smallest = self
             .kept
-            .iter()
-            .enumerate()
-            .map(|(i, (k, _))| (i, *k))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .peek_mut()
             .expect("reservoir with take > 0 is non-empty here");
-        if key > min_key {
-            self.kept[min_index] = (key, branch);
+        // Strictly greater, so a tie leaves the incumbent in place — the rule
+        // `MAX_SCORE` is documented against.
+        if key > smallest.key {
+            self.accepted += 1;
+            *smallest = Keyed {
+                key,
+                sequence,
+                branch,
+            };
         }
+        // Dropping the `PeekMut` restores the heap invariant.
     }
 
     /// The selected branches, highest key first (the equivalent of draw order).
-    pub fn into_branches(mut self) -> Vec<Branch> {
-        self.kept.sort_by(|a, b| b.0.total_cmp(&a.0));
-        self.kept.into_iter().map(|(_, branch)| branch).collect()
+    pub fn into_branches(self) -> Vec<Branch> {
+        let mut kept = self.kept.into_vec();
+        // Ties resolve by arrival for the same reason they do in the heap: the
+        // emitted order must not depend on where a candidate landed in it.
+        kept.sort_by(|a, b| {
+            b.key
+                .total_cmp(&a.key)
+                .then_with(|| a.sequence.cmp(&b.sequence))
+        });
+        kept.into_iter().map(|keyed| keyed.branch).collect()
     }
 }
 
@@ -279,6 +362,42 @@ mod tests {
         assert_eq!(a.iter().collect::<HashSet<_>>().len(), 3);
         assert_eq!(draw(1, 20).len(), 10);
         assert!(draw(1, 0).is_empty());
+    }
+
+    /// Tied keys evict by arrival, and the rule holds after an eviction has
+    /// already shuffled the heap.
+    ///
+    /// Equal keys are forced here the direct way — `offer` takes the score
+    /// already scored, so an infinite one makes `u^(1/score)` exactly `1.0` for
+    /// every draw. [`score`] clamps to [`MAX_SCORE`] before this point, which
+    /// is what keeps keys distinct in practice; this test is about what happens
+    /// when they nonetheless collide. Without a stated tie-break the heap could
+    /// evict either candidate, so this pins the rule rather than merely
+    /// observing today's output.
+    #[test]
+    fn tied_reservoir_keys_evict_in_arrival_order() {
+        let paths = ["/first", "/second", "/third", "/fourth"];
+        let draw = |seed: u64| {
+            let mut rng = rng_from_seed(seed);
+            let mut reservoir = Reservoir::new(2);
+            for (index, path) in paths.iter().enumerate() {
+                // Every candidate saturates to MAX_SCORE, so all four keys are
+                // bit-identical and only the tie-break decides the outcome.
+                reservoir.offer(branch(path, index as i64, 0.0), f64::INFINITY, &mut rng);
+            }
+            reservoir
+                .into_branches()
+                .into_iter()
+                .map(|b| b.path)
+                .collect::<Vec<_>>()
+        };
+
+        // A tie never displaces the incumbent, so the first two arrivals hold
+        // their slots against every later one.
+        assert_eq!(draw(7), vec!["/first".to_owned(), "/second".to_owned()]);
+        // Reproducible across seeds precisely because the keys are equal: the
+        // rule, not the RNG, settles this.
+        assert_eq!(draw(7), draw(99));
     }
 
     #[test]
