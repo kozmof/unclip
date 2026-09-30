@@ -2,13 +2,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::run_record;
+use crate::support::invalid;
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
     Timestamp, Tracked,
 };
 use unclip_observe::{Observation, ObservationId};
-use unclip_plugin::{PluginError, Result, RunPlan};
+use unclip_plugin::{Result, RunPlan};
 use unclip_record::{EngineRunRecord, RecordedInference};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,10 +17,6 @@ use unclip_record::{EngineRunRecord, RecordedInference};
 pub struct ObservationSplit {
     pub training: Vec<RecordedInference<Observation>>,
     pub held_out: Vec<RecordedInference<Observation>>,
-}
-
-fn invalid(message: &str) -> PluginError {
-    PluginError::Message(message.into())
 }
 
 /// Reject a candidate whose transitive provenance reaches held-out observations
@@ -64,7 +61,7 @@ pub fn validate_candidate_ancestry(
     if leaked.is_empty() {
         Ok(())
     } else {
-        Err(invalid(&format!(
+        Err(invalid(format!(
             "candidate provenance depends on held-out evidence: {}",
             leaked.join(", ")
         )))

@@ -9,8 +9,9 @@ use unclip_epistemic::{
     PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{MeasurementValue, Reading};
-use unclip_plugin::{PluginError, Result};
+use unclip_plugin::Result;
 
+use crate::support::invalid;
 use crate::{ConstraintStatus, CounterfactualEvidence, CounterfactualSnapshot};
 
 /// A step in the required smallest-to-largest domain-revision order.
@@ -32,6 +33,29 @@ pub enum RevisionTestOutcome {
     Insufficient,
 }
 
+/// The evidence and run identity one revision-ladder step is recorded against.
+///
+/// Every `record_*_test` takes the same seven inputs, which they used to accept
+/// positionally. The typed wrappers made most of those un-transposable, but
+/// `reason` and `run_id` were adjacent `&str` parameters: swapping them compiled
+/// and recorded a run whose stated reason was its identity. Naming them removes
+/// that, and retires the `too_many_arguments` exemption each signature carried.
+///
+/// This is the same shape as [`crate::MeasurementRun`] and
+/// [`crate::HeldOutInputs`] — harness-controlled inputs gathered into one
+/// struct — so the ladder now reads like the rest of the crate.
+pub struct RevisionTest<'a> {
+    pub candidate: &'a Tracked<CandidateProposal>,
+    pub counterfactual: &'a Calculated<CounterfactualSnapshot>,
+    pub experiment: &'a Experimental<CounterfactualEvidence>,
+    /// The caller's explicit sufficiency verdict. Never inferred from the
+    /// evidence: nothing here turns typed deltas into a score.
+    pub outcome: RevisionTestOutcome,
+    pub reason: &'a str,
+    pub run_id: &'a str,
+    pub timestamp: Timestamp,
+}
+
 /// Experimental record of one tested minimal-revision step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -47,10 +71,6 @@ pub struct RevisionAttempt {
     pub split: DerivedId,
     pub outcome: RevisionTestOutcome,
     pub reason: String,
-}
-
-fn invalid(message: impl Into<String>) -> PluginError {
-    PluginError::Message(message.into())
 }
 
 #[derive(Deserialize)]
@@ -80,7 +100,7 @@ struct AtomicRevisionExample {
 fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json::Value> {
     let evidence: AtomicRevisionEvidence =
         serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
-            .map_err(|error| invalid(error.to_string()))?;
+            .map_err(invalid)?;
     // Each condition reports itself. A single combined message used to name
     // every requirement at once, which left a caller whose observation list was
     // merely unsorted reading about four things that were not wrong.
@@ -206,15 +226,16 @@ fn has_measured_null(evidence: &CounterfactualEvidence, plugin: &str, model: &st
     })
 }
 
-fn validate_experiment<'a>(
-    step: &str,
-    candidate: &'a Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-) -> Result<&'a CandidateProposal> {
+fn validate_experiment<'a>(step: &str, test: &RevisionTest<'a>) -> Result<&'a CandidateProposal> {
+    let RevisionTest {
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+        ..
+    } = *test;
     crate::require_calculated_evidence(candidate, "revision candidate")?;
     if run_id.trim().is_empty() || reason.is_empty() {
         return Err(invalid(format!(
@@ -337,18 +358,21 @@ fn validate_prior(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn emit_attempt(
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
+    test: &RevisionTest<'_>,
     prior: Option<&Experimental<RevisionAttempt>>,
     step: RevisionStep,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
 ) -> Result<Experimental<RevisionAttempt>> {
+    let RevisionTest {
+        candidate,
+        counterfactual,
+        experiment,
+        outcome,
+        reason,
+        run_id,
+        ref timestamp,
+    } = *test;
+    let timestamp = timestamp.clone();
     let (slug, algorithm, version) = match step {
         RevisionStep::DeltaW => (
             "delta-w",
@@ -487,26 +511,16 @@ impl crate::Engine {
 /// The caller supplies the explicit sufficiency verdict and reason. Typed
 /// deltas, null evidence, Pareto relations, and constraints stay separate;
 /// this method never turns them into a score.
-#[allow(clippy::too_many_arguments)]
-pub fn record_delta_w_test(
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
-) -> Result<Experimental<RevisionAttempt>> {
-    let reason = reason.trim();
-    let proposal = validate_experiment(
-        "Delta W",
-        candidate,
+pub fn record_delta_w_test(mut test: RevisionTest<'_>) -> Result<Experimental<RevisionAttempt>> {
+    // Trim before validating, so an all-whitespace reason is rejected as empty
+    // and the recorded reason is the trimmed one.
+    test.reason = test.reason.trim();
+    let proposal = validate_experiment("Delta W", &test)?;
+    let RevisionTest {
         counterfactual,
         experiment,
-        outcome,
-        reason,
-        run_id,
-    )?;
+        ..
+    } = test;
     if proposal.kind != CandidateKind::WeightRevision {
         return Err(invalid(
             "Delta W can test only an explicit numeric-property weight revision",
@@ -530,17 +544,7 @@ pub fn record_delta_w_test(
             "Delta W requires a measured null.weight-change result",
         ));
     }
-    emit_attempt(
-        candidate,
-        counterfactual,
-        experiment,
-        None,
-        RevisionStep::DeltaW,
-        outcome,
-        reason,
-        run_id,
-        timestamp,
-    )
+    emit_attempt(&test, None, RevisionStep::DeltaW)
 }
 
 /// Record a relation revision test after Delta W was explicitly insufficient.
@@ -548,27 +552,19 @@ pub fn record_delta_w_test(
 /// The relation counterfactual must add exactly one explicitly bound edge and
 /// must compete with the existing-relation null. A sufficient earlier weight
 /// revision stops the ladder before this method can emit an attempt.
-#[allow(clippy::too_many_arguments)]
 pub fn record_delta_e_test(
     prior: &Experimental<RevisionAttempt>,
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
+    mut test: RevisionTest<'_>,
 ) -> Result<Experimental<RevisionAttempt>> {
-    let reason = reason.trim();
-    let proposal = validate_experiment(
-        "Delta E",
-        candidate,
+    // Trim before validating, so an all-whitespace reason is rejected as empty
+    // and the recorded reason is the trimmed one.
+    test.reason = test.reason.trim();
+    let proposal = validate_experiment("Delta E", &test)?;
+    let RevisionTest {
         counterfactual,
         experiment,
-        outcome,
-        reason,
-        run_id,
-    )?;
+        ..
+    } = test;
     validate_prior(prior, RevisionStep::DeltaW, experiment)?;
     if proposal.kind != CandidateKind::Relation {
         return Err(invalid(
@@ -610,44 +606,26 @@ pub fn record_delta_e_test(
             "Delta E requires a measured null.existing-relation result",
         ));
     }
-    emit_attempt(
-        candidate,
-        counterfactual,
-        experiment,
-        Some(prior),
-        RevisionStep::DeltaE,
-        outcome,
-        reason,
-        run_id,
-        timestamp,
-    )
+    emit_attempt(&test, Some(prior), RevisionStep::DeltaE)
 }
 
 /// Record a dynamic-coupling test after Delta E was explicitly insufficient.
 ///
 /// The counterfactual must add exactly one anonymous, explicitly non-causal
 /// coupling and must compete with the zero-association baseline diagnostic.
-#[allow(clippy::too_many_arguments)]
 pub fn record_dynamic_coupling_test(
     prior: &Experimental<RevisionAttempt>,
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
+    mut test: RevisionTest<'_>,
 ) -> Result<Experimental<RevisionAttempt>> {
-    let reason = reason.trim();
-    let proposal = validate_experiment(
-        "dynamic coupling",
-        candidate,
+    // Trim before validating, so an all-whitespace reason is rejected as empty
+    // and the recorded reason is the trimmed one.
+    test.reason = test.reason.trim();
+    let proposal = validate_experiment("dynamic coupling", &test)?;
+    let RevisionTest {
         counterfactual,
         experiment,
-        outcome,
-        reason,
-        run_id,
-    )?;
+        ..
+    } = test;
     validate_prior(prior, RevisionStep::DeltaE, experiment)?;
     if proposal.kind != CandidateKind::DynamicCoupling {
         return Err(invalid(
@@ -701,41 +679,23 @@ pub fn record_dynamic_coupling_test(
             "dynamic coupling requires a measured null.coupling-zero result",
         ));
     }
-    emit_attempt(
-        candidate,
-        counterfactual,
-        experiment,
-        Some(prior),
-        RevisionStep::DynamicCoupling,
-        outcome,
-        reason,
-        run_id,
-        timestamp,
-    )
+    emit_attempt(&test, Some(prior), RevisionStep::DynamicCoupling)
 }
 
 /// Record a motif, semantic-role, or transformation test after coupling was insufficient.
-#[allow(clippy::too_many_arguments)]
 pub fn record_structural_test(
     prior: &Experimental<RevisionAttempt>,
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
+    mut test: RevisionTest<'_>,
 ) -> Result<Experimental<RevisionAttempt>> {
-    let reason = reason.trim();
-    let proposal = validate_experiment(
-        "structural revision",
-        candidate,
+    // Trim before validating, so an all-whitespace reason is rejected as empty
+    // and the recorded reason is the trimmed one.
+    test.reason = test.reason.trim();
+    let proposal = validate_experiment("structural revision", &test)?;
+    let RevisionTest {
         counterfactual,
         experiment,
-        outcome,
-        reason,
-        run_id,
-    )?;
+        ..
+    } = test;
     validate_prior(prior, RevisionStep::DynamicCoupling, experiment)?;
     let snapshot = counterfactual.value();
     if snapshot.added_units.len() != 1
@@ -782,7 +742,7 @@ pub fn record_structural_test(
             }
         }
         CandidateKind::SemanticRole => {
-            crate::role_application::validate(proposal, &snapshot.domain)?;
+            crate::applications::role::validate(proposal, &snapshot.domain)?;
             if unit.kind != unclip_domain::UnitKind::SemanticRole
                 || unit.label.is_some()
                 || unit.properties.get("role_pattern")
@@ -804,7 +764,7 @@ pub fn record_structural_test(
             }
         }
         CandidateKind::Transformation => {
-            crate::transformation_application::validate(proposal, &snapshot.domain)?;
+            crate::applications::transformation::validate(proposal, &snapshot.domain)?;
             if unit.kind != unclip_domain::UnitKind::Transformation
                 || unit.label.is_some()
                 || unit.properties.get("transformation_pattern")
@@ -833,44 +793,27 @@ pub fn record_structural_test(
             ));
         }
     }
-    emit_attempt(
-        candidate,
-        counterfactual,
-        experiment,
-        Some(prior),
-        RevisionStep::Structural,
-        outcome,
-        reason,
-        run_id,
-        timestamp,
-    )
+    emit_attempt(&test, Some(prior), RevisionStep::Structural)
 }
 
 /// Record an atomic membership revision after structural change was insufficient.
 ///
 /// The new unit stays anonymous and retains the exact calculated residual
 /// evidence. Semantic naming remains a later interpretation operation.
-#[allow(clippy::too_many_arguments)]
 pub fn record_delta_v_test(
     prior: &Experimental<RevisionAttempt>,
-    candidate: &Tracked<CandidateProposal>,
-    counterfactual: &Calculated<CounterfactualSnapshot>,
-    experiment: &Experimental<CounterfactualEvidence>,
-    outcome: RevisionTestOutcome,
-    reason: &str,
-    run_id: &str,
-    timestamp: Timestamp,
+    mut test: RevisionTest<'_>,
 ) -> Result<Experimental<RevisionAttempt>> {
-    let reason = reason.trim();
-    let proposal = validate_experiment(
-        "Delta V",
+    // Trim before validating, so an all-whitespace reason is rejected as empty
+    // and the recorded reason is the trimmed one.
+    test.reason = test.reason.trim();
+    let proposal = validate_experiment("Delta V", &test)?;
+    let RevisionTest {
         candidate,
         counterfactual,
         experiment,
-        outcome,
-        reason,
-        run_id,
-    )?;
+        ..
+    } = test;
     validate_prior(prior, RevisionStep::Structural, experiment)?;
     if counterfactual
         .provenance()
@@ -929,15 +872,5 @@ pub fn record_delta_v_test(
             "Delta V requires a measured null.existing-unit result",
         ));
     }
-    emit_attempt(
-        candidate,
-        counterfactual,
-        experiment,
-        Some(prior),
-        RevisionStep::DeltaV,
-        outcome,
-        reason,
-        run_id,
-        timestamp,
-    )
+    emit_attempt(&test, Some(prior), RevisionStep::DeltaV)
 }

@@ -6,7 +6,10 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
+use unclip_engine::{
+    create_product_frame, materialize_product_domain, CrossDomainRun, CrossProductTransferInputs,
+    Engine, TransferSide,
+};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainInteractionMovementConfig, CrossDomainSample,
@@ -155,15 +158,17 @@ fn movement(
 ) -> (Calculated<Measurement>, CrossDomainInteractionMovement) {
     let result = engine
         .measure_cross_domain_interaction_movement(
-            &Tracked::from(product),
-            &Tracked::from(frame),
+            CrossDomainRun {
+                product: &Tracked::from(product),
+                frame: &Tracked::from(frame),
+                run_id: &format!("{prefix}-movement-run"),
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             samples,
             CrossDomainInteractionMovementConfig {
                 minimum_transitions: NonZeroUsize::new(2).unwrap(),
                 sequence: sequence(prefix),
             },
-            &format!("{prefix}-movement-run"),
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
         .unwrap();
     let Reading::Value {
@@ -245,15 +250,27 @@ fn engine_cross_product_transfer_preserves_signed_zero_versions_and_dependencies
     let fixture = fixture();
     let measure = || {
         fixture.engine.measure_cross_product_transfer(
-            &Tracked::from(&fixture.source_product),
-            &Tracked::from(&fixture.source_frame),
-            &Tracked::from_derived(&fixture.source_measurement, fixture.source_movement.clone()),
-            &Tracked::from(&fixture.target_product),
-            &Tracked::from(&fixture.target_frame),
-            &Tracked::from_derived(&fixture.target_measurement, fixture.target_movement.clone()),
+            CrossProductTransferInputs {
+                source: TransferSide {
+                    product: &Tracked::from(&fixture.source_product),
+                    frame: &Tracked::from(&fixture.source_frame),
+                    movement: &Tracked::from_derived(
+                        &fixture.source_measurement,
+                        fixture.source_movement.clone(),
+                    ),
+                },
+                target: TransferSide {
+                    product: &Tracked::from(&fixture.target_product),
+                    frame: &Tracked::from(&fixture.target_frame),
+                    movement: &Tracked::from_derived(
+                        &fixture.target_measurement,
+                        fixture.target_movement.clone(),
+                    ),
+                },
+                run_id: "transfer-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             config(2),
-            "transfer-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
     };
     let sensor = fixture
@@ -314,15 +331,27 @@ fn engine_cross_product_transfer_keeps_shortfalls_typed() {
     let result = fixture
         .engine
         .measure_cross_product_transfer(
-            &Tracked::from(&fixture.source_product),
-            &Tracked::from(&fixture.source_frame),
-            &Tracked::from_derived(&fixture.source_measurement, fixture.source_movement),
-            &Tracked::from(&fixture.target_product),
-            &Tracked::from(&fixture.target_frame),
-            &Tracked::from_derived(&fixture.target_measurement, fixture.target_movement),
+            CrossProductTransferInputs {
+                source: TransferSide {
+                    product: &Tracked::from(&fixture.source_product),
+                    frame: &Tracked::from(&fixture.source_frame),
+                    movement: &Tracked::from_derived(
+                        &fixture.source_measurement,
+                        fixture.source_movement,
+                    ),
+                },
+                target: TransferSide {
+                    product: &Tracked::from(&fixture.target_product),
+                    frame: &Tracked::from(&fixture.target_frame),
+                    movement: &Tracked::from_derived(
+                        &fixture.target_measurement,
+                        fixture.target_movement,
+                    ),
+                },
+                run_id: "sparse-transfer-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             config(5),
-            "sparse-transfer-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap();
     assert_eq!(
@@ -347,18 +376,27 @@ fn engine_cross_product_transfer_rejects_stale_or_incomplete_movement() {
     let error = stale_fixture
         .engine
         .measure_cross_product_transfer(
-            &Tracked::from(&stale_fixture.source_product),
-            &Tracked::from(&stale_fixture.source_frame),
-            &Tracked::from_derived(
-                &stale_fixture.source_measurement,
-                stale_fixture.source_movement,
-            ),
-            &Tracked::from(&stale_fixture.target_product),
-            &Tracked::from(&stale_fixture.target_frame),
-            &Tracked::from_derived(&stale_fixture.target_measurement, target_movement),
+            CrossProductTransferInputs {
+                source: TransferSide {
+                    product: &Tracked::from(&stale_fixture.source_product),
+                    frame: &Tracked::from(&stale_fixture.source_frame),
+                    movement: &Tracked::from_derived(
+                        &stale_fixture.source_measurement,
+                        stale_fixture.source_movement,
+                    ),
+                },
+                target: TransferSide {
+                    product: &Tracked::from(&stale_fixture.target_product),
+                    frame: &Tracked::from(&stale_fixture.target_frame),
+                    movement: &Tracked::from_derived(
+                        &stale_fixture.target_measurement,
+                        target_movement,
+                    ),
+                },
+                run_id: "stale-transfer-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             config(2),
-            "stale-transfer-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap_err();
     assert!(error.to_string().contains("exact source and target"));
@@ -368,15 +406,24 @@ fn engine_cross_product_transfer_rejects_stale_or_incomplete_movement() {
     let error = fixture
         .engine
         .measure_cross_product_transfer(
-            &Tracked::from(&fixture.source_product),
-            &Tracked::from(&fixture.source_frame),
-            &Tracked::from_derived(&fixture.source_measurement, fixture.source_movement),
-            &Tracked::from(&fixture.target_product),
-            &Tracked::from(&fixture.target_frame),
-            &Tracked::from_derived(&fixture.target_measurement, target_movement),
+            CrossProductTransferInputs {
+                source: TransferSide {
+                    product: &Tracked::from(&fixture.source_product),
+                    frame: &Tracked::from(&fixture.source_frame),
+                    movement: &Tracked::from_derived(
+                        &fixture.source_measurement,
+                        fixture.source_movement,
+                    ),
+                },
+                target: TransferSide {
+                    product: &Tracked::from(&fixture.target_product),
+                    frame: &Tracked::from(&fixture.target_frame),
+                    movement: &Tracked::from_derived(&fixture.target_measurement, target_movement),
+                },
+                run_id: "incomplete-transfer-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             config(2),
-            "incomplete-transfer-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap_err();
     assert!(error.to_string().contains("complete movement evidence"));

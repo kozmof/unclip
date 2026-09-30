@@ -8,7 +8,7 @@ use unclip_domain::{
 use unclip_engine::{
     evaluate_null_models_with_inputs, record_structural_test, ComparisonPair,
     CounterfactualEvidence, DeltaProfile, Engine, MeasurementRun, NullEvidence, NullInputs,
-    ProfileDelta, RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    ProfileDelta, RevisionAttempt, RevisionStep, RevisionTest, RevisionTestOutcome,
 };
 use unclip_epistemic::{
     Calculated, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
@@ -376,13 +376,16 @@ fn transformation_records_only_with_exact_structural_null_evidence() {
     let (candidate, counterfactual, experiment) = structural_fixture(true);
     let attempt = record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "the repeated state transition explains held-out evidence after coupling failed",
-        "transformation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason:
+                "the repeated state transition explains held-out evidence after coupling failed",
+            run_id: "transformation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .unwrap();
     assert_eq!(attempt.value().step, RevisionStep::Structural);
@@ -405,13 +408,15 @@ fn transformation_records_only_with_exact_structural_null_evidence() {
     let (candidate, counterfactual, experiment) = structural_fixture(false);
     assert!(record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "transformation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "transformation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }

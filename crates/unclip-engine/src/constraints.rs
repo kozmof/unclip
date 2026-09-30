@@ -114,7 +114,7 @@ pub fn assess_experiment_constraints(
                 let target = selected
                     .get(target)
                     .ok_or_else(|| invalid("transfer target is not selected"))?;
-                let (status, result) = super::transfer_constraint::assess(
+                let (status, result) = crate::transfer_constraint::assess(
                     source,
                     target,
                     *minimum_samples,

@@ -10,6 +10,7 @@ use unclip_epistemic::{
 use unclip_measure::{ExpectedIndependentBehavior, MeasurementKind, Reading};
 use unclip_plugin::{PluginError, Result};
 
+use crate::support::invalid;
 use crate::CompositionMeasurementProfile;
 
 /// One explicit rule for the expected behavior of a product measurement.
@@ -45,10 +46,6 @@ pub struct IndependenceExpectation {
 pub struct IndependenceExpectationProfile {
     pub composition_profile: DerivedId,
     pub expectations: Vec<IndependenceExpectation>,
-}
-
-fn invalid(message: impl Into<String>) -> PluginError {
-    PluginError::Message(message.into())
 }
 
 fn canonical_sources(
@@ -167,10 +164,7 @@ impl crate::Engine {
                     "independence definitions require a named rule and object parameters",
                 ));
             }
-            definition
-                .expected
-                .validate()
-                .map_err(|error| invalid(error.to_string()))?;
+            definition.expected.validate().map_err(invalid)?;
             let measurement_kind = definition.expected.kind();
             let sensor = self
                 .registry()

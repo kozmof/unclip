@@ -7,7 +7,7 @@ use unclip_domain::{
 use unclip_engine::{
     record_structural_test, ComparisonPair, ConstraintAssessment, ConstraintStatus,
     CounterfactualEvidence, DeltaProfile, Engine, ExperimentConstraint, NullEvidence, ProfileDelta,
-    RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    RevisionAttempt, RevisionStep, RevisionTest, RevisionTestOutcome,
 };
 use unclip_epistemic::{
     DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken, Experimental,
@@ -242,13 +242,15 @@ fn graph_motif_records_the_ordered_structural_attempt() {
     let record = || {
         record_structural_test(
             &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "the recurring motif explains held-out evidence after coupling failed",
-            "structural-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Sufficient,
+                reason: "the recurring motif explains held-out evidence after coupling failed",
+                run_id: "structural-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
         .unwrap()
     };
@@ -279,13 +281,15 @@ fn structural_step_rejects_sufficient_or_out_of_order_prior_attempts() {
     ] {
         assert!(record_structural_test(
             &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "structural-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Insufficient,
+                reason: "reviewed",
+                run_id: "structural-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
         .is_err());
     }
@@ -300,37 +304,43 @@ fn structural_step_requires_motif_null_constraints_and_supported_kind() {
     let (candidate, counterfactual, experiment) = fixture(false, None);
     assert!(record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "structural-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "structural-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 
     let (candidate, counterfactual, experiment) = fixture(true, Some(ConstraintStatus::Violated));
     assert!(record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "reviewed",
-        "structural-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason: "reviewed",
+            run_id: "structural-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
     assert!(record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "structural-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "structural-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_ok());
 
@@ -338,13 +348,15 @@ fn structural_step_requires_motif_null_constraints_and_supported_kind() {
     unsupported.kind = CandidateKind::CrossDomainStructure;
     assert!(record_structural_test(
         &prior,
-        &Tracked::from_recorded(DerivedId::new("motif-candidate"), unsupported),
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "structural-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &Tracked::from_recorded(DerivedId::new("motif-candidate"), unsupported),
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "structural-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }

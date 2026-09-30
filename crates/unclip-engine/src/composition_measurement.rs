@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::support::invalid;
 use serde::{Deserialize, Serialize};
 use unclip_domain::{
     DomainId, DomainSnapshot, FrameId, MeasurementFrame, ProductDomainSnapshot,
@@ -12,7 +13,7 @@ use unclip_epistemic::{
     EmitMetadata, FrameVersion, PluginId, Timestamp, Tracked,
 };
 use unclip_measure::{Measurement, ProductMeasurementBinding};
-use unclip_plugin::{PluginError, Result};
+use unclip_plugin::Result;
 
 /// One calculated measurement retained with the identity used by provenance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -55,10 +56,6 @@ pub struct CompositionMeasurementInputs<'a> {
     pub left: &'a [Calculated<Measurement>],
     pub right: &'a [Calculated<Measurement>],
     pub product: &'a [Calculated<Measurement>],
-}
-
-fn invalid(message: impl Into<String>) -> PluginError {
-    PluginError::Message(message.into())
 }
 
 fn validate_frame(domain: &DomainSnapshot, frame: &MeasurementFrame) -> Result<()> {
@@ -174,11 +171,7 @@ fn product_measurements(
     ];
     let expected = expected
         .into_iter()
-        .map(|(key, value)| {
-            value
-                .map(|value| (key, value))
-                .map_err(|error| invalid(error.to_string()))
-        })
+        .map(|(key, value)| value.map(|value| (key, value)).map_err(invalid))
         .collect::<Result<Vec<_>>>()?;
 
     let mut result = Vec::with_capacity(inputs.len());
@@ -218,22 +211,32 @@ fn product_measurements(
     Ok(result)
 }
 
+/// One input domain of a composition with the frame it was measured against.
+///
+/// Pairing them is what keeps a composition's two sides straight: the four
+/// references used to be positional, with `left_domain`/`right_domain` sharing a
+/// type and `left_frame`/`right_frame` sharing another, so a transposed pair
+/// compiled and bound each side's measurements to the other side's frame.
+pub struct CompositionSide<'a> {
+    pub domain: &'a Tracked<DomainSnapshot>,
+    pub frame: &'a Tracked<MeasurementFrame>,
+}
+
 /// Bind independently calculated input-domain and product-domain measurements.
 ///
 /// The three profiles remain separate and retain every typed reading. This
 /// stage does not infer correspondence, independence, or a scalar score.
-#[allow(clippy::too_many_arguments)]
 pub fn measure_composition(
-    left_domain: &Tracked<DomainSnapshot>,
-    left_frame: &Tracked<MeasurementFrame>,
-    right_domain: &Tracked<DomainSnapshot>,
-    right_frame: &Tracked<MeasurementFrame>,
+    left: CompositionSide<'_>,
+    right: CompositionSide<'_>,
     product: &Tracked<ProductDomainSnapshot>,
     product_frame: &Tracked<ProductMeasurementFrame>,
     inputs: CompositionMeasurementInputs<'_>,
     run_id: &str,
     timestamp: Timestamp,
 ) -> Result<Calculated<CompositionMeasurementProfile>> {
+    let (left_domain, left_frame) = (left.domain, left.frame);
+    let (right_domain, right_frame) = (right.domain, right.frame);
     if run_id.trim().is_empty() {
         return Err(invalid(
             "composition measurement requires a nonempty run ID",
@@ -251,12 +254,12 @@ pub fn measure_composition(
     let product_value = dependencies.read(product);
     let product_frame_value = dependencies.read(product_frame);
 
-    super::domain_null::validate(left)?;
-    super::domain_null::validate(right)?;
+    crate::nulls::domain::validate(left)?;
+    crate::nulls::domain::validate(right)?;
     validate_frame(left, left_frame_value)?;
     validate_frame(right, right_frame_value)?;
-    super::product_domain::validate_product_snapshot(product_value)?;
-    super::cross_domain::validate_frame(product_value, product_frame_value)?;
+    crate::product_domain::validate_product_snapshot(product_value)?;
+    crate::cross_domain::validate_frame(product_value, product_frame_value)?;
 
     if left.id == right.id
         || product_value.left.domain != left.id

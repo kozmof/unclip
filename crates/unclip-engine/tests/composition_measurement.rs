@@ -8,9 +8,9 @@ use unclip_domain::{
 use unclip_engine::{
     compare_product_with_independence, create_product_frame, derive_cross_domain_deviations,
     generate_candidates, materialize_product_domain, measure_composition, select_observations,
-    CandidateInputs, CompositionMeasurementInputs, CounterfactualMeasurementInputs, Engine,
-    ExperimentConstraints, HeldOutInputs, IndependenceDefinition, MeasurementInputs,
-    MeasurementRun,
+    CandidateInputs, CompositionMeasurementInputs, CompositionSide,
+    CounterfactualMeasurementInputs, CrossDomainRun, Engine, ExperimentConstraints, HeldOutInputs,
+    IndependenceDefinition, MeasurementInputs, MeasurementRun,
 };
 use unclip_epistemic::{
     Calculated, DerivedId, DomainVersion, FrameVersion, Operation, SourceRef, Timestamp, Tracked,
@@ -165,12 +165,14 @@ fn fixture(prefix: &str) -> Fixture {
     ];
     let product_measurements = vec![engine
         .measure_cross_domain_mutual_information(
-            &Tracked::from(&product),
-            &Tracked::from(&product_frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&product_frame),
+                run_id: &format!("{prefix}-measure-product"),
+                timestamp: Timestamp::new("2026-09-24T00:00:00Z"),
+            },
             &samples,
             CrossDomainMutualInformationConfig::default(),
-            &format!("{prefix}-measure-product"),
-            Timestamp::new("2026-09-24T00:00:00Z"),
         )
         .unwrap()];
 
@@ -193,10 +195,14 @@ fn compose(
     run_id: &str,
 ) -> unclip_plugin::Result<Calculated<unclip_engine::CompositionMeasurementProfile>> {
     measure_composition(
-        &subject.left,
-        &subject.left_frame,
-        &subject.right,
-        &subject.right_frame,
+        CompositionSide {
+            domain: &subject.left,
+            frame: &subject.left_frame,
+        },
+        CompositionSide {
+            domain: &subject.right,
+            frame: &subject.right_frame,
+        },
         &Tracked::from(&subject.product),
         &Tracked::from(&subject.product_frame),
         CompositionMeasurementInputs {
@@ -273,10 +279,14 @@ fn retains_three_separate_versioned_profiles_and_exact_dependencies() {
 fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
     let subject = fixture("invalid");
     let cross_bound = measure_composition(
-        &subject.left,
-        &subject.left_frame,
-        &subject.right,
-        &subject.right_frame,
+        CompositionSide {
+            domain: &subject.left,
+            frame: &subject.left_frame,
+        },
+        CompositionSide {
+            domain: &subject.right,
+            frame: &subject.right_frame,
+        },
         &Tracked::from(&subject.product),
         &Tracked::from(&subject.product_frame),
         CompositionMeasurementInputs {
@@ -294,10 +304,14 @@ fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
 
     let other = fixture("other");
     let stale_product = measure_composition(
-        &subject.left,
-        &subject.left_frame,
-        &subject.right,
-        &subject.right_frame,
+        CompositionSide {
+            domain: &subject.left,
+            frame: &subject.left_frame,
+        },
+        CompositionSide {
+            domain: &subject.right,
+            frame: &subject.right_frame,
+        },
         &Tracked::from(&subject.product),
         &Tracked::from(&subject.product_frame),
         CompositionMeasurementInputs {
@@ -314,10 +328,14 @@ fn rejects_stale_cross_bound_and_incomplete_measurement_profiles() {
         .contains("exact product, frame, and input-domain versions"));
 
     let empty = measure_composition(
-        &subject.left,
-        &subject.left_frame,
-        &subject.right,
-        &subject.right_frame,
+        CompositionSide {
+            domain: &subject.left,
+            frame: &subject.left_frame,
+        },
+        CompositionSide {
+            domain: &subject.right,
+            frame: &subject.right_frame,
+        },
         &Tracked::from(&subject.product),
         &Tracked::from(&subject.product_frame),
         CompositionMeasurementInputs {

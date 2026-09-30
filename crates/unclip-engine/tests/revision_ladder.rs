@@ -8,7 +8,7 @@ use unclip_domain::{
 use unclip_engine::{
     record_delta_e_test, record_delta_w_test, record_dynamic_coupling_test, ComparisonPair,
     ConstraintAssessment, ConstraintStatus, CounterfactualEvidence, DeltaProfile, Engine,
-    ExperimentConstraint, NullEvidence, ProfileDelta, RelationBindings, RevisionStep,
+    ExperimentConstraint, NullEvidence, ProfileDelta, RelationBindings, RevisionStep, RevisionTest,
     RevisionTestOutcome,
 };
 use unclip_epistemic::{
@@ -196,15 +196,15 @@ fn delta_w_records_an_explicit_replayable_experimental_verdict() {
             Some(ConstraintStatus::Satisfied),
         );
         let record = || {
-            record_delta_w_test(
-                &candidate,
-                &counterfactual,
-                &experiment,
+            record_delta_w_test(RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
                 outcome,
-                "held-out evidence and explicit constraints were reviewed",
-                "ladder",
-                Timestamp::new("now"),
-            )
+                reason: "held-out evidence and explicit constraints were reviewed",
+                run_id: "ladder",
+                timestamp: Timestamp::new("now"),
+            })
             .unwrap()
         };
         let attempt = record();
@@ -237,15 +237,15 @@ fn delta_w_requires_its_typed_counterfactual_and_null_evidence() {
     let (candidate, counterfactual, experiment) =
         fixture(CandidateKind::WeightRevision, false, None);
     let test = |outcome| {
-        record_delta_w_test(
-            &candidate,
-            &counterfactual,
-            &experiment,
+        record_delta_w_test(RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
             outcome,
-            "reviewed",
-            "ladder",
-            Timestamp::new("now"),
-        )
+            reason: "reviewed",
+            run_id: "ladder",
+            timestamp: Timestamp::new("now"),
+        })
     };
     assert!(test(RevisionTestOutcome::Sufficient).is_err());
     assert!(test(RevisionTestOutcome::Insufficient).is_err());
@@ -255,25 +255,25 @@ fn delta_w_requires_its_typed_counterfactual_and_null_evidence() {
         true,
         Some(ConstraintStatus::Violated),
     );
-    assert!(record_delta_w_test(
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "reviewed",
-        "ladder",
-        Timestamp::new("now"),
-    )
+    assert!(record_delta_w_test(RevisionTest {
+        candidate: &candidate,
+        counterfactual: &counterfactual,
+        experiment: &experiment,
+        outcome: RevisionTestOutcome::Sufficient,
+        reason: "reviewed",
+        run_id: "ladder",
+        timestamp: Timestamp::new("now"),
+    })
     .is_err());
-    assert!(record_delta_w_test(
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "ladder",
-        Timestamp::new("now"),
-    )
+    assert!(record_delta_w_test(RevisionTest {
+        candidate: &candidate,
+        counterfactual: &counterfactual,
+        experiment: &experiment,
+        outcome: RevisionTestOutcome::Insufficient,
+        reason: "reviewed",
+        run_id: "ladder",
+        timestamp: Timestamp::new("now"),
+    })
     .is_ok());
 }
 
@@ -281,15 +281,15 @@ fn delta_w_requires_its_typed_counterfactual_and_null_evidence() {
 fn delta_w_rejects_larger_revision_kinds_and_unreasoned_verdicts() {
     let (candidate, counterfactual, experiment) =
         fixture(CandidateKind::WeightRevision, true, None);
-    assert!(record_delta_w_test(
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        " ",
-        "ladder",
-        Timestamp::new("now"),
-    )
+    assert!(record_delta_w_test(RevisionTest {
+        candidate: &candidate,
+        counterfactual: &counterfactual,
+        experiment: &experiment,
+        outcome: RevisionTestOutcome::Sufficient,
+        reason: " ",
+        run_id: "ladder",
+        timestamp: Timestamp::new("now"),
+    })
     .is_err());
 
     let mut relation = proposal(CandidateKind::Relation);
@@ -300,15 +300,15 @@ fn delta_w_rejects_larger_revision_kinds_and_unreasoned_verdicts() {
         "relation_kind": "near"
     });
     let relation = Tracked::from_recorded(DerivedId::new("candidate"), relation);
-    assert!(record_delta_w_test(
-        &relation,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "ladder",
-        Timestamp::new("now"),
-    )
+    assert!(record_delta_w_test(RevisionTest {
+        candidate: &relation,
+        counterfactual: &counterfactual,
+        experiment: &experiment,
+        outcome: RevisionTestOutcome::Insufficient,
+        reason: "reviewed",
+        run_id: "ladder",
+        timestamp: Timestamp::new("now"),
+    })
     .is_err());
 }
 
@@ -451,15 +451,15 @@ fn delta_w_prior(
 ) -> unclip_epistemic::Experimental<unclip_engine::RevisionAttempt> {
     let (candidate, counterfactual, experiment) =
         fixture(CandidateKind::WeightRevision, true, None);
-    record_delta_w_test(
-        &candidate,
-        &counterfactual,
-        &experiment,
+    record_delta_w_test(RevisionTest {
+        candidate: &candidate,
+        counterfactual: &counterfactual,
+        experiment: &experiment,
         outcome,
-        "weight evidence was reviewed first",
-        "weight-ladder",
-        Timestamp::new("now"),
-    )
+        reason: "weight evidence was reviewed first",
+        run_id: "weight-ladder",
+        timestamp: Timestamp::new("now"),
+    })
     .unwrap()
 }
 
@@ -471,13 +471,15 @@ fn delta_e_requires_and_records_an_insufficient_delta_w_attempt() {
     let record = || {
         record_delta_e_test(
             &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "the relation explains held-out evidence after weight revision failed",
-            "relation-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Sufficient,
+                reason: "the relation explains held-out evidence after weight revision failed",
+                run_id: "relation-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
         .unwrap()
     };
@@ -505,13 +507,15 @@ fn sufficient_or_different_context_delta_w_attempts_stop_delta_e() {
     let record = |prior| {
         record_delta_e_test(
             prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "relation-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Insufficient,
+                reason: "reviewed",
+                run_id: "relation-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
     };
     assert!(record(&delta_w_prior(RevisionTestOutcome::Sufficient)).is_err());
@@ -520,13 +524,15 @@ fn sufficient_or_different_context_delta_w_attempts_stop_delta_e() {
     let (candidate, counterfactual, experiment) = relation_fixture(true, None, "2");
     assert!(record_delta_e_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "relation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "relation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }
@@ -537,13 +543,15 @@ fn delta_e_requires_relation_null_evidence_and_satisfied_constraints() {
     let (candidate, counterfactual, experiment) = relation_fixture(false, None, "1");
     assert!(record_delta_e_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "relation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "relation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 
@@ -551,24 +559,28 @@ fn delta_e_requires_relation_null_evidence_and_satisfied_constraints() {
         relation_fixture(true, Some(ConstraintStatus::Violated), "1");
     assert!(record_delta_e_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "reviewed",
-        "relation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason: "reviewed",
+            run_id: "relation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
     assert!(record_delta_e_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "relation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "relation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_ok());
 }
@@ -716,13 +728,15 @@ fn delta_e_prior(
     let (candidate, counterfactual, experiment) = relation_fixture(true, None, "1");
     record_delta_e_test(
         &weight,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        outcome,
-        "relation evidence was reviewed after weight revision failed",
-        "relation-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome,
+            reason: "relation evidence was reviewed after weight revision failed",
+            run_id: "relation-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .unwrap()
 }
@@ -735,13 +749,16 @@ fn dynamic_coupling_requires_and_records_an_insufficient_delta_e_attempt() {
     let record = || {
         record_dynamic_coupling_test(
             &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "non-causal coupling explains held-out evidence after relation revision failed",
-            "coupling-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Sufficient,
+                reason:
+                    "non-causal coupling explains held-out evidence after relation revision failed",
+                run_id: "coupling-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
         .unwrap()
     };
@@ -767,13 +784,15 @@ fn sufficient_or_out_of_order_prior_attempts_stop_dynamic_coupling() {
     let record = |prior| {
         record_dynamic_coupling_test(
             prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Insufficient,
-            "reviewed",
-            "coupling-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Insufficient,
+                reason: "reviewed",
+                run_id: "coupling-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
     };
     let sufficient_delta_e = delta_e_prior(RevisionTestOutcome::Sufficient);
@@ -788,13 +807,15 @@ fn dynamic_coupling_requires_its_null_and_satisfied_constraints() {
     let (candidate, counterfactual, experiment) = coupling_fixture(false, None);
     assert!(record_dynamic_coupling_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "coupling-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "coupling-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 
@@ -802,24 +823,28 @@ fn dynamic_coupling_requires_its_null_and_satisfied_constraints() {
         coupling_fixture(true, Some(ConstraintStatus::Violated));
     assert!(record_dynamic_coupling_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "reviewed",
-        "coupling-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason: "reviewed",
+            run_id: "coupling-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
     assert!(record_dynamic_coupling_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "coupling-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "coupling-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_ok());
 }

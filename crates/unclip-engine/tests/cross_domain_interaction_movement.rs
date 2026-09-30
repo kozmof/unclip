@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
+use unclip_engine::{create_product_frame, materialize_product_domain, CrossDomainRun, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainInteractionMovementConfig, CrossDomainSample,
@@ -145,12 +145,14 @@ fn engine_interaction_movement_is_order_stable_sparse_versioned_and_tracked() {
     let samples = samples();
     let measure = |samples: &[Tracked<CrossDomainSample>]| {
         engine.measure_cross_domain_interaction_movement(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "movement-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             samples,
             config(1),
-            "movement-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
     };
     let sensor = engine
@@ -212,12 +214,14 @@ fn engine_interaction_movement_keeps_partial_and_total_shortfalls_typed() {
     let samples = samples();
     let partial = engine
         .measure_cross_domain_interaction_movement(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "partial-movement-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             &samples,
             config(2),
-            "partial-movement-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
         .unwrap();
     let Reading::Value {
@@ -234,12 +238,14 @@ fn engine_interaction_movement_keeps_partial_and_total_shortfalls_typed() {
 
     let insufficient = engine
         .measure_cross_domain_interaction_movement(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "insufficient-movement-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             &samples,
             config(4),
-            "insufficient-movement-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
         .unwrap();
     assert_eq!(
@@ -273,12 +279,14 @@ fn engine_interaction_movement_rejects_sequence_mismatch() {
     .unwrap();
     let error = engine
         .measure_cross_domain_interaction_movement(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "wrong-sequence-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             &samples(),
             config,
-            "wrong-sequence-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
         .unwrap_err();
     assert!(error.to_string().contains("exactly match"));

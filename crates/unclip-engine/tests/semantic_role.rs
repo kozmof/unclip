@@ -8,7 +8,7 @@ use unclip_domain::{
 use unclip_engine::{
     evaluate_null_models_with_inputs, record_structural_test, ComparisonPair,
     CounterfactualEvidence, DeltaProfile, Engine, MeasurementRun, NullEvidence, NullInputs,
-    ProfileDelta, RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    ProfileDelta, RevisionAttempt, RevisionStep, RevisionTest, RevisionTestOutcome,
 };
 use unclip_epistemic::{
     Calculated, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken,
@@ -355,13 +355,15 @@ fn semantic_role_records_only_with_exact_structural_null_evidence() {
     let (candidate, counterfactual, experiment) = structural_fixture(true);
     let attempt = record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "the exact role signature explains held-out evidence after coupling failed",
-        "role-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason: "the exact role signature explains held-out evidence after coupling failed",
+            run_id: "role-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .unwrap();
     assert_eq!(attempt.value().step, RevisionStep::Structural);
@@ -384,13 +386,15 @@ fn semantic_role_records_only_with_exact_structural_null_evidence() {
     let (candidate, counterfactual, experiment) = structural_fixture(false);
     assert!(record_structural_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "role-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "role-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }

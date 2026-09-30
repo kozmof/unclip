@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::support::invalid;
 use unclip_domain::{ProductDomainSnapshot, ProductMeasurementFrame, UnitId};
 use unclip_epistemic::{
     Calculated, DependencyCollector, DerivedId, EmitMetadata, Operation, PluginId, Timestamp,
@@ -12,7 +13,9 @@ use unclip_measure::{
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig, CrossDomainSample,
     CrossProductTransferConfig, Measurement,
 };
-use unclip_plugin::{CrossProductMeasureCtx, PluginError, ProductMeasureCtx, Result};
+use unclip_plugin::{
+    CrossProductMeasureCtx, CrossProductSide, PluginError, ProductMeasureCtx, Result,
+};
 
 const CCA_SENSOR_ID: &str = "sensor.canonical-correlation";
 const MI_SENSOR_ID: &str = "sensor.cross-domain-mutual-information";
@@ -20,8 +23,42 @@ const COMMUNITY_SENSOR_ID: &str = "sensor.cross-domain-communities";
 const INTERACTION_MOVEMENT_SENSOR_ID: &str = "sensor.cross-domain-interaction-movement";
 const CROSS_PRODUCT_TRANSFER_SENSOR_ID: &str = "sensor.cross-product-transfer";
 
-fn invalid(message: impl std::fmt::Display) -> PluginError {
-    PluginError::Message(message.to_string())
+/// The product domain and frame a cross-domain measurement is taken against,
+/// with the run identity it is recorded under.
+///
+/// Gathered into a struct rather than passed positionally so each measurement
+/// method stays under the argument count that used to require a
+/// `too_many_arguments` exemption, and so the four methods that share these
+/// inputs are visibly taking the same thing.
+pub struct CrossDomainRun<'a> {
+    pub product: &'a Tracked<ProductDomainSnapshot>,
+    pub frame: &'a Tracked<ProductMeasurementFrame>,
+    pub run_id: &'a str,
+    pub timestamp: Timestamp,
+}
+
+/// One side of a cross-product transfer: a product domain, its measurement
+/// frame, and the interaction movement recorded over it.
+///
+/// This exists to make the direction of a transfer un-transposable at the call
+/// site. `measure_cross_product_transfer` used to take six positional
+/// arguments — source product, frame, and movement followed by the target's
+/// three — where each source parameter had the same type as its target
+/// counterpart. Swapping a pair compiled, passed every validation, and recorded
+/// a transfer measured in the opposite direction. Naming the sides at
+/// construction is what removes that.
+pub struct TransferSide<'a> {
+    pub product: &'a Tracked<ProductDomainSnapshot>,
+    pub frame: &'a Tracked<ProductMeasurementFrame>,
+    pub movement: &'a Tracked<unclip_measure::CrossDomainInteractionMovement>,
+}
+
+/// Both sides of a cross-product transfer with the run identity.
+pub struct CrossProductTransferInputs<'a> {
+    pub source: TransferSide<'a>,
+    pub target: TransferSide<'a>,
+    pub run_id: &'a str,
+    pub timestamp: Timestamp,
 }
 
 /// Hold a product sensor to its declared `params_schema` before invoking it.
@@ -109,16 +146,18 @@ impl crate::Engine {
     /// Product axes define the ordered left and right variable bases. Samples are
     /// complete-case filtered by the registered product sensor, and every supplied
     /// sample is read through its invocation-scoped dependency collector.
-    #[allow(clippy::too_many_arguments)]
     pub fn measure_canonical_correlation(
         &self,
-        product: &Tracked<ProductDomainSnapshot>,
-        frame: &Tracked<ProductMeasurementFrame>,
+        run: CrossDomainRun<'_>,
         samples: &[Tracked<CrossDomainSample>],
         config: CanonicalCorrelationConfig,
-        run_id: &str,
-        timestamp: Timestamp,
     ) -> Result<Calculated<Measurement>> {
+        let CrossDomainRun {
+            product,
+            frame,
+            run_id,
+            timestamp,
+        } = run;
         if run_id.trim().is_empty() {
             return Err(invalid("canonical correlation requires a nonempty run ID"));
         }
@@ -153,7 +192,7 @@ impl crate::Engine {
 
         let dependencies = DependencyCollector::default();
         let product_value = dependencies.read(product);
-        super::product_domain::validate_product_snapshot(product_value)?;
+        crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let (left_units, right_units) = frame_units(frame_value);
@@ -193,16 +232,18 @@ impl crate::Engine {
     /// Numeric values are discretized only through the caller's explicit equal-width
     /// bin count. Each axis uses its own pairwise-complete evidence and retains its
     /// bin boundaries and sparse observation identities in the structured result.
-    #[allow(clippy::too_many_arguments)]
     pub fn measure_cross_domain_mutual_information(
         &self,
-        product: &Tracked<ProductDomainSnapshot>,
-        frame: &Tracked<ProductMeasurementFrame>,
+        run: CrossDomainRun<'_>,
         samples: &[Tracked<CrossDomainSample>],
         config: CrossDomainMutualInformationConfig,
-        run_id: &str,
-        timestamp: Timestamp,
     ) -> Result<Calculated<Measurement>> {
+        let CrossDomainRun {
+            product,
+            frame,
+            run_id,
+            timestamp,
+        } = run;
         if run_id.trim().is_empty() {
             return Err(invalid(
                 "cross-domain mutual information requires a nonempty run ID",
@@ -239,7 +280,7 @@ impl crate::Engine {
 
         let dependencies = DependencyCollector::default();
         let product_value = dependencies.read(product);
-        super::product_domain::validate_product_snapshot(product_value)?;
+        crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(config).map_err(invalid)?;
@@ -275,16 +316,18 @@ impl crate::Engine {
     /// Only product-frame coordinates represented by the bound mutual-information
     /// profile participate. Thresholding is explicit, and connected components keep
     /// left and right identities separate even when their unit IDs are equal.
-    #[allow(clippy::too_many_arguments)]
     pub fn measure_cross_domain_communities(
         &self,
-        product: &Tracked<ProductDomainSnapshot>,
-        frame: &Tracked<ProductMeasurementFrame>,
+        run: CrossDomainRun<'_>,
         mutual_information: &Tracked<CrossDomainMutualInformation>,
         config: CrossDomainCommunityConfig,
-        run_id: &str,
-        timestamp: Timestamp,
     ) -> Result<Calculated<Measurement>> {
+        let CrossDomainRun {
+            product,
+            frame,
+            run_id,
+            timestamp,
+        } = run;
         if run_id.trim().is_empty() {
             return Err(invalid(
                 "cross-domain communities require a nonempty run ID",
@@ -315,7 +358,7 @@ impl crate::Engine {
 
         let dependencies = DependencyCollector::default();
         let product_value = dependencies.read(product);
-        super::product_domain::validate_product_snapshot(product_value)?;
+        crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(config).map_err(invalid)?;
@@ -356,16 +399,18 @@ impl crate::Engine {
     ///
     /// Consecutive transitions come only from the explicit observation sequence.
     /// Sparse endpoints exclude that exact transition without closing the gap.
-    #[allow(clippy::too_many_arguments)]
     pub fn measure_cross_domain_interaction_movement(
         &self,
-        product: &Tracked<ProductDomainSnapshot>,
-        frame: &Tracked<ProductMeasurementFrame>,
+        run: CrossDomainRun<'_>,
         samples: &[Tracked<CrossDomainSample>],
         config: CrossDomainInteractionMovementConfig,
-        run_id: &str,
-        timestamp: Timestamp,
     ) -> Result<Calculated<Measurement>> {
+        let CrossDomainRun {
+            product,
+            frame,
+            run_id,
+            timestamp,
+        } = run;
         if run_id.trim().is_empty() {
             return Err(invalid(
                 "cross-domain interaction movement requires a nonempty run ID",
@@ -402,7 +447,7 @@ impl crate::Engine {
 
         let dependencies = DependencyCollector::default();
         let product_value = dependencies.read(product);
-        super::product_domain::validate_product_snapshot(product_value)?;
+        crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
@@ -437,19 +482,21 @@ impl crate::Engine {
     ///
     /// Source and target products, frames, and movement profiles remain separate
     /// calculated dependencies. Axis mappings are caller-supplied and one-to-one.
-    #[allow(clippy::too_many_arguments)]
     pub fn measure_cross_product_transfer(
         &self,
-        source_product: &Tracked<ProductDomainSnapshot>,
-        source_frame: &Tracked<ProductMeasurementFrame>,
-        source_movement: &Tracked<unclip_measure::CrossDomainInteractionMovement>,
-        target_product: &Tracked<ProductDomainSnapshot>,
-        target_frame: &Tracked<ProductMeasurementFrame>,
-        target_movement: &Tracked<unclip_measure::CrossDomainInteractionMovement>,
+        inputs: CrossProductTransferInputs<'_>,
         config: CrossProductTransferConfig,
-        run_id: &str,
-        timestamp: Timestamp,
     ) -> Result<Calculated<Measurement>> {
+        let CrossProductTransferInputs {
+            source,
+            target,
+            run_id,
+            timestamp,
+        } = inputs;
+        let (source_product, source_frame, source_movement) =
+            (source.product, source.frame, source.movement);
+        let (target_product, target_frame, target_movement) =
+            (target.product, target.frame, target.movement);
         if run_id.trim().is_empty() {
             return Err(invalid("cross-product transfer requires a nonempty run ID"));
         }
@@ -498,11 +545,11 @@ impl crate::Engine {
 
         let dependencies = DependencyCollector::default();
         let source_product_value = dependencies.read(source_product);
-        super::product_domain::validate_product_snapshot(source_product_value)?;
+        crate::product_domain::validate_product_snapshot(source_product_value)?;
         let source_frame_value = dependencies.read(source_frame);
         validate_frame(source_product_value, source_frame_value)?;
         let target_product_value = dependencies.read(target_product);
-        super::product_domain::validate_product_snapshot(target_product_value)?;
+        crate::product_domain::validate_product_snapshot(target_product_value)?;
         let target_frame_value = dependencies.read(target_frame);
         validate_frame(target_product_value, target_frame_value)?;
         let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
@@ -536,12 +583,16 @@ impl crate::Engine {
         )
         .with_algorithm("mapped_cross_product_movement_transfer");
         let ctx = CrossProductMeasureCtx::new(
-            source_product,
-            source_frame,
-            source_movement,
-            target_product,
-            target_frame,
-            target_movement,
+            CrossProductSide {
+                product: source_product,
+                frame: source_frame,
+                movement: source_movement,
+            },
+            CrossProductSide {
+                product: target_product,
+                frame: target_frame,
+                movement: target_movement,
+            },
             &sensor_params,
             dependencies,
         );

@@ -7,7 +7,7 @@ use unclip_domain::{
 use unclip_engine::{
     record_delta_v_test, ComparisonPair, ConstraintAssessment, ConstraintStatus,
     CounterfactualEvidence, DeltaProfile, Engine, ExperimentConstraint, NullEvidence, ProfileDelta,
-    RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    RevisionAttempt, RevisionStep, RevisionTest, RevisionTestOutcome,
 };
 use unclip_epistemic::{
     DependencyCollector, DerivedId, DomainVersion, EmitMetadata, ExperimentToken, Experimental,
@@ -237,13 +237,15 @@ fn delta_v_records_the_ordered_atomic_membership_attempt() {
     let record = || {
         record_delta_v_test(
             &prior,
-            &candidate,
-            &counterfactual,
-            &experiment,
-            RevisionTestOutcome::Sufficient,
-            "persistent held-out residual evidence requires one new anonymous unit",
-            "atomic-ladder",
-            Timestamp::new("now"),
+            RevisionTest {
+                candidate: &candidate,
+                counterfactual: &counterfactual,
+                experiment: &experiment,
+                outcome: RevisionTestOutcome::Sufficient,
+                reason: "persistent held-out residual evidence requires one new anonymous unit",
+                run_id: "atomic-ladder",
+                timestamp: Timestamp::new("now"),
+            },
         )
         .unwrap()
     };
@@ -324,13 +326,15 @@ fn sufficient_or_out_of_order_structural_attempt_stops_delta_v_before_applicatio
         .unwrap();
     assert!(record_delta_v_test(
         &prior,
-        &candidate,
-        &unauthorized,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &unauthorized,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }
@@ -341,13 +345,15 @@ fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
     let (candidate, counterfactual, experiment) = fixture(&prior, false, None);
     assert!(record_delta_v_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 
@@ -355,24 +361,28 @@ fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
         fixture(&prior, true, Some(ConstraintStatus::Violated));
     assert!(record_delta_v_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Sufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Sufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
     assert!(record_delta_v_test(
         &prior,
-        &candidate,
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &candidate,
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_ok());
 
@@ -380,13 +390,15 @@ fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
     incomplete.value["examples"][0]["measurements"] = json!([]);
     assert!(record_delta_v_test(
         &prior,
-        &Tracked::from_recorded(DerivedId::new("atomic-candidate"), incomplete),
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &Tracked::from_recorded(DerivedId::new("atomic-candidate"), incomplete),
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 
@@ -394,13 +406,15 @@ fn delta_v_requires_complete_residual_null_and_constraint_evidence() {
     unsupported.kind = CandidateKind::CompositeMeaning;
     assert!(record_delta_v_test(
         &prior,
-        &Tracked::from_recorded(DerivedId::new("atomic-candidate"), unsupported),
-        &counterfactual,
-        &experiment,
-        RevisionTestOutcome::Insufficient,
-        "reviewed",
-        "atomic-ladder",
-        Timestamp::new("now"),
+        RevisionTest {
+            candidate: &Tracked::from_recorded(DerivedId::new("atomic-candidate"), unsupported),
+            counterfactual: &counterfactual,
+            experiment: &experiment,
+            outcome: RevisionTestOutcome::Insufficient,
+            reason: "reviewed",
+            run_id: "atomic-ladder",
+            timestamp: Timestamp::new("now"),
+        },
     )
     .is_err());
 }

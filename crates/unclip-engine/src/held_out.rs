@@ -1,11 +1,12 @@
 //! Baseline sensor execution over a frozen, explicitly selected held-out split.
-use crate::profile_comparison::compare_profiles;
+use crate::comparisons::profile::compare_profiles;
+use crate::support::invalid;
 use std::collections::BTreeSet;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{Calculated, DependencyCollector, Tracked};
 use unclip_measure::Measurement;
 use unclip_observe::{Alignment, PartialRanking};
-use unclip_plugin::{PluginError, Result, RunPlan};
+use unclip_plugin::{Result, RunPlan};
 
 pub struct HeldOutInputs<'a> {
     pub baseline: &'a Tracked<DomainSnapshot>,
@@ -14,10 +15,6 @@ pub struct HeldOutInputs<'a> {
     /// Only held-out inference products are accepted. Missing products remain missing.
     pub alignments: &'a [Tracked<Alignment>],
     pub rankings: &'a [Tracked<PartialRanking>],
-}
-
-fn invalid(message: &str) -> PluginError {
-    PluginError::Message(message.into())
 }
 
 impl super::Engine {
@@ -163,8 +160,8 @@ impl super::Engine {
         let dependencies = DependencyCollector::default();
         let baseline = dependencies.read(inputs.baseline.baseline);
         let snapshot = inputs.counterfactual.value();
-        let baseline_key = serde_json::to_string(&(&baseline.id.0, &baseline.version.0))
-            .map_err(|error| invalid(&error.to_string()))?;
+        let baseline_key =
+            serde_json::to_string(&(&baseline.id.0, &baseline.version.0)).map_err(invalid)?;
         if snapshot.baseline_domain_version_id != baseline_key
             || snapshot.domain.id != baseline.id
             || snapshot.domain.version == baseline.version

@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
+use unclip_engine::{create_product_frame, materialize_product_domain, CrossDomainRun, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainMutualInformation, CrossDomainMutualInformationConfig, CrossDomainSample,
@@ -148,12 +148,14 @@ fn engine_cross_domain_mi_preserves_axes_versions_and_dependencies() {
     ];
     let measure = |samples: &[Tracked<CrossDomainSample>]| {
         engine.measure_cross_domain_mutual_information(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "mi-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             samples,
             config(),
-            "mi-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
     };
     let sensor = engine
@@ -224,12 +226,14 @@ fn engine_cross_domain_mi_keeps_assessed_and_sparse_axes_separate() {
     ];
     let result = engine
         .measure_cross_domain_mutual_information(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "sparse-mi",
+                timestamp: Timestamp::new("now"),
+            },
             &samples,
             config(),
-            "sparse-mi",
-            Timestamp::new("now"),
         )
         .unwrap();
     let Reading::Value {
@@ -253,16 +257,18 @@ fn engine_cross_domain_mi_reports_an_all_sparse_profile() {
     let (engine, product, frame) = product_and_frame();
     let result = engine
         .measure_cross_domain_mutual_information(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "insufficient-mi",
+                timestamp: Timestamp::new("now"),
+            },
             &[sample(
                 "only",
                 &[("presentation", 0.0), ("social", 0.0)],
                 &[("composition", 0.0), ("sharing", 0.0)],
             )],
             config(),
-            "insufficient-mi",
-            Timestamp::new("now"),
         )
         .unwrap();
     assert_eq!(

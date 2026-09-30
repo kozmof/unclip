@@ -5,7 +5,7 @@ use unclip_domain::{
 };
 use unclip_engine::{
     derive_empirical, generate_candidates, persistable_experiment, run_record, select_observations,
-    Engine, MeasurementInputs, MeasurementRun,
+    Engine, ExperimentStorageIds, MeasurementInputs, MeasurementRun,
 };
 use unclip_epistemic::{
     hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion,
@@ -1858,11 +1858,13 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         &experiment,
         &selected,
         &proposal,
-        "domain-version",
-        "frame-version",
-        "before-profile",
-        "after-profile",
-        "now",
+        ExperimentStorageIds {
+            domain_version_id: "domain-version",
+            frame_version_id: "frame-version",
+            before_profile_id: "before-profile",
+            after_profile_id: "after-profile",
+            started_at: "now",
+        },
     )
     .unwrap();
     assert_eq!(persisted.outcome.value().candidate_id, *proposal.id());

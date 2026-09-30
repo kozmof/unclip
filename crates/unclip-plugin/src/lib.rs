@@ -699,25 +699,34 @@ pub struct CrossProductMeasureCtx<'a> {
     dependencies: DependencyCollector,
 }
 
+/// One side of a cross-product comparison: a product domain, its measurement
+/// frame, and the interaction movement recorded over it.
+///
+/// The three fields are what a side *is*; naming the side at construction is
+/// what keeps a transfer's direction straight. `CrossProductMeasureCtx::new`
+/// used to take these six references positionally, where each source parameter
+/// had the same type as its target counterpart, so transposing a pair compiled
+/// and produced a context that read as the opposite direction throughout.
+pub struct CrossProductSide<'a> {
+    pub product: &'a Tracked<ProductDomainSnapshot>,
+    pub frame: &'a Tracked<ProductMeasurementFrame>,
+    pub movement: &'a Tracked<CrossDomainInteractionMovement>,
+}
+
 impl<'a> CrossProductMeasureCtx<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        source_product: &'a Tracked<ProductDomainSnapshot>,
-        source_frame: &'a Tracked<ProductMeasurementFrame>,
-        source_movement: &'a Tracked<CrossDomainInteractionMovement>,
-        target_product: &'a Tracked<ProductDomainSnapshot>,
-        target_frame: &'a Tracked<ProductMeasurementFrame>,
-        target_movement: &'a Tracked<CrossDomainInteractionMovement>,
+        source: CrossProductSide<'a>,
+        target: CrossProductSide<'a>,
         params: &'a Params,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
-            source_product,
-            source_frame,
-            source_movement,
-            target_product,
-            target_frame,
-            target_movement,
+            source_product: source.product,
+            source_frame: source.frame,
+            source_movement: source.movement,
+            target_product: target.product,
+            target_frame: target.frame,
+            target_movement: target.movement,
             params,
             dependencies,
         }

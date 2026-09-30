@@ -1,6 +1,6 @@
 //! Experimental aggregation of executed counterfactual measurements and comparisons.
 use crate::constraints::assess_experiment_constraints;
-use crate::null_models::evaluate_null_models_with_inputs;
+use crate::nulls::models::evaluate_null_models_with_inputs;
 use crate::pareto::compare_pareto;
 use crate::run_record;
 use serde::{Deserialize, Serialize};
@@ -304,20 +304,40 @@ impl super::Engine {
     }
 }
 
+/// The storage identities a completed experiment is filed under.
+///
+/// These were five consecutive `&str` parameters — two version ids, the before
+/// and after profile ids, and a start time. Any transposition among them
+/// compiled and passed the emptiness checks below, and `before`/`after` in
+/// particular decide which profile a recorded delta is measured *from*. The
+/// only check that could ever have caught a swap is that the two profile ids
+/// differ, which a swap preserves.
+pub struct ExperimentStorageIds<'a> {
+    pub domain_version_id: &'a str,
+    pub frame_version_id: &'a str,
+    /// The profile measured before the candidate was applied.
+    pub before_profile_id: &'a str,
+    /// The profile measured after it was applied. Must differ from `before`.
+    pub after_profile_id: &'a str,
+    pub started_at: &'a str,
+}
+
 /// Convert executed evidence to the storage repository's completed bundle.
 /// Direct dependencies are the persisted candidate, selected observations,
 /// and calculated deltas; the typed result remains intact in `result`.
-#[allow(clippy::too_many_arguments)]
 pub fn persistable_experiment(
     experiment: &CounterfactualExperiment,
     split: &Calculated<super::ObservationSplit>,
     candidate: &Tracked<unclip_domain::CandidateProposal>,
-    domain_version_id: &str,
-    frame_version_id: &str,
-    before_profile_id: &str,
-    after_profile_id: &str,
-    started_at: &str,
+    storage: ExperimentStorageIds<'_>,
 ) -> Result<PersistableExperiment> {
+    let ExperimentStorageIds {
+        domain_version_id,
+        frame_version_id,
+        before_profile_id,
+        after_profile_id,
+        started_at,
+    } = storage;
     let invalid = |message: &str| PluginError::Message(message.into());
     if domain_version_id.trim().is_empty()
         || frame_version_id.trim().is_empty()

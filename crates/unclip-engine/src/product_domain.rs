@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::support::invalid;
 use unclip_domain::{
     DomainSnapshot, ProductDomainId, ProductDomainInput, ProductDomainSnapshot,
     ProductDomainVersion, ProductFrameAxis, ProductFrameId, ProductFrameVersion,
@@ -11,11 +12,7 @@ use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
     Timestamp, Tracked,
 };
-use unclip_plugin::{PluginError, Result};
-
-fn invalid(message: impl Into<String>) -> PluginError {
-    PluginError::Message(message.into())
-}
+use unclip_plugin::Result;
 
 fn ordered_unique<T: Ord>(values: &[T]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
@@ -70,7 +67,6 @@ pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Resu
 ///
 /// The output retains immutable input identities and versions. It contains no
 /// copied units or relations, so it remains distinct from an ordinary domain union.
-#[allow(clippy::too_many_arguments)]
 pub fn materialize_product_domain(
     left: &Tracked<DomainSnapshot>,
     right: &Tracked<DomainSnapshot>,
@@ -95,8 +91,8 @@ pub fn materialize_product_domain(
     let dependencies = DependencyCollector::default();
     let left_domain = dependencies.read(left);
     let right_domain = dependencies.read(right);
-    super::domain_null::validate(left_domain)?;
-    super::domain_null::validate(right_domain)?;
+    crate::nulls::domain::validate(left_domain)?;
+    crate::nulls::domain::validate(right_domain)?;
     if left.id().0.trim().is_empty()
         || right.id().0.trim().is_empty()
         || left.id() == right.id()

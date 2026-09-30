@@ -130,18 +130,34 @@ fn stored_sensor_runs(
     Ok((identities, sensor_runs))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the before and after profiles of one experiment have in common.
+///
+/// Built once and shared, so the two calls differ only in the four things that
+/// actually differ. `stored_profile` previously took all nine positionally, with
+/// `run_id` and `id` adjacent and both `&str` — a transposition that compiled
+/// and filed the profile under the wrong identity.
+struct ProfileContext<'a> {
+    run_id: &'a str,
+    frame: &'a unclip_domain::MeasurementFrame,
+    sensor_run_ids: &'a BTreeMap<PluginId, String>,
+    plan: &'a unclip_plugin::RunPlan,
+    timestamp: &'a str,
+}
+
 fn stored_profile(
-    run_id: &str,
+    ctx: &ProfileContext<'_>,
     id: &str,
-    frame: &unclip_domain::MeasurementFrame,
     values: &[unclip_epistemic::Calculated<Measurement>],
     profile_provenance: DerivedId,
-    sensor_run_ids: &BTreeMap<PluginId, String>,
     sensor_runs: Vec<SensorRunRecord>,
-    plan: &unclip_plugin::RunPlan,
-    timestamp: &str,
 ) -> anyhow::Result<ExperimentMeasurementProfile> {
+    let ProfileContext {
+        run_id,
+        frame,
+        sensor_run_ids,
+        plan,
+        timestamp,
+    } = *ctx;
     let measurements = values
         .iter()
         .enumerate()
@@ -380,11 +396,13 @@ pub(crate) async fn run(
         &experiment,
         &split,
         &candidate,
-        &domain_key,
-        &frame_key,
-        &before_profile_id,
-        &after_profile_id,
-        &timestamp,
+        unclip_engine::ExperimentStorageIds {
+            domain_version_id: &domain_key,
+            frame_version_id: &frame_key,
+            before_profile_id: &before_profile_id,
+            after_profile_id: &after_profile_id,
+            started_at: &timestamp,
+        },
     )?;
     let before_pair = experiment
         .execution
@@ -407,27 +425,28 @@ pub(crate) async fn run(
         &parsed.params,
         &timestamp,
     )?;
+    let profile_context = ProfileContext {
+        run_id: &request.run_id,
+        frame: &frame,
+        sensor_run_ids: &sensor_run_ids,
+        plan: &plan,
+        timestamp: &timestamp,
+    };
     let before_profile = stored_profile(
-        &request.run_id,
+        &profile_context,
         &before_profile_id,
-        &frame,
         &experiment.execution.measurements.before,
         before_pair.id().clone(),
-        &sensor_run_ids,
         sensor_runs,
-        &plan,
-        &timestamp,
     )?;
+    // The sensor runs are written with the before profile; the after profile
+    // references the same rows rather than inserting them twice.
     let after_profile = stored_profile(
-        &request.run_id,
+        &profile_context,
         &after_profile_id,
-        &frame,
         &experiment.execution.measurements.after,
         after_pair.id().clone(),
-        &sensor_run_ids,
         vec![],
-        &plan,
-        &timestamp,
     )?;
     let mut prerequisite_provenance = vec![
         root_provenance(

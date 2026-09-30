@@ -5,7 +5,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
+use unclip_engine::{create_product_frame, materialize_product_domain, CrossDomainRun, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CanonicalCorrelationAnalysis, CanonicalCorrelationConfig, CrossDomainSample, MeasurementValue,
@@ -146,12 +146,14 @@ fn engine_cca_binds_product_versions_and_tracks_every_input() {
     };
     let measure = |samples: &[Tracked<CrossDomainSample>]| {
         engine.measure_canonical_correlation(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "cca-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             samples,
             config,
-            "cca-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
     };
     let sensor = engine
@@ -224,12 +226,14 @@ fn engine_cca_preserves_sparse_and_no_variation_states() {
     let calculate = |samples: &[Tracked<CrossDomainSample>]| {
         engine
             .measure_canonical_correlation(
-                &Tracked::from(&product),
-                &Tracked::from(&frame),
+                CrossDomainRun {
+                    product: &Tracked::from(&product),
+                    frame: &Tracked::from(&frame),
+                    run_id: "sparse-cca",
+                    timestamp: Timestamp::new("now"),
+                },
                 samples,
                 CanonicalCorrelationConfig::default(),
-                "sparse-cca",
-                Timestamp::new("now"),
             )
             .unwrap()
     };
@@ -276,12 +280,14 @@ fn engine_cca_rejects_a_frame_from_another_product_version() {
     wrong_frame.product_version = ProductDomainVersion::new("other");
     assert!(engine
         .measure_canonical_correlation(
-            &Tracked::from(&product),
-            &Tracked::from_recorded(DerivedId::new("wrong-frame"), wrong_frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from_recorded(DerivedId::new("wrong-frame"), wrong_frame),
+                run_id: "invalid-cca",
+                timestamp: Timestamp::new("now"),
+            },
             &coupled_samples(),
             CanonicalCorrelationConfig::default(),
-            "invalid-cca",
-            Timestamp::new("now"),
         )
         .is_err());
 }
@@ -299,12 +305,14 @@ fn engine_cca_holds_the_sensor_to_its_declared_params_schema() {
     };
     let error = engine
         .measure_canonical_correlation(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "schema-cca",
+                timestamp: Timestamp::new("now"),
+            },
             &coupled_samples(),
             out_of_range,
-            "schema-cca",
-            Timestamp::new("now"),
         )
         .expect_err("a config the declared schema rejects must not reach the sensor");
     let message = error.to_string();
@@ -315,12 +323,14 @@ fn engine_cca_holds_the_sensor_to_its_declared_params_schema() {
     // rejects the violation rather than the path.
     assert!(engine
         .measure_canonical_correlation(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "schema-cca-ok",
+                timestamp: Timestamp::new("now"),
+            },
             &coupled_samples(),
             CanonicalCorrelationConfig::default(),
-            "schema-cca-ok",
-            Timestamp::new("now"),
         )
         .is_ok());
 }

@@ -6,7 +6,7 @@ use unclip_domain::{
     ProductFrameAxis, ProductFrameId, ProductFrameVersion, ProductInteraction,
     ProductMeasurementFrame, Unit, UnitId, UnitKind,
 };
-use unclip_engine::{create_product_frame, materialize_product_domain, Engine};
+use unclip_engine::{create_product_frame, materialize_product_domain, CrossDomainRun, Engine};
 use unclip_epistemic::{Calculated, DerivedId, DomainVersion, PluginId, Timestamp, Tracked};
 use unclip_measure::{
     CrossDomainCommunityConfig, CrossDomainCommunityDetection, CrossDomainCommunityMember,
@@ -125,15 +125,17 @@ fn mutual_information(
     ];
     let result = engine
         .measure_cross_domain_mutual_information(
-            &Tracked::from(product),
-            &Tracked::from(frame),
+            CrossDomainRun {
+                product: &Tracked::from(product),
+                frame: &Tracked::from(frame),
+                run_id: "mi-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
             &samples,
             CrossDomainMutualInformationConfig {
                 minimum_samples: NonZeroUsize::new(2).unwrap(),
                 bins: NonZeroUsize::new(2).unwrap(),
             },
-            "mi-run",
-            Timestamp::new("2026-09-24T00:00:01Z"),
         )
         .unwrap();
     let Reading::Value {
@@ -167,12 +169,14 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
     let tracked_mi = Tracked::from_derived(&mi, profile);
     let measure = || {
         engine.measure_cross_domain_communities(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "community-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             &tracked_mi,
             community_config(2),
-            "community-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
     };
     let sensor = engine
@@ -237,12 +241,14 @@ fn engine_communities_keep_a_higher_sample_floor_typed() {
     let (mi, profile) = mutual_information(&engine, &product, &frame);
     let result = engine
         .measure_cross_domain_communities(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "sparse-community-run",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             &Tracked::from_derived(&mi, profile),
             community_config(5),
-            "sparse-community-run",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap();
     assert_eq!(
@@ -266,12 +272,14 @@ fn engine_communities_reject_mismatched_or_incomplete_mi_profiles() {
     profile.binding.frame_version = ProductFrameVersion::new("wrong");
     let error = engine
         .measure_cross_domain_communities(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "wrong-binding",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             &Tracked::from_derived(&mi, profile),
             community_config(2),
-            "wrong-binding",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap_err();
     assert!(error
@@ -282,12 +290,14 @@ fn engine_communities_reject_mismatched_or_incomplete_mi_profiles() {
     profile.axes.pop();
     let error = engine
         .measure_cross_domain_communities(
-            &Tracked::from(&product),
-            &Tracked::from(&frame),
+            CrossDomainRun {
+                product: &Tracked::from(&product),
+                frame: &Tracked::from(&frame),
+                run_id: "missing-axis",
+                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+            },
             &Tracked::from_derived(&mi, profile),
             community_config(2),
-            "missing-axis",
-            Timestamp::new("2026-09-24T00:00:02Z"),
         )
         .unwrap_err();
     assert!(error

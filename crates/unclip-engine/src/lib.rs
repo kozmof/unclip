@@ -2,81 +2,70 @@
 
 #![forbid(unsafe_code)]
 
-mod candidate_application;
-mod comparison;
+mod applications;
+mod comparisons;
 mod composition_measurement;
 mod constraints;
-mod context_null;
-mod coupling_application;
-mod coupling_null;
 mod cross_domain;
-mod cross_domain_discovery;
+pub use cross_domain::{CrossDomainRun, CrossProductTransferInputs, TransferSide};
 mod discovery;
-mod distribution_comparison;
-mod domain_null;
 mod empirical;
-mod event_comparison;
 mod experiment;
-mod graph_comparison;
 mod held_out;
 mod independence;
-mod independence_comparison;
-mod matrix_comparison;
-mod motif_application;
-mod motif_discovery;
-mod motif_null;
-mod null_models;
+mod nulls;
 mod observation_selection;
-mod pairwise_discovery;
 mod pareto;
-mod partition_comparison;
 mod product_domain;
 pub use product_domain::{create_product_frame, materialize_product_domain};
-mod profile_comparison;
-mod ranking_comparison;
-mod ranking_null;
-mod relation_discovery;
 mod revision;
-mod role_application;
-mod role_null;
-mod spectral_comparison;
-mod structure_discovery;
-mod structured_comparison;
-mod temporal_discovery;
+mod support;
 mod transfer_constraint;
-mod transformation_application;
-mod transformation_null;
-mod weight_null;
 
-pub use candidate_application::{
+pub use applications::candidate::{
     CounterfactualSnapshot, PropertyChange, PropertyTarget, RelationBindings,
 };
-pub use comparison::{compare_measurements, ScalarDifference, ScalarDifferenceComparator};
+pub use comparisons::distribution::{
+    DistributionComparison, DistributionNormalization, JensenShannonComparator,
+};
+pub use comparisons::event::{ChangePointAlignmentComparator, EventComparison, EventMatch};
+pub use comparisons::graph::{
+    DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
+};
+pub use comparisons::independence::{
+    compare_product_with_independence, IndependenceComparisonEntry, IndependenceComparisonProfile,
+    IndependenceComparisonResult,
+};
+pub use comparisons::matrix::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
+pub use comparisons::partition::{PartitionComparison, PartitionRandComparator};
+pub use comparisons::profile::{
+    compare_profiles, ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta,
+};
+pub use comparisons::ranking::{KendallComparator, RankingComparison, RboComparator};
+pub use comparisons::scalar::{compare_measurements, ScalarDifference, ScalarDifferenceComparator};
+pub use comparisons::spectral::{SpectralComparison, SpectrumComparator};
+pub use comparisons::structured::{StructuredIdentityComparator, StructuredIdentityComparison};
 pub use composition_measurement::{
     measure_composition, BoundDomainMeasurementProfile, BoundProductMeasurementProfile,
-    CompositionMeasurementInputs, CompositionMeasurementProfile, ProfileMeasurement,
+    CompositionMeasurementInputs, CompositionMeasurementProfile, CompositionSide,
+    ProfileMeasurement,
 };
 pub use constraints::{
     assess_experiment_constraints, ConstraintAssessment, ConstraintStatus, ExperimentConstraint,
 };
-pub use context_null::ContextualCooccurrenceNull;
-pub use coupling_null::CouplingZeroNull;
-pub use cross_domain_discovery::{
+pub use discovery::cross_domain::{
     derive_cross_domain_deviations, CrossDomainCandidateGenerator, CrossDomainDeviationEvidence,
 };
-pub use discovery::{generate_candidates, CandidateInputs, PersistentResidualGenerator};
-pub use distribution_comparison::{
-    DistributionComparison, DistributionNormalization, JensenShannonComparator,
-};
-pub use domain_null::{ExistingRelationNull, ExistingUnitNull};
+pub use discovery::motif::RecurringMotifGenerator;
+pub use discovery::pairwise::PairwiseCouplingGenerator;
+pub use discovery::relation::MissingRelationGenerator;
+pub use discovery::residual::{generate_candidates, CandidateInputs, PersistentResidualGenerator};
+pub use discovery::structure::{CommunityCandidateGenerator, LatentAxisGenerator};
+pub use discovery::temporal::TemporalCouplingGenerator;
 pub use empirical::{derive_empirical, EmpiricalMethod, EmpiricalResult};
-pub use event_comparison::{ChangePointAlignmentComparator, EventComparison, EventMatch};
 pub use experiment::{
     persistable_experiment, CounterfactualEvidence, CounterfactualExperiment,
-    ExperimentConstraints, NullEvidence, PersistableExperiment,
-};
-pub use graph_comparison::{
-    DirectedGraphEdge, GraphComparison, GraphIdentityComparator, NamedDirectedGraph,
+    ExperimentConstraints, ExperimentStorageIds, NullEvidence, PersistableExperiment,
 };
 pub use held_out::{
     CounterfactualComparison, CounterfactualMeasurementInputs, CounterfactualMeasurements,
@@ -85,45 +74,31 @@ pub use held_out::{
 pub use independence::{
     IndependenceDefinition, IndependenceExpectation, IndependenceExpectationProfile,
 };
-pub use independence_comparison::{
-    compare_product_with_independence, IndependenceComparisonEntry, IndependenceComparisonProfile,
-    IndependenceComparisonResult,
-};
-pub use matrix_comparison::{MatrixCellDifference, MatrixComparison, PairwiseMatrixComparator};
-pub use motif_discovery::RecurringMotifGenerator;
-pub use motif_null::ExistingMotifNull;
-pub use null_models::{
+pub use nulls::context::ContextualCooccurrenceNull;
+pub use nulls::coupling::CouplingZeroNull;
+pub use nulls::domain::{ExistingRelationNull, ExistingUnitNull};
+pub use nulls::models::{
     evaluate_null_models, evaluate_null_models_with_inputs, evaluate_null_models_with_rankings,
     NullInputs, RandomCooccurrenceNull,
 };
+pub use nulls::motif::ExistingMotifNull;
+pub use nulls::ranking::RankingConstraintNull;
+pub use nulls::role::ExistingRoleNull;
+pub use nulls::transformation::ExistingTransformationNull;
+pub use nulls::weight::WeightChangeNull;
 pub use observation_selection::{
     observation_split_run_record, select_observations, validate_candidate_ancestry,
     ObservationSplit,
 };
-pub use pairwise_discovery::PairwiseCouplingGenerator;
 pub use pareto::{
     compare_pareto, ObjectiveDirection, ParetoAssessment, ParetoDimension, ParetoEvidence,
     ParetoRelation,
 };
-pub use partition_comparison::{PartitionComparison, PartitionRandComparator};
-pub use profile_comparison::{
-    compare_profiles, ComparisonPair, DeltaProfile, ProfileComparisonResult, ProfileDelta,
-};
-pub use ranking_comparison::{KendallComparator, RankingComparison, RboComparator};
-pub use ranking_null::RankingConstraintNull;
-pub use relation_discovery::MissingRelationGenerator;
 pub use revision::{
     record_delta_e_test, record_delta_v_test, record_delta_w_test, record_dynamic_coupling_test,
-    record_structural_test, RevisionAttempt, RevisionStep, RevisionTestOutcome,
+    record_structural_test, RevisionAttempt, RevisionStep, RevisionTest, RevisionTestOutcome,
 };
-pub use role_null::ExistingRoleNull;
-pub use spectral_comparison::{SpectralComparison, SpectrumComparator};
-pub use structure_discovery::{CommunityCandidateGenerator, LatentAxisGenerator};
-pub use structured_comparison::{StructuredIdentityComparator, StructuredIdentityComparison};
-pub use temporal_discovery::TemporalCouplingGenerator;
 pub use transfer_constraint::TransferAssessment;
-pub use transformation_null::ExistingTransformationNull;
-pub use weight_null::WeightChangeNull;
 
 use std::collections::BTreeMap;
 
