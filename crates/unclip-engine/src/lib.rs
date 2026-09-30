@@ -429,6 +429,16 @@ impl Engine {
         run: MeasurementRun<'_>,
         seed: impl Fn(&DependencyCollector),
     ) -> Result<Vec<Calculated<Measurement>>> {
+        // Every emitted `DerivedId` is `{run_id}/{plugin_id}`, so an empty run
+        // id silently produces ids like `/sensor.coverage` — indistinguishable
+        // between runs and unusable as a provenance key. `interpret` and the
+        // crate's free functions already refuse this; the measure path did not,
+        // which made the weakest check the one on the most-used stage.
+        if run.id.trim().is_empty() {
+            return Err(unclip_plugin::PluginError::Message(
+                "measurement requires a non-empty run ID".into(),
+            ));
+        }
         let mut sensors = plan.sensors.iter().collect::<Vec<_>>();
         sensors.sort_by(|left, right| {
             let left = left.descriptor();
