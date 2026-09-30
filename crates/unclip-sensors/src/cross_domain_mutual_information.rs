@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use semver::Version;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{
-    cross_domain_mutual_information, CrossDomainMutualInformationConfig,
+    cross_domain_mutual_information_iter, CrossDomainMutualInformationConfig,
     CrossDomainMutualInformationOutcome, Measurement, MeasurementContext, MeasurementKind,
     MeasurementValue, ProductMeasurementBinding, Reading,
 };
@@ -70,12 +70,13 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
                 "cross-domain mutual information requires a frame bound to the exact product inputs",
             ));
         }
+        // Read every selected sample, including when calculation exits early.
         let samples = ctx
             .samples()
             .iter()
-            .map(|sample| ctx.read(sample).clone())
+            .map(|sample| ctx.read(sample))
             .collect::<Vec<_>>();
-        let outcome = cross_domain_mutual_information(
+        let outcome = cross_domain_mutual_information_iter(
             ProductMeasurementBinding {
                 product: product.id.clone(),
                 product_version: product.version.clone(),
@@ -85,19 +86,18 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
                 right: product.right.clone(),
             },
             &frame.axes,
-            &samples,
+            samples.into_iter(),
             config,
         )
         .map_err(crate::support::calculation)?;
 
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossDomainMutualInformationOutcome::Value { analysis } => {
-                let unassessed = analysis.unassessed_axes.clone();
+                let reading_value = serde_json::to_value(&analysis).map_err(invalid)?;
+                let unassessed = analysis.unassessed_axes;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(
-                            serde_json::to_value(analysis).map_err(invalid)?,
-                        ),
+                        value: MeasurementValue::Structured(reading_value),
                     },
                     None,
                     "value",

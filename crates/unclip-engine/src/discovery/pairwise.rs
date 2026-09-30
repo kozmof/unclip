@@ -103,7 +103,7 @@ impl CandidateGenerator for PairwiseCouplingGenerator {
                         continue;
                     }
                     proposals.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::DynamicCoupling,
-                        value:serde_json::json!({"pattern":{"matching":"thresholded_pairwise_association","metric":matrix.metric(),"units":[matrix.units()[left],matrix.units()[right]]},"evidence":{"measurement":id,"sensor":measurement.sensor,"sensor_version":measurement.sensor_version,"context":measurement.context,"cell":cell},"selection":{"threshold":params.threshold,"minimum_samples":params.minimum_samples},"causal_claim":false}).as_object().expect("object").clone()}));
+                        value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"thresholded_pairwise_association","metric":matrix.metric(),"units":[matrix.units()[left],matrix.units()[right]]},"evidence":{"measurement":id,"sensor":measurement.sensor,"sensor_version":measurement.sensor_version,"context":measurement.context,"cell":cell},"selection":{"threshold":params.threshold,"minimum_samples":params.minimum_samples},"causal_claim":false}))}));
                 }
             }
         }

@@ -69,7 +69,7 @@ impl Sensor for PermutationSensor {
             .frame()
             .axes
             .iter()
-            .map(|axis| axis.unit.clone())
+            .map(|axis| &axis.unit)
             .collect::<BTreeSet<_>>();
         let alignments = alignment_index(ctx, &frame_units);
 
@@ -119,23 +119,23 @@ impl Sensor for PermutationSensor {
     }
 }
 
-pub(crate) type AlignmentIndex =
-    BTreeMap<ObservationId, BTreeMap<ObservedUnitId, BTreeSet<UnitId>>>;
+pub(crate) type AlignmentIndex<'a> =
+    BTreeMap<&'a ObservationId, BTreeMap<&'a ObservedUnitId, BTreeSet<&'a UnitId>>>;
 
-pub(crate) fn alignment_index(
-    ctx: &MeasureCtx<'_>,
-    frame_units: &BTreeSet<UnitId>,
-) -> AlignmentIndex {
+pub(crate) fn alignment_index<'a>(
+    ctx: &'a MeasureCtx<'_>,
+    frame_units: &BTreeSet<&UnitId>,
+) -> AlignmentIndex<'a> {
     let mut index: AlignmentIndex = BTreeMap::new();
     for tracked in ctx.alignments() {
         let alignment = ctx.read(tracked);
-        let units = index.entry(alignment.observation.clone()).or_default();
+        let units = index.entry(&alignment.observation).or_default();
         for candidate in &alignment.candidates {
             if frame_units.contains(&candidate.domain) {
                 units
-                    .entry(candidate.observed.clone())
+                    .entry(&candidate.observed)
                     .or_default()
-                    .insert(candidate.domain.clone());
+                    .insert(&candidate.domain);
             }
         }
     }
@@ -144,8 +144,8 @@ pub(crate) fn alignment_index(
 
 pub(crate) fn ranked_state(
     ranking: &unclip_observe::PartialRanking,
-    alignment: &BTreeMap<ObservedUnitId, BTreeSet<UnitId>>,
-    frame_units: &BTreeSet<UnitId>,
+    alignment: &BTreeMap<&ObservedUnitId, BTreeSet<&UnitId>>,
+    frame_units: &BTreeSet<&UnitId>,
 ) -> RankedState {
     let mut state = RankedState {
         tiers: Vec::new(),
@@ -158,7 +158,7 @@ pub(crate) fn ranked_state(
         let mut resolved_tier = Vec::new();
         for observed in &tier.units {
             match unique_alignment(alignment.get(observed)) {
-                Some(unit) if represented.insert(unit.clone()) => resolved_tier.push(unit.clone()),
+                Some(unit) if represented.insert(unit) => resolved_tier.push(unit.clone()),
                 _ => state.unresolved.push(observed.clone()),
             }
         }
@@ -169,7 +169,7 @@ pub(crate) fn ranked_state(
 
     for observed in &ranking.unknown {
         match unique_alignment(alignment.get(observed)) {
-            Some(unit) if represented.insert(unit.clone()) => state.unknown.push(unit.clone()),
+            Some(unit) if represented.insert(unit) => state.unknown.push(unit.clone()),
             _ => state.unresolved.push(observed.clone()),
         }
     }
@@ -178,15 +178,15 @@ pub(crate) fn ranked_state(
         frame_units
             .iter()
             .filter(|unit| !represented.contains(*unit))
-            .cloned(),
+            .map(|unit| (*unit).clone()),
     );
     state
 }
 
-fn unique_alignment(candidates: Option<&BTreeSet<UnitId>>) -> Option<&UnitId> {
+fn unique_alignment<'a>(candidates: Option<&BTreeSet<&'a UnitId>>) -> Option<&'a UnitId> {
     let candidates = candidates?;
     (candidates.len() == 1)
-        .then(|| candidates.iter().next())
+        .then(|| candidates.iter().next().copied())
         .flatten()
 }
 

@@ -4,7 +4,7 @@ use semver::Version;
 use unclip_domain::UnitId;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{
-    canonical_correlation, CanonicalCorrelationConfig, CanonicalCorrelationOutcome,
+    canonical_correlation_iter, CanonicalCorrelationConfig, CanonicalCorrelationOutcome,
     CanonicalCorrelationUndefined, Measurement, MeasurementContext, MeasurementKind,
     MeasurementValue, Reading,
 };
@@ -87,23 +87,24 @@ impl ProductSensor for CanonicalCorrelationSensor {
         let config: CanonicalCorrelationConfig = serde::Deserialize::deserialize(ctx.params())
             .map_err(crate::support::invalid_params)?;
         let (left_units, right_units) = frame_units(ctx)?;
+        // Read every selected sample, including when calculation exits early.
         let samples = ctx
             .samples()
             .iter()
-            .map(|sample| ctx.read(sample).clone())
+            .map(|sample| ctx.read(sample))
             .collect::<Vec<_>>();
-        let outcome = canonical_correlation(&left_units, &right_units, &samples, config)
-            .map_err(crate::support::calculation)?;
+        let outcome =
+            canonical_correlation_iter(&left_units, &right_units, samples.into_iter(), config)
+                .map_err(crate::support::calculation)?;
 
         let (reading, sample_count, excluded, status) = match outcome {
             CanonicalCorrelationOutcome::Value { analysis } => {
                 let sample_count = analysis.sample_count;
-                let excluded = analysis.excluded_observations.clone();
+                let reading_value = serde_json::to_value(&analysis).map_err(invalid)?;
+                let excluded = analysis.excluded_observations;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(
-                            serde_json::to_value(analysis).map_err(invalid)?,
-                        ),
+                        value: MeasurementValue::Structured(reading_value),
                     },
                     sample_count,
                     excluded,

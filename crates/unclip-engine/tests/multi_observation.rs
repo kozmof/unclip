@@ -341,7 +341,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
             _ => panic!("unexpected reading"),
         }
     }
-    let mut reversed = fixture.clone();
+    let mut reversed = fixture;
     reversed.observations.reverse();
     reversed.rankings.reverse();
     reversed.alignments.reverse();
@@ -1222,7 +1222,7 @@ fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
             .unwrap()
     };
     let expected = calculate(&fixture);
-    let mut shuffled = fixture.clone();
+    let mut shuffled = fixture;
     shuffled.observations.reverse();
     shuffled.rankings.reverse();
     shuffled.alignments.reverse();
@@ -1296,7 +1296,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
             value: MeasurementValue::Events(vec![])
         }
     );
-    let mut constant = fixture.clone();
+    let mut constant = fixture;
     for ranking in &mut constant.rankings {
         ranking.tiers = vec![RankTier {
             units: vec![ObservedUnitId::new("a"), ObservedUnitId::new("b")],
@@ -1515,7 +1515,7 @@ fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() 
             run()
         )
         .is_err());
-    let mut invalid_frame = fixture.frame.clone();
+    let mut invalid_frame = fixture.frame;
     invalid_frame.axes.push(invalid_frame.axes[0].clone());
     let invalid_frame = Tracked::from_recorded(DerivedId::new("frame"), invalid_frame);
     assert!(engine

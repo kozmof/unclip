@@ -32,17 +32,17 @@ impl SupportAnalysis {
 }
 
 pub(crate) fn analyze(ctx: &MeasureCtx<'_>) -> SupportAnalysis {
-    let mut aligned: BTreeMap<ObservationId, BTreeMap<ObservedUnitId, BTreeSet<UnitId>>> =
+    let mut aligned: BTreeMap<&ObservationId, BTreeMap<&ObservedUnitId, BTreeSet<&UnitId>>> =
         BTreeMap::new();
 
     for tracked in ctx.alignments() {
         let alignment = ctx.read(tracked);
-        let units = aligned.entry(alignment.observation.clone()).or_default();
+        let units = aligned.entry(&alignment.observation).or_default();
         for candidate in &alignment.candidates {
             units
-                .entry(candidate.observed.clone())
+                .entry(&candidate.observed)
                 .or_default()
-                .insert(candidate.domain.clone());
+                .insert(&candidate.domain);
         }
     }
 

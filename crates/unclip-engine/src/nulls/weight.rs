@@ -96,7 +96,7 @@ impl NullModel for WeightChangeNull {
                 "proposed integer weight exceeds exact numeric range",
             ));
         }
-        let proposed: PropertyValue = serde_json::from_value(pattern.proposed_value.clone())
+        let proposed: PropertyValue = serde::Deserialize::deserialize(&pattern.proposed_value)
             .map_err(|e| PluginError::Message(e.to_string()))?;
         let proposed = numeric(&proposed)?;
         let Some(domain) = ctx.domain() else {

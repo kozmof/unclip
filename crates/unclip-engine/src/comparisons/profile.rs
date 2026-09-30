@@ -123,20 +123,19 @@ pub fn compare_profiles(
                     "delta output identity collides with an input or output",
                 ));
             }
-            let tracked = Tracked::from_derived(&delta, delta.value().clone());
             entries.push(ProfileDelta {
                 pair: pair.clone(),
                 id: delta.id().clone(),
-                delta: dependencies.read(&tracked).clone(),
+                delta: dependencies.read_derived(&delta).clone(),
             });
             deltas.push(delta);
         }
     }
     let mut comparators=plan.comparators.iter().map(|plugin| {
         let descriptor=plugin.descriptor();let params=run.params.get(&descriptor.id).cloned().unwrap_or_else(|| serde_json::json!({}));
-        (descriptor.id.clone(),serde_json::json!({"id":descriptor.id,"version":descriptor.version,"params":params,"params_hash":hash_params(&params)}))
+        (&descriptor.id,serde_json::json!({"id":descriptor.id,"version":descriptor.version,"params":params,"params_hash":hash_params(&params)}))
     }).collect::<Vec<_>>();
-    comparators.sort_by(|a, b| a.0.cmp(&b.0));
+    comparators.sort_by(|a, b| a.0.cmp(b.0));
     let params = serde_json::json!({"pairs":pairs,"comparators":comparators.into_iter().map(|(_,entry)| entry).collect::<Vec<_>>()});
     let token = CalculationToken::from_harness(
         EmitMetadata::new(

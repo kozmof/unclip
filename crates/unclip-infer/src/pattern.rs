@@ -93,7 +93,7 @@ impl Inferrer for PatternInferrer {
                     ctx.domain()
                         .units
                         .contains_key(&id)
-                        .then_some((id, hit.pattern.clone()))
+                        .then(|| (id, hit.pattern.clone()))
                 })
                 .collect();
             for hit in &hits {

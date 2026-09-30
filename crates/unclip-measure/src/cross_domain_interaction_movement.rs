@@ -130,7 +130,18 @@ pub fn cross_domain_interaction_movement(
     samples: &[CrossDomainSample],
     config: CrossDomainInteractionMovementConfig,
 ) -> Result<CrossDomainInteractionMovementOutcome, CrossDomainInteractionMovementError> {
+    cross_domain_interaction_movement_iter(binding, axes, samples.iter(), config)
+}
+
+/// Calculate from borrowed samples without copying their maps.
+pub fn cross_domain_interaction_movement_iter<'a>(
+    binding: ProductMeasurementBinding,
+    axes: &[ProductFrameAxis],
+    samples: impl ExactSizeIterator<Item = &'a CrossDomainSample>,
+    config: CrossDomainInteractionMovementConfig,
+) -> Result<CrossDomainInteractionMovementOutcome, CrossDomainInteractionMovementError> {
     validate_binding(&binding)?;
+    let sample_count = samples.len();
 
     let mut coordinates = BTreeSet::new();
     let mut left_units = BTreeSet::new();
@@ -168,8 +179,8 @@ pub fn cross_domain_interaction_movement(
         .iter()
         .map(|entry| &entry.observation)
         .collect::<BTreeSet<_>>();
-    if sequence_ids.len() != samples.len()
-        || by_observation.len() != samples.len()
+    if sequence_ids.len() != sample_count
+        || by_observation.len() != sample_count
         || by_observation.keys().copied().collect::<BTreeSet<_>>() != sequence_ids
     {
         return Err(CrossDomainInteractionMovementError::SequenceMismatch);
@@ -177,7 +188,7 @@ pub fn cross_domain_interaction_movement(
 
     if axes.is_empty() {
         return Ok(CrossDomainInteractionMovementOutcome::NoAxes {
-            observation_count: samples.len(),
+            observation_count: sample_count,
         });
     }
 
@@ -257,14 +268,15 @@ pub fn cross_domain_interaction_movement(
             },
         );
     }
+    let transition_count = transitions.len();
     Ok(CrossDomainInteractionMovementOutcome::Value {
         movement: Box::new(CrossDomainInteractionMovement {
             binding,
-            sequence: config.sequence.clone(),
+            sequence: config.sequence,
             axes: measured,
             unassessed_axes: unassessed,
-            observation_count: samples.len(),
-            transition_count: transitions.len(),
+            observation_count: sample_count,
+            transition_count,
             minimum_transitions: config.minimum_transitions.get(),
         }),
     })

@@ -40,7 +40,7 @@ pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Resu
             .iter()
             .chain(&interaction.requirements)
             .collect::<BTreeSet<_>>();
-        let coordinate = (interaction.left.clone(), interaction.right.clone());
+        let coordinate = (&interaction.left, &interaction.right);
         if interaction.left.0.trim().is_empty()
             || interaction.right.0.trim().is_empty()
             || interaction.observations.is_empty() && interaction.requirements.is_empty()
@@ -115,7 +115,7 @@ pub fn materialize_product_domain(
             || interaction.id() == left.id()
             || interaction.id() == right.id()
             || interaction.id() == &output_id
-            || !evidence_ids.insert(interaction.id().clone())
+            || !evidence_ids.insert(interaction.id())
         {
             return Err(invalid(
                 "product interaction evidence requires distinct nonempty identities",
@@ -141,7 +141,7 @@ pub fn materialize_product_domain(
                 .chain(&interaction.requirements)
                 .any(|evidence| evidence.0.trim().is_empty())
             || unique_support.len() != support_count
-            || !pairs.insert((interaction.left.clone(), interaction.right.clone()))
+            || !pairs.insert((&interaction.left, &interaction.right))
         {
             return Err(invalid(
                 "product interactions require one unique existing left/right pair with ordered observed or required evidence",
@@ -229,11 +229,11 @@ pub fn create_product_frame(
     let materialized = product_snapshot
         .interactions
         .iter()
-        .map(|interaction| (interaction.left.clone(), interaction.right.clone()))
+        .map(|interaction| (&interaction.left, &interaction.right))
         .collect::<BTreeSet<_>>();
     let mut selected = BTreeSet::new();
     for axis in axes {
-        let coordinate = (axis.left.clone(), axis.right.clone());
+        let coordinate = (&axis.left, &axis.right);
         if axis.left.0.trim().is_empty()
             || axis.right.0.trim().is_empty()
             || axis

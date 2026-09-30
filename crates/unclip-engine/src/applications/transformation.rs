@@ -38,8 +38,13 @@ pub(crate) fn validate(
     domain: &DomainSnapshot,
 ) -> Result<TransformationPattern> {
     let evidence: TransformationEvidence =
-        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
-            .map_err(invalid)?;
+        serde::Deserialize::deserialize(serde::de::value::MapDeserializer::new(
+            proposal
+                .value
+                .iter()
+                .map(|(key, value)| (key.as_str(), value)),
+        ))
+        .map_err(invalid)?;
     let pattern = &evidence.pattern;
     if pattern.matching != "exact_unit_state_transition"
         || pattern.before.is_empty()

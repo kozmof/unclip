@@ -103,8 +103,14 @@ pub(crate) async fn run(
         })?;
 
     let evidence: CounterfactualEvidence =
-        serde_json::from_value(Value::Object(experiment.outcome.result.clone()))
-            .context("completed experiment has incompatible counterfactual evidence")?;
+        serde::Deserialize::deserialize(serde::de::value::MapDeserializer::new(
+            experiment
+                .outcome
+                .result
+                .iter()
+                .map(|(key, value)| (key.as_str(), value)),
+        ))
+        .context("completed experiment has incompatible counterfactual evidence")?;
     ensure!(
         evidence.candidate == candidate_id,
         "completed experiment evidence belongs to another candidate"

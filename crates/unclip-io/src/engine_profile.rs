@@ -85,7 +85,7 @@ fn validate(document: &EngineProfileDocument) -> anyhow::Result<()> {
     {
         ensure!(!plugin.id.0.is_empty(), "plugin id must not be empty");
         ensure!(
-            ids.insert(plugin.id.clone()),
+            ids.insert(&plugin.id),
             "duplicate plugin id in engine profile: {}",
             plugin.id.0
         );

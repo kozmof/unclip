@@ -388,7 +388,7 @@ pub async fn replay_cmd(
                 .query
                 .as_ref()
                 .and_then(|q| q.get("under"))
-                .map(|v| serde_json::from_value::<Vec<UnderOverride>>(v.clone()))
+                .map(<Vec<UnderOverride> as serde::Deserialize>::deserialize)
                 .transpose()
                 .context("packet has malformed `under` provenance")?
                 .unwrap_or_default();
@@ -413,7 +413,7 @@ pub async fn replay_cmd(
             let provenance = packet
                 .query
                 .context("packet has no embedded query; cannot replay")?;
-            let query: SampleQuery = serde_json::from_value(provenance.clone())
+            let query: SampleQuery = serde::Deserialize::deserialize(&provenance)
                 .context("packet has malformed query provenance")?;
             let params: SampleParams = serde_json::from_value(provenance)
                 .context("packet has malformed sampling-control provenance")?;

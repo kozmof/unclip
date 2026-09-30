@@ -98,7 +98,7 @@ impl super::Engine {
         for entry in split.training.iter().chain(&split.held_out) {
             dependencies.read(&Tracked::from_recorded(
                 entry.provenance.clone(),
-                entry.value.clone(),
+                &entry.value,
             ));
         }
         for input in inputs.baseline.alignments.iter().chain(inputs.alignments) {
@@ -165,18 +165,16 @@ impl super::Engine {
             (&mut evidence.after, &execution.measurements.after),
         ] {
             for value in values {
-                dependencies.read(&Tracked::from_derived(value, value.value().clone()));
+                dependencies.read_derived(value);
                 selected.push(value.id().clone());
             }
         }
         for delta in &execution.comparison.deltas {
-            dependencies.read(&Tracked::from_derived(delta, delta.value().clone()));
+            dependencies.read_derived(delta);
         }
         let profile = &execution.comparison.profile;
         evidence.comparison = profile.id().clone();
-        evidence.delta_profile = dependencies
-            .read(&Tracked::from_derived(profile, profile.value().clone()))
-            .clone();
+        evidence.delta_profile = dependencies.read_derived(profile).clone();
         for result in &null_results {
             if dependencies.snapshot().contains(result.id()) || result.id() == &id {
                 return Err(PluginError::Message(
@@ -186,9 +184,7 @@ impl super::Engine {
             evidence.null_results.push(NullEvidence {
                 id: result.id().clone(),
                 model: result.provenance().producer.clone(),
-                reading: dependencies
-                    .read(&Tracked::from_derived(result, result.value().clone()))
-                    .clone(),
+                reading: dependencies.read_derived(result).clone(),
             });
         }
         let mut transfer = constraint_inputs
@@ -237,11 +233,7 @@ impl super::Engine {
                 ));
             }
             evidence.pareto_assessment = Some(result.id().clone());
-            evidence.pareto = Some(
-                dependencies
-                    .read(&Tracked::from_derived(&result, result.value().clone()))
-                    .clone(),
-            );
+            evidence.pareto = Some(dependencies.read_derived(&result).clone());
             Some(result)
         };
         let assessments = if constraints.is_empty() {
@@ -270,9 +262,7 @@ impl super::Engine {
                 ));
             }
             evidence.constraint_assessment = Some(result.id().clone());
-            evidence.constraints = dependencies
-                .read(&Tracked::from_derived(&result, result.value().clone()))
-                .clone();
+            evidence.constraints = dependencies.read_derived(&result).clone();
             Some(result)
         };
         if dependencies.snapshot().contains(&id) || evidence.candidate == id {
@@ -362,7 +352,7 @@ pub fn persistable_experiment(
     for entry in split_value.training.iter().chain(&split_value.held_out) {
         dependencies.read(&Tracked::from_recorded(
             entry.provenance.clone(),
-            entry.value.clone(),
+            &entry.value,
         ));
     }
     let deltas = experiment
@@ -371,7 +361,7 @@ pub fn persistable_experiment(
         .deltas
         .iter()
         .map(|delta| {
-            dependencies.read(&Tracked::from_derived(delta, delta.value().clone()));
+            dependencies.read_derived(delta);
             unclip_record::ExperimentDelta {
                 before_profile_id: before_profile_id.into(),
                 after_profile_id: after_profile_id.into(),

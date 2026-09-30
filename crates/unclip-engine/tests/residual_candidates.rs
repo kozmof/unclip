@@ -287,7 +287,7 @@ fn rejects_invalid_parameters_and_inconsistent_or_unselected_evidence() {
         serde_json::json!({"minimum_observations":2})
     )
     .is_err());
-    let mut duplicate = measured.clone();
+    let mut duplicate = measured;
     duplicate.push(duplicate[0].clone());
     assert!(run(
         &fixture.observations,

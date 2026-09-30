@@ -114,7 +114,7 @@ impl CandidateGenerator for TemporalCouplingGenerator {
                 continue;
             }
             proposals.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::DynamicCoupling,
-                value:serde_json::json!({"pattern":{"matching":"lagged_directional_association","source":evidence.source,"target":evidence.target,"lag_steps":evidence.lag_steps,"sequence":evidence.sequence},"evidence":{"measurement":id,"sensor":measurement.sensor,"sensor_version":measurement.sensor_version,"coefficient":coefficient,"sample_count":count,"context":measurement.context},"selection":{"threshold":params.threshold,"minimum_samples":params.minimum_samples},"causal_claim":false}).as_object().expect("object").clone()}));
+                value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"lagged_directional_association","source":evidence.source,"target":evidence.target,"lag_steps":evidence.lag_steps,"sequence":evidence.sequence},"evidence":{"measurement":id,"sensor":measurement.sensor,"sensor_version":measurement.sensor_version,"coefficient":coefficient,"sample_count":count,"context":measurement.context},"selection":{"threshold":params.threshold,"minimum_samples":params.minimum_samples},"causal_claim":false}))}));
         }
         Ok(proposals)
     }

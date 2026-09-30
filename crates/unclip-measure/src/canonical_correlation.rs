@@ -128,6 +128,16 @@ pub fn canonical_correlation(
     samples: &[CrossDomainSample],
     config: CanonicalCorrelationConfig,
 ) -> Result<CanonicalCorrelationOutcome, CanonicalCorrelationError> {
+    canonical_correlation_iter(left_units, right_units, samples.iter(), config)
+}
+
+/// Calculate from borrowed samples without copying their maps.
+pub fn canonical_correlation_iter<'a>(
+    left_units: &[UnitId],
+    right_units: &[UnitId],
+    samples: impl ExactSizeIterator<Item = &'a CrossDomainSample>,
+    config: CanonicalCorrelationConfig,
+) -> Result<CanonicalCorrelationOutcome, CanonicalCorrelationError> {
     validate_config(config)?;
     validate_units("left", left_units)?;
     validate_units("right", right_units)?;
@@ -142,7 +152,7 @@ pub fn canonical_correlation(
 
     let left_set = left_units.iter().collect::<BTreeSet<_>>();
     let right_set = right_units.iter().collect::<BTreeSet<_>>();
-    let mut ordered = samples.iter().collect::<Vec<_>>();
+    let mut ordered = samples.collect::<Vec<_>>();
     ordered.sort_by_key(|sample| &sample.observation);
     for pair in ordered.windows(2) {
         if pair[0].observation == pair[1].observation {

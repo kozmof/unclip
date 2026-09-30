@@ -207,7 +207,7 @@ pub(crate) async fn insert_provenance_in_transaction(
         if input == &value.id {
             return Err(invalid("provenance cannot depend on itself"));
         }
-        if !unique_inputs.insert(input.clone()) {
+        if !unique_inputs.insert(input) {
             return Err(invalid("provenance inputs must be unique"));
         }
     }

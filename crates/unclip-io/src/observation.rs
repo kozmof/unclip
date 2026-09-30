@@ -40,7 +40,7 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
     let mut unit_ids = BTreeSet::new();
     for unit in &document.observation.units {
         ensure!(
-            unit_ids.insert(unit.id.clone()),
+            unit_ids.insert(&unit.id),
             "duplicate observed unit id: {}",
             unit.id.0
         );
@@ -58,7 +58,7 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
     let mut relation_ids = BTreeSet::new();
     for relation in &document.observation.relations {
         ensure!(
-            relation_ids.insert(relation.id.clone()),
+            relation_ids.insert(&relation.id),
             "duplicate observed relation id: {}",
             relation.id.0
         );
@@ -86,7 +86,7 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
             ranking.observation == document.observation.id,
             "ranking observation id does not match the observation"
         );
-        let mut ranked = BTreeSet::<ObservedUnitId>::new();
+        let mut ranked = BTreeSet::<&ObservedUnitId>::new();
         for unit in ranking
             .tiers
             .iter()
@@ -99,7 +99,7 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
                 unit.0
             );
             ensure!(
-                ranked.insert(unit.clone()),
+                ranked.insert(unit),
                 "observed unit appears more than once in ranking: {}",
                 unit.0
             );

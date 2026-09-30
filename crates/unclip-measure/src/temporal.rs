@@ -396,7 +396,7 @@ mod tests {
             "change threshold must be finite and strictly positive"
         );
         assert!(detect_change_points(&change_sequence(3), &ranks, window, 1.0).is_err());
-        let mut reordered = ranks.clone();
+        let mut reordered = ranks;
         reordered.samples.swap(0, 1);
         assert!(detect_change_points(&sequence, &reordered, window, 1.0).is_err());
     }
@@ -535,7 +535,7 @@ mod tests {
             lagged_dependency(&sequence, &trajectory(&[1; 4]), &target, lag),
             Err(TemporalError::TrajectoryMismatch { index: 4 })
         );
-        let mut reordered = target.clone();
+        let mut reordered = target;
         reordered.samples.swap(0, 1);
         assert_eq!(
             lagged_dependency(&sequence, &source, &reordered, lag),

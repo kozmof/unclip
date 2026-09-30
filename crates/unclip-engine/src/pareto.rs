@@ -68,7 +68,7 @@ pub fn compare_pareto(
         if input.id().0.trim().is_empty()
             || input.id() == &output
             || selected
-                .insert(input.id().clone(), dependencies.read(input))
+                .insert(input.id(), dependencies.read(input))
                 .is_some()
         {
             return Err(invalid(

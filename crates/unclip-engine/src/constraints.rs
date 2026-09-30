@@ -77,7 +77,7 @@ pub fn assess_experiment_constraints(
             || input.id() == &output
             || input.id() == application.id()
             || selected
-                .insert(input.id().clone(), dependencies.read(input))
+                .insert(input.id(), dependencies.read(input))
                 .is_some()
         {
             return Err(invalid("constraint measurements require unique nonempty identities distinct from application and output"));

@@ -34,8 +34,13 @@ pub(crate) fn validate(
     domain: &DomainSnapshot,
 ) -> Result<RolePattern> {
     let evidence: RoleEvidence =
-        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
-            .map_err(invalid)?;
+        serde::Deserialize::deserialize(serde::de::value::MapDeserializer::new(
+            proposal
+                .value
+                .iter()
+                .map(|(key, value)| (key.as_str(), value)),
+        ))
+        .map_err(invalid)?;
     let pattern = &evidence.pattern;
     if pattern.matching != "exact_relation_kind_signature"
         || pattern.members.len() < 2
@@ -79,7 +84,7 @@ pub(crate) fn validate(
             .relations
             .values()
             .filter(|relation| &relation.target == member)
-            .map(|relation| relation.kind.clone())
+            .map(|relation| relation.kind.as_str())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -87,7 +92,7 @@ pub(crate) fn validate(
             .relations
             .values()
             .filter(|relation| &relation.source == member)
-            .map(|relation| relation.kind.clone())
+            .map(|relation| relation.kind.as_str())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();

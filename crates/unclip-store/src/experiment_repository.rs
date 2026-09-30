@@ -804,10 +804,10 @@ async fn hydrate_ledger_profile(
     })
 }
 
-fn collect_json_strings(value: &Value, strings: &mut BTreeSet<String>) {
+fn collect_json_strings<'a>(value: &'a Value, strings: &mut BTreeSet<&'a str>) {
     match value {
         Value::String(value) => {
-            strings.insert(value.clone());
+            strings.insert(value.as_str());
         }
         Value::Array(values) => {
             for value in values {
@@ -826,7 +826,7 @@ fn collect_json_strings(value: &Value, strings: &mut BTreeSet<String>) {
 async fn hydrate_ledger_provenance(
     db: &DatabaseConnection,
     mut required: BTreeSet<DerivedId>,
-    evidence: &[Value],
+    evidence: &[&Value],
 ) -> StoreResult<Vec<StoredProvenance>> {
     let repository = crate::SeaOrmProvenanceRepository::new(db.clone());
     let mut possible = BTreeSet::new();
@@ -999,12 +999,14 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
             );
         }
         required_provenance.extend(interpretations.iter().map(|value| value.id.clone()));
-        let mut evidence = vec![
-            Value::Object(revision.revision.evidence.clone()),
-            Value::Object(experiment.outcome.plan.clone()),
-            Value::Object(experiment.outcome.result.clone()),
-        ];
-        evidence.extend(interpretations.iter().map(|value| value.value.clone()));
+        let evidence = revision
+            .revision
+            .evidence
+            .values()
+            .chain(experiment.outcome.plan.values())
+            .chain(experiment.outcome.result.values())
+            .chain(interpretations.iter().map(|value| &value.value))
+            .collect::<Vec<_>>();
         let provenance =
             hydrate_ledger_provenance(&self.db, required_provenance, &evidence).await?;
 

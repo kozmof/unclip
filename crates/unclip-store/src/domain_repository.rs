@@ -212,7 +212,7 @@ pub(crate) async fn insert_snapshot(
     .await?;
 
     for (_, unit) in snapshot.units {
-        let unit_id = unit.id.0.clone();
+        let unit_id = unit.id.0;
         units::Entity::insert(units::ActiveModel {
             domain_version_id: Set(key.clone()),
             id: Set(unit_id.clone()),
@@ -240,7 +240,7 @@ pub(crate) async fn insert_snapshot(
     }
 
     for (_, relation) in snapshot.relations {
-        let relation_id = relation.id.0.clone();
+        let relation_id = relation.id.0;
         relations::Entity::insert(relations::ActiveModel {
             domain_version_id: Set(key.clone()),
             id: Set(relation_id.clone()),

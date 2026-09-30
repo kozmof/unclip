@@ -50,7 +50,7 @@ fn valid_calculated_profile<T>(value: &Calculated<T>, producer: &str, algorithm:
         && provenance.params_hash == hash_params(&provenance.params)
 }
 
-fn valid_sources(sources: &[DerivedId], available: &BTreeSet<DerivedId>) -> bool {
+fn valid_sources(sources: &[DerivedId], available: &BTreeSet<&DerivedId>) -> bool {
     !sources.is_empty()
         && sources
             .iter()
@@ -103,7 +103,7 @@ pub fn compare_product_with_independence(
     comparators.sort_by(|left, right| left.descriptor().id.cmp(&right.descriptor().id));
     let mut comparator_ids = BTreeSet::new();
     for comparator in &comparators {
-        if !comparator_ids.insert(comparator.descriptor().id.clone()) {
+        if !comparator_ids.insert(&comparator.descriptor().id) {
             return Err(invalid(
                 "independence comparison requires unique comparator identities",
             ));
@@ -115,19 +115,19 @@ pub fn compare_product_with_independence(
         .left
         .measurements
         .iter()
-        .map(|entry| entry.id.clone())
+        .map(|entry| &entry.id)
         .collect::<BTreeSet<_>>();
     let right = composition_value
         .right
         .measurements
         .iter()
-        .map(|entry| entry.id.clone())
+        .map(|entry| &entry.id)
         .collect::<BTreeSet<_>>();
     let product = composition_value
         .product
         .measurements
         .iter()
-        .map(|entry| (entry.id.clone(), &entry.measurement))
+        .map(|entry| (&entry.id, &entry.measurement))
         .collect::<BTreeMap<_, _>>();
     let all_measurements = composition_value
         .left
@@ -135,7 +135,7 @@ pub fn compare_product_with_independence(
         .iter()
         .chain(&composition_value.right.measurements)
         .chain(&composition_value.product.measurements)
-        .map(|entry| (entry.id.clone(), &entry.measurement))
+        .map(|entry| (&entry.id, &entry.measurement))
         .collect::<BTreeMap<_, _>>();
     if product.len() != composition_value.product.measurements.len()
         || all_measurements.len()
@@ -150,7 +150,10 @@ pub fn compare_product_with_independence(
     }
 
     let profile_id = DerivedId::new(format!("{}/independence-comparison", run.id));
-    let mut identities = all_measurements.keys().cloned().collect::<BTreeSet<_>>();
+    let mut identities = all_measurements
+        .keys()
+        .map(|id| (*id).clone())
+        .collect::<BTreeSet<_>>();
     identities.insert(composition.id().clone());
     identities.insert(expectations.id().clone());
     if profile_id.0.trim().is_empty() || !identities.insert(profile_id.clone()) {
@@ -160,8 +163,8 @@ pub fn compare_product_with_independence(
     }
 
     let aggregate_dependencies = DependencyCollector::default();
-    aggregate_dependencies.read(&Tracked::from(composition));
-    aggregate_dependencies.read(&Tracked::from(expectations));
+    aggregate_dependencies.read_derived(composition);
+    aggregate_dependencies.read_derived(expectations);
     let mut used_products = BTreeSet::new();
     let mut used_comparators = BTreeSet::new();
     let mut baseline_measurements = Vec::new();
@@ -169,7 +172,7 @@ pub fn compare_product_with_independence(
     let mut entries = Vec::new();
 
     for (index, expectation) in expectations.value().expectations.iter().enumerate() {
-        if !used_products.insert(expectation.product_measurement.clone())
+        if !used_products.insert(&expectation.product_measurement)
             || expectation.expected.kind() != expectation.measurement_kind
             || expectation.expected.validate().is_err()
             || expectation.rule.trim().is_empty()
@@ -220,8 +223,8 @@ pub fn compare_product_with_independence(
             ));
         }
         let dependencies = DependencyCollector::default();
-        dependencies.read(&Tracked::from(composition));
-        dependencies.read(&Tracked::from(expectations));
+        dependencies.read_derived(composition);
+        dependencies.read_derived(expectations);
         let observed_tracked =
             Tracked::from_recorded(expectation.product_measurement.clone(), (*observed).clone());
         dependencies.read(&observed_tracked);
@@ -234,7 +237,7 @@ pub fn compare_product_with_independence(
             let measurement = all_measurements.get(source).ok_or_else(|| {
                 invalid("independence expectation references unavailable source evidence")
             })?;
-            let tracked = Tracked::from_recorded(source.clone(), (*measurement).clone());
+            let tracked = Tracked::from_recorded(source.clone(), *measurement);
             dependencies.read(&tracked);
             aggregate_dependencies.read(&tracked);
         }
@@ -272,7 +275,7 @@ pub fn compare_product_with_independence(
 
         for comparator in compatible {
             let descriptor = comparator.descriptor();
-            used_comparators.insert(descriptor.id.clone());
+            used_comparators.insert(&descriptor.id);
             let subplan = RunPlan {
                 sensors: vec![],
                 inferrers: vec![],
@@ -300,8 +303,7 @@ pub fn compare_product_with_independence(
                     "independence delta identity collides with an input or output",
                 ));
             }
-            let delta_tracked = Tracked::from(&delta);
-            aggregate_dependencies.read(&delta_tracked);
+            aggregate_dependencies.read_derived(&delta);
             entries.push(IndependenceComparisonEntry {
                 product_measurement: expectation.product_measurement.clone(),
                 expectation_measurement: baseline.id().clone(),
@@ -315,7 +317,7 @@ pub fn compare_product_with_independence(
         }
         baseline_measurements.push(baseline);
     }
-    if used_products != product.keys().cloned().collect() {
+    if !used_products.iter().copied().eq(product.keys().copied()) {
         return Err(invalid(
             "independence comparison requires every product measurement exactly once",
         ));

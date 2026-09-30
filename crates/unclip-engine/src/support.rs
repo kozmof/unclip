@@ -81,3 +81,11 @@ pub(crate) fn require_run_id(stage: &str, id: &str) -> unclip_plugin::Result<()>
     }
     Ok(())
 }
+
+/// Take the map produced by an object-shaped JSON literal without copying it.
+pub(crate) fn json_object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    match value {
+        serde_json::Value::Object(object) => object,
+        _ => unreachable!("expected an object-shaped JSON literal"),
+    }
+}

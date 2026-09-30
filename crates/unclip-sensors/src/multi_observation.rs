@@ -142,16 +142,13 @@ pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
         .frame()
         .axes
         .iter()
-        .map(|axis| axis.unit.clone())
+        .map(|axis| &axis.unit)
         .collect::<BTreeSet<_>>();
     let alignments = alignment_index(ctx, &frame_units);
     let mut rankings = BTreeMap::new();
     for tracked in ctx.rankings() {
         let ranking = ctx.read(tracked);
-        if rankings
-            .insert(ranking.observation.clone(), ranking)
-            .is_some()
-        {
+        if rankings.insert(&ranking.observation, ranking).is_some() {
             return Err(PluginError::Message(format!(
                 "multiple rankings for observation {} require explicit selection",
                 ranking.observation.0
@@ -161,7 +158,7 @@ pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
     let mut observations = BTreeSet::new();
     for tracked in ctx.observations() {
         let observation = ctx.read(tracked);
-        if !observations.insert(observation.id.clone()) {
+        if !observations.insert(&observation.id) {
             return Err(PluginError::Message(format!(
                 "duplicate observation {}",
                 observation.id.0
@@ -190,9 +187,9 @@ pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
                     unresolved: vec![],
                 },
             };
-            (id.clone(), state)
+            ((*id).clone(), state)
         })
         .collect::<Vec<_>>();
-    let frame_units = frame_units.into_iter().collect::<Vec<_>>();
+    let frame_units = frame_units.into_iter().cloned().collect::<Vec<_>>();
     Ok((frame_units, states))
 }

@@ -930,7 +930,7 @@ fn partition_similarity_retains_directional_counts_and_ignores_group_order() {
     use unclip_engine::PartitionComparison;
     let a = partition(&[&["a", "b"], &["c", "d"]]);
     let b = partition(&[&["a", "c"], &["b", "d"]]);
-    let results = compare_rank("compare.partition-rand", a.clone(), b.clone(), json!({})).unwrap();
+    let results = compare_rank("compare.partition-rand", a.clone(), b, json!({})).unwrap();
     let PartitionComparison::Value {
         rand_similarity,
         pairs,

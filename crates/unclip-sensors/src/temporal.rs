@@ -209,13 +209,13 @@ impl Sensor for TemporalSensor {
         }
         let mut states = Vec::new();
         for entry in sequence.observations() {
-            let state = by_id.remove(&entry.observation).ok_or_else(|| {
+            let (observation, state) = by_id.remove_entry(&entry.observation).ok_or_else(|| {
                 invalid(format!(
                     "sequence observation {} is not selected",
                     entry.observation.0
                 ))
             })?;
-            states.push((entry.observation.clone(), state));
+            states.push((observation, state));
         }
         let ranks = construct_rank_trajectories(&units, &states);
         context.insert("sequence".into(), serde_json::json!(sequence));

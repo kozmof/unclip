@@ -2,7 +2,7 @@
 
 use crate::support::{invalid, invalid_params};
 use serde::Deserialize;
-use unclip_domain::{CandidateKind, PropertyValue, UnitKind};
+use unclip_domain::{CandidateKind, UnitKind};
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{NullCtx, NullModel, PluginDescriptor, Result};
@@ -66,10 +66,16 @@ impl NullModel for ExistingMotifNull {
         let mut matches = Vec::new();
         for unit in domain.units.values() {
             if unit.kind == UnitKind::GraphMotif
-                && unit.properties.get("graph_pattern")
-                    == Some(&PropertyValue::structured(pattern.clone()))
+                && unit
+                    .properties
+                    .get("graph_pattern")
+                    .and_then(|value| match value {
+                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        _ => None,
+                    })
+                    == Some(pattern)
             {
-                matches.push(unit.id.clone());
+                matches.push(&unit.id);
             }
         }
         Ok(token.emit(Reading::Value {

@@ -70,7 +70,7 @@ impl Default for LlmLabelInterpreter {
 }
 
 fn parse_params(params: &Params) -> Result<InterpreterParams> {
-    let parsed: InterpreterParams = serde_json::from_value(params.clone())
+    let parsed: InterpreterParams = serde::Deserialize::deserialize(params)
         .map_err(|error| PluginError::Message(format!("invalid llm-label parameters: {error}")))?;
     if parsed.model.trim().is_empty() || parsed.model_version.trim().is_empty() {
         return Err(PluginError::Message(
@@ -123,17 +123,15 @@ impl Interpreter for LlmLabelInterpreter {
             format!("{INSTRUCTIONS}\n\nAdditional context:\n{}", params.context)
         };
         let structure = ctx.structure().clone();
-        let response = ctx
-            .io()
-            .request(&InterpretationRequest {
-                model: params.model.trim().to_owned(),
-                model_version: params.model_version.trim().to_owned(),
-                instructions,
-                structure: structure.clone(),
-                parameters: params.generation,
-                response_schema: response_schema(),
-            })
-            .await?;
+        let request = InterpretationRequest {
+            model: params.model.trim().to_owned(),
+            model_version: params.model_version.trim().to_owned(),
+            instructions,
+            structure,
+            parameters: params.generation,
+            response_schema: response_schema(),
+        };
+        let response = ctx.io().request(&request).await?;
         let mut label: LlmLabel = serde_json::from_value(response).map_err(|error| {
             PluginError::Message(format!("invalid llm-label response: {error}"))
         })?;
@@ -145,7 +143,7 @@ impl Interpreter for LlmLabelInterpreter {
             ));
         }
         let value = serde_json::to_value(LabeledStructure {
-            structure,
+            structure: request.structure,
             interpretation: label,
         })
         .map_err(|error| {

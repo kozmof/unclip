@@ -40,9 +40,9 @@ pub use community::{
 
 mod canonical_correlation;
 pub use canonical_correlation::{
-    canonical_correlation, CanonicalCorrelationAnalysis, CanonicalCorrelationConfig,
-    CanonicalCorrelationError, CanonicalCorrelationMode, CanonicalCorrelationOutcome,
-    CanonicalCorrelationUndefined, CrossDomainSample,
+    canonical_correlation, canonical_correlation_iter, CanonicalCorrelationAnalysis,
+    CanonicalCorrelationConfig, CanonicalCorrelationError, CanonicalCorrelationMode,
+    CanonicalCorrelationOutcome, CanonicalCorrelationUndefined, CrossDomainSample,
 };
 
 mod cross_domain_interaction_movement;
@@ -50,10 +50,10 @@ mod cross_domain_mutual_information;
 mod cross_product_transfer;
 pub(crate) use cross_domain_interaction_movement::directional_concordance;
 pub use cross_domain_interaction_movement::{
-    cross_domain_interaction_movement, CrossDomainAxisMovement, CrossDomainInteractionMovement,
-    CrossDomainInteractionMovementConfig, CrossDomainInteractionMovementError,
-    CrossDomainInteractionMovementOutcome, CrossDomainTransition,
-    UnassessedCrossDomainAxisMovement,
+    cross_domain_interaction_movement, cross_domain_interaction_movement_iter,
+    CrossDomainAxisMovement, CrossDomainInteractionMovement, CrossDomainInteractionMovementConfig,
+    CrossDomainInteractionMovementError, CrossDomainInteractionMovementOutcome,
+    CrossDomainTransition, UnassessedCrossDomainAxisMovement,
 };
 
 pub use cross_product_transfer::{
@@ -63,10 +63,10 @@ pub use cross_product_transfer::{
 };
 
 pub use cross_domain_mutual_information::{
-    cross_domain_mutual_information, CrossDomainAxisMutualInformation,
-    CrossDomainMutualInformation, CrossDomainMutualInformationConfig,
-    CrossDomainMutualInformationError, CrossDomainMutualInformationOutcome,
-    ProductMeasurementBinding, UnassessedCrossDomainAxis,
+    cross_domain_mutual_information, cross_domain_mutual_information_iter,
+    CrossDomainAxisMutualInformation, CrossDomainMutualInformation,
+    CrossDomainMutualInformationConfig, CrossDomainMutualInformationError,
+    CrossDomainMutualInformationOutcome, ProductMeasurementBinding, UnassessedCrossDomainAxis,
 };
 
 mod cross_domain_community;

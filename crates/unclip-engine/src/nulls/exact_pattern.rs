@@ -15,7 +15,7 @@
 //! function whose control flow is a parameter is worse than the duplication it
 //! removes.
 
-use unclip_domain::{CandidateKind, DomainSnapshot, PropertyValue, UnitKind};
+use unclip_domain::{CandidateKind, DomainSnapshot, UnitKind};
 use unclip_epistemic::{Calculated, CalculationToken};
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_plugin::{NullCtx, Result};
@@ -90,10 +90,16 @@ impl ExactPatternNull {
             .values()
             .filter(|unit| {
                 unit.kind == self.unit_kind
-                    && unit.properties.get(self.property)
-                        == Some(&PropertyValue::structured(pattern.clone()))
+                    && unit
+                        .properties
+                        .get(self.property)
+                        .and_then(|value| match value {
+                            unclip_domain::PropertyValue::Structured(value) => Some(value),
+                            _ => None,
+                        })
+                        == Some(pattern)
             })
-            .map(|unit| unit.id.clone())
+            .map(|unit| &unit.id)
             .collect::<Vec<_>>();
         Ok(token.emit(Reading::Value {
             value: MeasurementValue::Structured(serde_json::json!({

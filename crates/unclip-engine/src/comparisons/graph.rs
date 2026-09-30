@@ -112,15 +112,27 @@ impl Comparator for GraphIdentityComparator {
             GraphComparison::NotApplicable {
                 reason: "requires explicit named directed graphs".into(),
             }
-        } else if let (Some(a), Some(b)) = (&parsed[0], &parsed[1]) {
-            let an = a.nodes.iter().cloned().collect::<BTreeSet<_>>();
-            let bn = b.nodes.iter().cloned().collect::<BTreeSet<_>>();
-            let ae = a.edges.iter().cloned().collect::<BTreeSet<_>>();
-            let be = b.edges.iter().cloned().collect::<BTreeSet<_>>();
-            let nodes_added = bn.difference(&an).cloned().collect::<Vec<_>>();
-            let nodes_removed = an.difference(&bn).cloned().collect::<Vec<_>>();
-            let edges_added = be.difference(&ae).cloned().collect::<Vec<_>>();
-            let edges_removed = ae.difference(&be).cloned().collect::<Vec<_>>();
+        } else if let (Some(a), Some(b)) = (parsed[0].take(), parsed[1].take()) {
+            let an = a.nodes.iter().collect::<BTreeSet<_>>();
+            let bn = b.nodes.iter().collect::<BTreeSet<_>>();
+            let ae = a.edges.iter().collect::<BTreeSet<_>>();
+            let be = b.edges.iter().collect::<BTreeSet<_>>();
+            let nodes_added = bn
+                .difference(&an)
+                .map(|value| (*value).clone())
+                .collect::<Vec<_>>();
+            let nodes_removed = an
+                .difference(&bn)
+                .map(|value| (*value).clone())
+                .collect::<Vec<_>>();
+            let edges_added = be
+                .difference(&ae)
+                .map(|value| (*value).clone())
+                .collect::<Vec<_>>();
+            let edges_removed = ae
+                .difference(&be)
+                .map(|value| (*value).clone())
+                .collect::<Vec<_>>();
             GraphComparison::Value {
                 node_distance: nodes_added
                     .len()
@@ -134,8 +146,8 @@ impl Comparator for GraphIdentityComparator {
                 nodes_removed,
                 edges_added,
                 edges_removed,
-                before: a.clone(),
-                after: b.clone(),
+                before: a,
+                after: b,
             }
         } else {
             GraphComparison::Unavailable {

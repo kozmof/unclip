@@ -23,7 +23,7 @@ struct Snapshot {
 }
 
 fn calculate(run: &EngineRunRecord, snapshot: &Snapshot) -> anyhow::Result<Vec<EmpiricalResult>> {
-    let method: EmpiricalMethod = serde_json::from_value(run.resolved_plan.clone())?;
+    let method: EmpiricalMethod = serde::Deserialize::deserialize(&run.resolved_plan)?;
     let inputs = snapshot
         .inputs
         .iter()

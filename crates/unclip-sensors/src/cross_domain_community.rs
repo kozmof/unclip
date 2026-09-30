@@ -105,12 +105,11 @@ impl ProductSensor for CrossDomainCommunitySensor {
             .map_err(crate::support::calculation)?;
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossDomainCommunityOutcome::Value { detection } => {
-                let unassessed = detection.unassessed_interactions.clone();
+                let reading_value = serde_json::to_value(&detection).map_err(invalid)?;
+                let unassessed = detection.unassessed_interactions;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(
-                            serde_json::to_value(detection).map_err(invalid)?,
-                        ),
+                        value: MeasurementValue::Structured(reading_value),
                     },
                     None,
                     "value",

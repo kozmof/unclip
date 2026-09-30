@@ -209,7 +209,7 @@ fn conditional_requirements_validate_context_counts_and_retained_readings() {
     let mut wrong_sensor = input(0.3, Some(4), "z");
     wrong_sensor.sensor = PluginId::new("sensor.mutual-information");
     assert!(assess(wrong_sensor, &requirement).is_err());
-    let mut invalid = requirement.clone();
+    let mut invalid = requirement;
     if let ExperimentConstraint::ConditionalDependency {
         minimum_information,
         ..

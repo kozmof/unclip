@@ -119,12 +119,11 @@ impl CrossProductSensor for CrossProductTransferSensor {
             .map_err(crate::support::calculation)?;
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossProductTransferOutcome::Value { transfer } => {
-                let unassessed = transfer.unassessed_transfers.clone();
+                let reading_value = serde_json::to_value(&transfer).map_err(invalid)?;
+                let unassessed = transfer.unassessed_transfers;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(
-                            serde_json::to_value(transfer).map_err(invalid)?,
-                        ),
+                        value: MeasurementValue::Structured(reading_value),
                     },
                     None,
                     "value",

@@ -26,9 +26,9 @@ impl Default for MissingRelationGenerator {
     }
 }
 pub(crate) struct ResidualRelation<'a> {
-    pub observation: unclip_observe::ObservationId,
+    pub observation: &'a unclip_observe::ObservationId,
     pub relation: &'a unclip_observe::ObservedRelation,
-    pub labels: (String, String, String),
+    pub labels: (&'a str, &'a str, &'a str),
     pub measurements: BTreeSet<unclip_epistemic::DerivedId>,
 }
 
@@ -55,14 +55,10 @@ pub(crate) fn residual_relations<'a>(
             let target = units
                 .get(&relation.target)
                 .ok_or_else(|| invalid("observed relation target is missing"))?;
-            let key = (
-                source.to_string(),
-                relation.kind.clone(),
-                target.to_string(),
-            );
+            let key = (source.as_str(), relation.kind.as_str(), target.as_str());
             let qualified = format!("{}/{}", observation.id.0, relation.id.0);
             if relations
-                .insert(qualified, (observation.id.clone(), relation, key))
+                .insert(qualified, (&observation.id, relation, key))
                 .is_some()
             {
                 return Err(invalid("ambiguous qualified residual relation identity"));
@@ -115,20 +111,18 @@ impl CandidateGenerator for MissingRelationGenerator {
                 labels: key,
                 measurements,
             } = edge;
-            support
-                .entry(key.clone())
-                .or_default()
-                .insert(observation.clone());
-            groups.entry(key.clone()).or_default().push(serde_json::json!({"observation":observation,"relation":relation.id,"source":relation.source,"target":relation.target,"uncertainty":relation.uncertainty,"measurements":measurements}));
+            support.entry(key).or_default().insert(observation);
+            groups.entry(key).or_default().push(serde_json::json!({"observation":observation,"relation":relation.id,"source":relation.source,"target":relation.target,"uncertainty":relation.uncertainty,"measurements":measurements}));
         }
         let mut proposals = Vec::new();
-        for ((source, kind, target), examples) in groups {
-            let observations = &support[&(source.clone(), kind.clone(), target.clone())];
+        for (key, examples) in groups {
+            let observations = &support[&key];
+            let (source, kind, target) = key;
             if observations.len() < minimum {
                 continue;
             }
             proposals.push(token.emit(CandidateProposal { domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::Relation,
-                value:serde_json::json!({"pattern":{"matching":"exact_directed_observed_relation","source_label":source,"relation_kind":kind,"target_label":target},"observation_count":observations.len(),"observations":observations,"examples":examples}).as_object().expect("object").clone() }));
+                value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"exact_directed_observed_relation","source_label":source,"relation_kind":kind,"target_label":target},"observation_count":observations.len(),"observations":observations,"examples":examples})) }));
         }
         Ok(proposals)
     }

@@ -119,10 +119,10 @@ fn frame_units(frame: &ProductMeasurementFrame) -> (Vec<UnitId>, Vec<UnitId>) {
     let mut left = Vec::new();
     let mut right = Vec::new();
     for axis in &frame.axes {
-        if seen_left.insert(axis.left.clone()) {
+        if seen_left.insert(&axis.left) {
             left.push(axis.left.clone());
         }
-        if seen_right.insert(axis.right.clone()) {
+        if seen_right.insert(&axis.right) {
             right.push(axis.right.clone());
         }
     }

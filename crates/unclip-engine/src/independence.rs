@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Timestamp, Tracked,
+    PluginId, Timestamp,
 };
 use unclip_measure::{ExpectedIndependentBehavior, MeasurementKind, Reading};
 use unclip_plugin::{PluginError, Result};
@@ -107,8 +107,7 @@ impl crate::Engine {
             ));
         }
         let dependencies = DependencyCollector::default();
-        let tracked = Tracked::from_derived(composition, composition.value());
-        let composition_value = dependencies.read(&tracked);
+        let composition_value = dependencies.read_derived(composition);
         let left = composition_value
             .left
             .measurements

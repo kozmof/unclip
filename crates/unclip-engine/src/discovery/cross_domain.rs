@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Timestamp, Tracked,
+    PluginId, Timestamp,
 };
 use unclip_measure::{EmpiricalStructure, ProductMeasurementBinding, Reading};
 use unclip_plugin::{CandidateCtx, CandidateGenerator, PluginDescriptor, Result};
@@ -129,7 +129,7 @@ impl CandidateGenerator for CrossDomainCandidateGenerator {
                 continue;
             }
             let evidence: CrossDomainDeviationEvidence =
-                serde_json::from_value(value.value.clone()).map_err(invalid)?;
+                serde::Deserialize::deserialize(&value.value).map_err(invalid)?;
             validate_evidence(&evidence)?;
             let left = domain_key(&evidence.binding.left).map_err(invalid)?;
             let right = domain_key(&evidence.binding.right).map_err(invalid)?;
@@ -207,8 +207,13 @@ pub(crate) fn validate_candidate(
         ));
     }
     let value: CrossDomainProposalValue =
-        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
-            .map_err(invalid)?;
+        serde::Deserialize::deserialize(serde::de::value::MapDeserializer::new(
+            proposal
+                .value
+                .iter()
+                .map(|(key, value)| (key.as_str(), value)),
+        ))
+        .map_err(invalid)?;
     if value.pattern.matching != "typed_product_deviation_from_independence"
         || value.evidence.structure.0.trim().is_empty()
         || value.pattern.product_measurement.0.trim().is_empty()
@@ -314,7 +319,7 @@ pub fn derive_cross_domain_deviations(
             ));
         }
         let dependencies = DependencyCollector::default();
-        dependencies.read(&Tracked::from(profile));
+        dependencies.read_derived(profile);
         let token = CalculationToken::from_harness(
             EmitMetadata::new(
                 output_id,

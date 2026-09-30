@@ -260,8 +260,7 @@ mod tests {
             MatrixCell::Undefined { sample_count: 2 }
         );
         b.samples[1].position = RankPosition::Unknown;
-        let matrix =
-            pairwise_matrix(&[a.clone(), b], PairwiseMetric::RelativeRankVariance).unwrap();
+        let matrix = pairwise_matrix(&[a, b], PairwiseMetric::RelativeRankVariance).unwrap();
         assert_eq!(
             matrix.cells()[0][0],
             MatrixCell::Value {

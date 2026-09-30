@@ -126,10 +126,9 @@ fn ordinary_measurements(
                 "composition profile measurements require globally unique identities",
             ));
         }
-        let tracked = Tracked::from_derived(input, input.value());
         result.push(ProfileMeasurement {
             id: input.id().clone(),
-            measurement: (*dependencies.read(&tracked)).clone(),
+            measurement: dependencies.read_derived(input).clone(),
         });
     }
     result.sort_by(|left, right| left.id.cmp(&right.id));
@@ -201,10 +200,9 @@ fn product_measurements(
                 "composition profile measurements require globally unique identities",
             ));
         }
-        let tracked = Tracked::from_derived(input, input.value());
         result.push(ProfileMeasurement {
             id: input.id().clone(),
-            measurement: (*dependencies.read(&tracked)).clone(),
+            measurement: dependencies.read_derived(input).clone(),
         });
     }
     result.sort_by(|left, right| left.id.cmp(&right.id));

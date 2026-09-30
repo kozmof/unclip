@@ -116,10 +116,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
             for unit in &observation.units {
                 let qualified = format!("{}/{}", observation.id.0, unit.id.0);
                 if units
-                    .insert(
-                        qualified,
-                        (observation.id.clone(), unit.id.clone(), unit.label.clone()),
-                    )
+                    .insert(qualified, (&observation.id, &unit.id, unit.label.as_str()))
                     .is_some()
                 {
                     return Err(invalid("ambiguous qualified residual unit identity"));
@@ -134,18 +131,15 @@ impl CandidateGenerator for PersistentResidualGenerator {
                 ));
             }
         }
-        let mut groups = BTreeMap::<String, Vec<serde_json::Value>>::new();
-        let mut support = BTreeMap::<String, BTreeSet<_>>::new();
+        let mut groups = BTreeMap::<&str, Vec<serde_json::Value>>::new();
+        let mut support = BTreeMap::<&str, BTreeSet<_>>::new();
         for (id, evidence) in residuals {
             let (observation, unit, label) = &units[&id];
             if label.trim().is_empty() {
                 continue;
             }
-            support
-                .entry(label.clone())
-                .or_default()
-                .insert(observation.clone());
-            groups.entry(label.clone()).or_default().push(
+            support.entry(*label).or_default().insert(*observation);
+            groups.entry(*label).or_default().push(
                 serde_json::json!({"observation":observation,"unit":unit,"measurements":evidence}),
             );
         }
@@ -156,7 +150,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
                 continue;
             }
             candidates.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::AtomicMeaning,
-                value:serde_json::json!({"pattern":{"matching":"exact_observed_label","observed_label":label},"observation_count":observations.len(),"observations":observations,"examples":examples}).as_object().expect("object").clone()}));
+                value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"exact_observed_label","observed_label":label},"observation_count":observations.len(),"observations":observations,"examples":examples}))}));
         }
         Ok(candidates)
     }

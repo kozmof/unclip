@@ -200,7 +200,7 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
         let (observations, alignments, rankings) = if let Some(snapshot) =
             run.metadata.get("measurement_inputs")
         {
-            let snapshot: MeasurementInputSnapshot = serde_json::from_value(snapshot.clone())
+            let snapshot: MeasurementInputSnapshot = serde::Deserialize::deserialize(snapshot)
                 .map_err(|error| invalid(format!("invalid measurement input snapshot: {error}")))?;
             (
                 snapshot.observations,
@@ -213,7 +213,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                 Vec::new()
             } else {
                 observation_rows::Entity::find()
-                    .filter(observation_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .filter(
+                        observation_rows::Column::ProvenanceId
+                            .is_in(provenance_ids.iter().map(String::as_str)),
+                    )
                     .order_by_asc(observation_rows::Column::Id)
                     .all(&self.db)
                     .await?
@@ -233,7 +236,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                 Vec::new()
             } else {
                 alignment_rows::Entity::find()
-                    .filter(alignment_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .filter(
+                        alignment_rows::Column::ProvenanceId
+                            .is_in(provenance_ids.iter().map(String::as_str)),
+                    )
                     .order_by_asc(alignment_rows::Column::Id)
                     .all(&self.db)
                     .await?
@@ -253,7 +259,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                 Vec::new()
             } else {
                 ranking_rows::Entity::find()
-                    .filter(ranking_rows::Column::ProvenanceId.is_in(provenance_ids.clone()))
+                    .filter(
+                        ranking_rows::Column::ProvenanceId
+                            .is_in(provenance_ids.iter().map(String::as_str)),
+                    )
                     .order_by_asc(ranking_rows::Column::Id)
                     .all(&self.db)
                     .await?

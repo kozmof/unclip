@@ -168,7 +168,7 @@ impl CandidateGenerator for CommunityCandidateGenerator {
                     continue;
                 }
                 candidates.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::CompositeMeaning,
-                    value:serde_json::json!({"pattern":{"matching":"empirical_community","members":members},"evidence":{"structure":id,"community_index":index,"result":result},"selection":{"metric":params.metric,"minimum_samples":params.minimum_samples,"minimum_members":params.minimum_members}}).as_object().expect("object").clone()}));
+                    value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"empirical_community","members":members},"evidence":{"structure":id,"community_index":index,"result":result},"selection":{"metric":params.metric,"minimum_samples":params.minimum_samples,"minimum_members":params.minimum_members}}))}));
             }
         }
         Ok(candidates)
@@ -236,7 +236,7 @@ impl CandidateGenerator for LatentAxisGenerator {
                     continue;
                 }
                 candidates.push(token.emit(CandidateProposal {domain_version_id:ctx.domain_version_id().into(),kind:CandidateKind::LatentAxis,
-                    value:serde_json::json!({"pattern":{"matching":"empirical_spectral_axis","units":result.units,"eigenvalue":pair.eigenvalue,"loadings":pair.loadings},"evidence":{"structure":id,"eigenpair_index":index,"result":result},"selection":{"metric":params.metric,"minimum_samples":params.minimum_samples,"minimum_absolute_eigenvalue":params.minimum_absolute_eigenvalue}}).as_object().expect("object").clone()}));
+                    value:crate::support::json_object(serde_json::json!({"pattern":{"matching":"empirical_spectral_axis","units":result.units,"eigenvalue":pair.eigenvalue,"loadings":pair.loadings},"evidence":{"structure":id,"eigenpair_index":index,"result":result},"selection":{"metric":params.metric,"minimum_samples":params.minimum_samples,"minimum_absolute_eigenvalue":params.minimum_absolute_eigenvalue}}))}));
             }
         }
         Ok(candidates)

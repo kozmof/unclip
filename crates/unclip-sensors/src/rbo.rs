@@ -72,14 +72,14 @@ impl Sensor for RboSensor {
             .frame()
             .axes
             .iter()
-            .map(|axis| axis.unit.clone())
+            .map(|axis| &axis.unit)
             .collect::<BTreeSet<_>>();
         let frame_positions = ctx
             .frame()
             .axes
             .iter()
             .enumerate()
-            .map(|(index, axis)| (axis.unit.clone(), index))
+            .map(|(index, axis)| (&axis.unit, index))
             .collect::<BTreeMap<_, _>>();
         let alignments = alignment_index(ctx, &frame_units);
 

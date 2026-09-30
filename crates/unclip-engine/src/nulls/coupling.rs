@@ -71,7 +71,7 @@ impl NullModel for CouplingZeroNull {
         let (observed, metric) = match matching.expect("validated matching") {
             "thresholded_pairwise_association" => {
                 let metric: PairwiseMetric =
-                    serde_json::from_value(candidate.value["pattern"]["metric"].clone())
+                    serde::Deserialize::deserialize(&candidate.value["pattern"]["metric"])
                         .map_err(invalid)?;
                 if metric == PairwiseMetric::RelativeRankVariance {
                     return Ok(token.emit(Reading::NotApplicable {
@@ -81,7 +81,7 @@ impl NullModel for CouplingZeroNull {
                     }));
                 }
                 let cell: MatrixCell =
-                    serde_json::from_value(candidate.value["evidence"]["cell"].clone())
+                    serde::Deserialize::deserialize(&candidate.value["evidence"]["cell"])
                         .map_err(invalid)?;
                 let MatrixCell::Value { value, .. } = cell else {
                     return Err(invalid(

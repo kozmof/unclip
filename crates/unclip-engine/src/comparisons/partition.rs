@@ -52,14 +52,14 @@ fn canonical(groups: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
         if group.is_empty() {
             return Err(invalid("partition groups must be nonempty"));
         }
+        group.sort();
         for member in group.iter() {
-            if member.trim().is_empty() || !seen.insert(member.clone()) {
+            if member.trim().is_empty() || !seen.insert(member) {
                 return Err(invalid(
                     "partition members must be nonempty and occur exactly once",
                 ));
             }
         }
-        group.sort();
     }
     result.sort();
     Ok(result)
@@ -106,9 +106,9 @@ impl Comparator for PartitionRandComparator {
             PartitionComparison::NotApplicable {
                 reason: "requires explicit partitions; no membership is inferred".into(),
             }
-        } else if let (Some(a), Some(b)) = (&parsed[0], &parsed[1]) {
-            let left = membership(a);
-            let right = membership(b);
+        } else if let (Some(a), Some(b)) = (parsed[0].take(), parsed[1].take()) {
+            let left = membership(&a);
+            let right = membership(&b);
             if !left.keys().eq(right.keys()) {
                 return Err(invalid(
                     "partition comparison requires identical member sets",
@@ -148,8 +148,8 @@ impl Comparator for PartitionRandComparator {
                     separate_in_both: separate,
                     split_pairs: split,
                     merged_pairs: merged,
-                    before: a.clone(),
-                    after: b.clone(),
+                    before: a,
+                    after: b,
                 }
             }
         } else {

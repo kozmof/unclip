@@ -129,7 +129,7 @@ impl super::Engine {
         );
         let mut output_ids = BTreeSet::new();
         for result in &results {
-            if input_ids.contains(result.id()) || !output_ids.insert(result.id().clone()) {
+            if input_ids.contains(result.id()) || !output_ids.insert(result.id()) {
                 return Err(invalid(
                     "held-out measurement output identity collides with an input or output",
                 ));
@@ -202,10 +202,10 @@ impl super::Engine {
         };
         // Check cross-side identity collisions as well as each side's local checks.
         let mut input_ids = BTreeSet::from([
-            inputs.baseline.baseline.id().clone(),
-            counterfactual.id().clone(),
-            inputs.baseline.frame.id().clone(),
-            inputs.baseline.split.id().clone(),
+            inputs.baseline.baseline.id(),
+            counterfactual.id(),
+            inputs.baseline.frame.id(),
+            inputs.baseline.split.id(),
         ]);
         input_ids.extend(
             inputs
@@ -213,7 +213,7 @@ impl super::Engine {
                 .alignments
                 .iter()
                 .chain(inputs.alignments)
-                .map(|v| v.id().clone()),
+                .map(|v| v.id()),
         );
         input_ids.extend(
             inputs
@@ -221,7 +221,7 @@ impl super::Engine {
                 .rankings
                 .iter()
                 .chain(inputs.rankings)
-                .map(|v| v.id().clone()),
+                .map(|v| v.id()),
         );
         let before = self.measure_held_out_baseline(
             plan,
@@ -243,7 +243,7 @@ impl super::Engine {
         )?;
         let mut output_ids = BTreeSet::new();
         for result in before.iter().chain(&after) {
-            if input_ids.contains(result.id()) || !output_ids.insert(result.id().clone()) {
+            if input_ids.contains(result.id()) || !output_ids.insert(result.id()) {
                 return Err(invalid(
                     "counterfactual measurement output identity collides with an input or output",
                 ));

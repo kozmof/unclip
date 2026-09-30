@@ -99,8 +99,13 @@ struct AtomicRevisionExample {
 
 fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json::Value> {
     let evidence: AtomicRevisionEvidence =
-        serde_json::from_value(serde_json::Value::Object(proposal.value.clone()))
-            .map_err(invalid)?;
+        serde::Deserialize::deserialize(serde::de::value::MapDeserializer::new(
+            proposal
+                .value
+                .iter()
+                .map(|(key, value)| (key.as_str(), value)),
+        ))
+        .map_err(invalid)?;
     // Each condition reports itself. A single combined message used to name
     // every requirement at once, which left a caller whose observation list was
     // merely unsorted reading about four things that were not wrong.
@@ -412,10 +417,10 @@ fn emit_attempt(
     }
     let dependencies = DependencyCollector::default();
     dependencies.read(candidate);
-    dependencies.read(&Tracked::from(counterfactual));
-    dependencies.read(&Tracked::from(experiment));
+    dependencies.read_derived(counterfactual);
+    dependencies.read_derived(experiment);
     if let Some(prior) = prior {
-        dependencies.read(&Tracked::from(prior));
+        dependencies.read_derived(prior);
     }
     let prior_id = prior.map(|attempt| attempt.id().clone());
     let params = serde_json::json!({
@@ -661,10 +666,16 @@ pub fn record_dynamic_coupling_test(
         || unit.label.is_some()
         || unit.properties.get("causal_claim")
             != Some(&unclip_domain::PropertyValue::Boolean(false))
-        || unit.properties.get("candidate_evidence")
-            != Some(&unclip_domain::PropertyValue::structured(
-                serde_json::Value::Object(proposal.value.clone()),
-            ))
+        || unit
+            .properties
+            .get("candidate_evidence")
+            .and_then(|value| match value {
+                unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
+                    Some(value)
+                }
+                _ => None,
+            })
+            != Some(&proposal.value)
     {
         return Err(invalid(
             "dynamic coupling must remain anonymous, non-causal, and retain its candidate evidence",
@@ -715,16 +726,28 @@ pub fn record_structural_test(
         .value
         .get("pattern")
         .ok_or_else(|| invalid("structural candidate requires a pattern"))?;
-    let common_evidence = unit.properties.get("candidate_evidence")
-        == Some(&unclip_domain::PropertyValue::structured(
-            serde_json::Value::Object(proposal.value.clone()),
-        ));
+    let common_evidence = unit
+        .properties
+        .get("candidate_evidence")
+        .and_then(|value| match value {
+            unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
+                Some(value)
+            }
+            _ => None,
+        })
+        == Some(&proposal.value);
     match proposal.kind {
         CandidateKind::GraphMotif => {
             if unit.kind != unclip_domain::UnitKind::GraphMotif
                 || unit.label.is_some()
-                || unit.properties.get("graph_pattern")
-                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
+                || unit
+                    .properties
+                    .get("graph_pattern")
+                    .and_then(|value| match value {
+                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        _ => None,
+                    })
+                    != Some(pattern)
                 || !common_evidence
             {
                 return Err(invalid(
@@ -745,8 +768,14 @@ pub fn record_structural_test(
             crate::applications::role::validate(proposal, &snapshot.domain)?;
             if unit.kind != unclip_domain::UnitKind::SemanticRole
                 || unit.label.is_some()
-                || unit.properties.get("role_pattern")
-                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
+                || unit
+                    .properties
+                    .get("role_pattern")
+                    .and_then(|value| match value {
+                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        _ => None,
+                    })
+                    != Some(pattern)
                 || !common_evidence
             {
                 return Err(invalid(
@@ -767,8 +796,14 @@ pub fn record_structural_test(
             crate::applications::transformation::validate(proposal, &snapshot.domain)?;
             if unit.kind != unclip_domain::UnitKind::Transformation
                 || unit.label.is_some()
-                || unit.properties.get("transformation_pattern")
-                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
+                || unit
+                    .properties
+                    .get("transformation_pattern")
+                    .and_then(|value| match value {
+                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        _ => None,
+                    })
+                    != Some(pattern)
                 || unit.properties.get("causal_claim")
                     != Some(&unclip_domain::PropertyValue::Boolean(false))
                 || !common_evidence
@@ -852,12 +887,24 @@ pub fn record_delta_v_test(
             != Some(&unclip_domain::PropertyValue::Text(
                 candidate.id().0.clone(),
             ))
-        || unit.properties.get("candidate_pattern")
-            != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
-        || unit.properties.get("candidate_evidence")
-            != Some(&unclip_domain::PropertyValue::structured(
-                serde_json::Value::Object(proposal.value.clone()),
-            ))
+        || unit
+            .properties
+            .get("candidate_pattern")
+            .and_then(|value| match value {
+                unclip_domain::PropertyValue::Structured(value) => Some(value),
+                _ => None,
+            })
+            != Some(pattern)
+        || unit
+            .properties
+            .get("candidate_evidence")
+            .and_then(|value| match value {
+                unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
+                    Some(value)
+                }
+                _ => None,
+            })
+            != Some(&proposal.value)
     {
         return Err(invalid(
             "Delta V unit must remain anonymous and retain its exact candidate identity, pattern, and evidence",

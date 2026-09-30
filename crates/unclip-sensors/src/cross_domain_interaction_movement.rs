@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use semver::Version;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
 use unclip_measure::{
-    cross_domain_interaction_movement, CrossDomainInteractionMovementConfig,
+    cross_domain_interaction_movement_iter, CrossDomainInteractionMovementConfig,
     CrossDomainInteractionMovementOutcome, Measurement, MeasurementContext, MeasurementKind,
     MeasurementValue, ProductMeasurementBinding, Reading,
 };
@@ -73,12 +73,13 @@ impl ProductSensor for CrossDomainInteractionMovementSensor {
                 "cross-domain interaction movement requires a frame bound to the exact product inputs",
             ));
         }
+        // Read every selected sample, including when calculation exits early.
         let samples = ctx
             .samples()
             .iter()
-            .map(|sample| ctx.read(sample).clone())
+            .map(|sample| ctx.read(sample))
             .collect::<Vec<_>>();
-        let outcome = cross_domain_interaction_movement(
+        let outcome = cross_domain_interaction_movement_iter(
             ProductMeasurementBinding {
                 product: product.id.clone(),
                 product_version: product.version.clone(),
@@ -88,19 +89,18 @@ impl ProductSensor for CrossDomainInteractionMovementSensor {
                 right: product.right.clone(),
             },
             &frame.axes,
-            &samples,
+            samples.into_iter(),
             config,
         )
         .map_err(crate::support::calculation)?;
 
         let (reading, sample_count, status, unassessed) = match outcome {
             CrossDomainInteractionMovementOutcome::Value { movement } => {
-                let unassessed = movement.unassessed_axes.clone();
+                let reading_value = serde_json::to_value(&movement).map_err(invalid)?;
+                let unassessed = movement.unassessed_axes;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(
-                            serde_json::to_value(movement).map_err(invalid)?,
-                        ),
+                        value: MeasurementValue::Structured(reading_value),
                     },
                     None,
                     "value",

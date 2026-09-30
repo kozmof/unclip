@@ -334,3 +334,39 @@ fn engine_cca_holds_the_sensor_to_its_declared_params_schema() {
         )
         .is_ok());
 }
+
+#[test]
+fn empty_frame_still_records_every_selected_sample() {
+    let (engine, product, _) = product_and_frame();
+    let product = Tracked::from(&product);
+    let frame = create_product_frame(
+        &product,
+        &[],
+        ProductFrameId::new("empty"),
+        ProductFrameVersion::new("1"),
+        "empty-frame",
+        Timestamp::new("2026-09-24T00:00:00Z"),
+    )
+    .unwrap();
+    let frame = Tracked::from(&frame);
+    let samples = vec![sample("unused", &[], &[])];
+    let result = engine
+        .measure_canonical_correlation(
+            CrossDomainRun {
+                product: &product,
+                frame: &frame,
+                run_id: "empty-cca",
+                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+            },
+            &samples,
+            CanonicalCorrelationConfig::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        result.value().reading,
+        Reading::NotApplicable { .. }
+    ));
+    assert!(result.provenance().inputs.contains(samples[0].id()));
+    assert!(result.provenance().inputs.contains(product.id()));
+    assert!(result.provenance().inputs.contains(frame.id()));
+}

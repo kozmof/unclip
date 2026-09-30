@@ -126,6 +126,16 @@ pub fn cross_domain_mutual_information(
     samples: &[CrossDomainSample],
     config: CrossDomainMutualInformationConfig,
 ) -> Result<CrossDomainMutualInformationOutcome, CrossDomainMutualInformationError> {
+    cross_domain_mutual_information_iter(binding, axes, samples.iter(), config)
+}
+
+/// Calculate from borrowed samples without copying their maps.
+pub fn cross_domain_mutual_information_iter<'a>(
+    binding: ProductMeasurementBinding,
+    axes: &[ProductFrameAxis],
+    samples: impl ExactSizeIterator<Item = &'a CrossDomainSample>,
+    config: CrossDomainMutualInformationConfig,
+) -> Result<CrossDomainMutualInformationOutcome, CrossDomainMutualInformationError> {
     if config.minimum_samples.get() < 2 || config.bins.get() > MAXIMUM_BINS {
         return Err(CrossDomainMutualInformationError::InvalidConfiguration);
     }
@@ -167,7 +177,7 @@ pub fn cross_domain_mutual_information(
         });
     }
 
-    let mut ordered = samples.iter().collect::<Vec<_>>();
+    let mut ordered = samples.collect::<Vec<_>>();
     ordered.sort_by_key(|sample| &sample.observation);
     for pair in ordered.windows(2) {
         if pair[0].observation == pair[1].observation {

@@ -160,7 +160,7 @@ fn run_ordered_pair(explanation_stage: SensorStage) -> Vec<String> {
                 rankings: &[],
             },
             MeasurementRun {
-                id: &run_metadata().id.0.clone(),
+                id: &run_metadata().id.0,
                 timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
                 params: &params,
             },

@@ -51,8 +51,8 @@ fn interaction(
 fn product_domain_materializes_only_observed_or_required_pairs() {
     let left_value = domain("coffee", "7", &["presentation", "social"]);
     let right_value = domain("photo", "3", &["composition", "sharing"]);
-    let left = Tracked::from_recorded(DerivedId::new("coffee@7"), left_value.clone());
-    let right = Tracked::from_recorded(DerivedId::new("photo@3"), right_value.clone());
+    let left = Tracked::from_recorded(DerivedId::new("coffee@7"), left_value);
+    let right = Tracked::from_recorded(DerivedId::new("photo@3"), right_value);
     let observed = interaction(
         "observed-pair",
         "presentation",

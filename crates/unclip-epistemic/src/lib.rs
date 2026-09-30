@@ -363,8 +363,21 @@ impl DependencyCollector {
     }
 
     pub fn read<'a, T>(&self, input: &'a Tracked<T>) -> &'a T {
-        self.guard().insert(input.id.clone());
+        self.record(&input.id);
         &input.value
+    }
+
+    /// Read a derived value and record its identity without copying its payload.
+    pub fn read_derived<'a, T, O: OperationKind>(&self, input: &'a Derived<T, O>) -> &'a T {
+        self.record(&input.id);
+        &input.value
+    }
+
+    fn record(&self, id: &DerivedId) {
+        let mut inputs = self.guard();
+        if !inputs.contains(id) {
+            inputs.insert(id.clone());
+        }
     }
 
     pub fn snapshot(&self) -> Vec<DerivedId> {
@@ -569,6 +582,23 @@ mod tests {
         assert_eq!(dependencies.read(&tracked), "value");
         let result = CalculationToken::from_harness(metadata("result"), dependencies).emit(42);
         assert_eq!(result.provenance().operation, Operation::Calculated);
+        assert_eq!(result.provenance().inputs, vec![DerivedId::new("source")]);
+    }
+
+    #[test]
+    fn derived_reads_borrow_non_clone_payloads_and_deduplicate_dependencies() {
+        struct Payload(Vec<u8>);
+        let source =
+            InferenceToken::from_harness(metadata("source"), DependencyCollector::default())
+                .emit(Payload(vec![1, 2, 3]));
+        let dependencies = DependencyCollector::default();
+        let value = dependencies.read_derived(&source);
+        assert!(std::ptr::eq(value, source.value()));
+        assert_eq!(value.0, [1, 2, 3]);
+        dependencies.read_derived(&source);
+        let tracked = Tracked::from_derived(&source, source.value());
+        dependencies.read(&tracked);
+        let result = CalculationToken::from_harness(metadata("result"), dependencies).emit(());
         assert_eq!(result.provenance().inputs, vec![DerivedId::new("source")]);
     }
 
