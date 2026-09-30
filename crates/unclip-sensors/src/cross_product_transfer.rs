@@ -97,8 +97,8 @@ impl CrossProductSensor for CrossProductTransferSensor {
         ctx: &CrossProductMeasureCtx<'_>,
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
-        let config: CrossProductTransferConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
+        let config: CrossProductTransferConfig = serde::Deserialize::deserialize(ctx.params())
+            .map_err(crate::support::invalid_params)?;
         let source_product = ctx.source_product();
         let source_frame = ctx.source_frame();
         let source_movement = ctx.source_movement();

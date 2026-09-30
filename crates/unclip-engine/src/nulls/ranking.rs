@@ -60,7 +60,7 @@ impl NullModel for RankingConstraintNull {
     }
     fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if params.minimum_observations < 2 {
             return Err(invalid(
                 "ranking null requires at least two comparable observations",

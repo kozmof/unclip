@@ -68,7 +68,7 @@ pub(crate) fn residual_evidence(
         let MeasurementValue::Structured(value) = value else {
             return Err(invalid("residual measurement must be structured"));
         };
-        let residual: Residual = serde_json::from_value(value.clone()).map_err(invalid)?;
+        let residual: Residual = serde::Deserialize::deserialize(value).map_err(invalid)?;
         let unique = residual.ids.iter().collect::<BTreeSet<_>>();
         if residual.count != residual.ids.len() || unique.len() != residual.ids.len() {
             return Err(invalid("residual count and unique identities must agree"));
@@ -85,7 +85,7 @@ pub(crate) fn residual_evidence(
 
 pub(crate) fn minimum_observations(ctx: &CandidateCtx<'_>) -> Result<usize> {
     let params: Parameters =
-        serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
     if params.minimum_observations < 2 || ctx.domain_version_id().is_empty() {
         return Err(invalid(
             "persistent residuals require a domain version and at least two observations",

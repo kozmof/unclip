@@ -74,7 +74,7 @@ fn evaluate(
     token: CalculationToken,
     kind: CandidateKind,
 ) -> Result<Calculated<Reading>> {
-    let _: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+    let _: Parameters = serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
     let candidate = ctx.candidate();
     let matching = if kind == CandidateKind::AtomicMeaning {
         "exact_observed_label"

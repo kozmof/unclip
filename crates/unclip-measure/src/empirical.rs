@@ -16,7 +16,7 @@ macro_rules! empirical_payload {
                 let value = serde_json::to_value(payload)?;
                 // serde_json represents non-finite floats as null. Reject that
                 // lossy conversion rather than storing a corrupted typed result.
-                serde_json::from_value::<$payload>(value.clone())?;
+                <$payload as serde::Deserialize>::deserialize(&value)?;
                 Ok(Self {
                     kind: $kind.into(),
                     value,
@@ -34,7 +34,7 @@ macro_rules! empirical_payload {
                         $kind
                     )));
                 }
-                serde_json::from_value(structure.value.clone())
+                serde::Deserialize::deserialize(&structure.value)
             }
         }
     };

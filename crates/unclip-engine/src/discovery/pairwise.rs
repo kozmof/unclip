@@ -44,7 +44,7 @@ impl CandidateGenerator for PairwiseCouplingGenerator {
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         let valid_threshold = match params.metric {
             PairwiseMetric::Spearman | PairwiseMetric::Kendall => {
                 (-1.0..=1.0).contains(&params.threshold)

@@ -26,23 +26,24 @@ pub(super) fn assess(
             "transfer requires a positive sample floor and finite nonnegative tolerance",
         ));
     }
-    let mut left = source.context.values.clone();
-    let mut right = target.context.values.clone();
-    let parse = |value: Option<serde_json::Value>| -> Result<BTreeSet<ObservationId>> {
-        let ids: Vec<ObservationId> = serde_json::from_value(value.ok_or_else(|| {
+    let left = &source.context.values;
+    let right = &target.context.values;
+    let parse = |value: Option<&serde_json::Value>| -> Result<BTreeSet<ObservationId>> {
+        let ids: Vec<ObservationId> = serde::Deserialize::deserialize(value.ok_or_else(|| {
             invalid("transfer requires explicit observation identities on both measurements")
         })?)
         .map_err(|_| invalid("invalid transfer observation identities"))?;
-        let set = ids.iter().cloned().collect::<BTreeSet<_>>();
-        if ids.is_empty() || ids.len() != set.len() || ids.iter().any(|id| id.0.trim().is_empty()) {
+        let count = ids.len();
+        let set = ids.into_iter().collect::<BTreeSet<_>>();
+        if set.is_empty() || count != set.len() || set.iter().any(|id| id.0.trim().is_empty()) {
             return Err(invalid(
                 "transfer observation identities must be nonempty and unique",
             ));
         }
         Ok(set)
     };
-    let source_ids = parse(left.remove("observations"))?;
-    let target_ids = parse(right.remove("observations"))?;
+    let source_ids = parse(left.get("observations"))?;
+    let target_ids = parse(right.get("observations"))?;
     if !source_ids.is_disjoint(&target_ids) {
         return Err(invalid(
             "transfer evidence observation sets must be disjoint",
@@ -50,7 +51,12 @@ pub(super) fn assess(
     }
     if source.sensor != target.sensor
         || source.sensor_version != target.sensor_version
-        || left != right
+        || !left
+            .iter()
+            .filter(|(key, _)| key.as_str() != "observations")
+            .eq(right
+                .iter()
+                .filter(|(key, _)| key.as_str() != "observations"))
     {
         return Err(invalid("transfer requires the same sensor, version and settings apart from observation selection"));
     }

@@ -33,7 +33,8 @@ impl NullModel for ExistingMotifNull {
     }
 
     fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>> {
-        let _: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        let _: Parameters =
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         let candidate = ctx.candidate();
         if candidate.kind != CandidateKind::GraphMotif
             || candidate

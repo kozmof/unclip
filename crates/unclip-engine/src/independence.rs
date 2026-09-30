@@ -49,8 +49,8 @@ pub struct IndependenceExpectationProfile {
 }
 
 fn canonical_sources(
-    sources: &[DerivedId],
-    available: &BTreeSet<DerivedId>,
+    mut sources: Vec<DerivedId>,
+    available: &BTreeSet<&DerivedId>,
     side: &str,
 ) -> Result<Vec<DerivedId>> {
     if sources.is_empty() {
@@ -58,18 +58,17 @@ fn canonical_sources(
             "independence definitions require selected {side} measurements"
         )));
     }
-    let mut result = sources.to_vec();
-    result.sort();
-    if result
+    sources.sort();
+    if sources
         .iter()
         .any(|identity| identity.0.trim().is_empty() || !available.contains(identity))
-        || result.windows(2).any(|pair| pair[0] == pair[1])
+        || sources.windows(2).any(|pair| pair[0] == pair[1])
     {
         return Err(invalid(format!(
             "independence definitions require unique measurements from the selected {side} profile"
         )));
     }
-    Ok(result)
+    Ok(sources)
 }
 
 impl crate::Engine {
@@ -108,25 +107,25 @@ impl crate::Engine {
             ));
         }
         let dependencies = DependencyCollector::default();
-        let tracked = Tracked::from(composition);
+        let tracked = Tracked::from_derived(composition, composition.value());
         let composition_value = dependencies.read(&tracked);
         let left = composition_value
             .left
             .measurements
             .iter()
-            .map(|entry| entry.id.clone())
+            .map(|entry| &entry.id)
             .collect::<BTreeSet<_>>();
         let right = composition_value
             .right
             .measurements
             .iter()
-            .map(|entry| entry.id.clone())
+            .map(|entry| &entry.id)
             .collect::<BTreeSet<_>>();
         let product = composition_value
             .product
             .measurements
             .iter()
-            .map(|entry| (entry.id.clone(), &entry.measurement))
+            .map(|entry| (&entry.id, &entry.measurement))
             .collect::<BTreeMap<_, _>>();
         if left.len() != composition_value.left.measurements.len()
             || right.len() != composition_value.right.measurements.len()
@@ -187,9 +186,9 @@ impl crate::Engine {
                 sensor: measurement.sensor.clone(),
                 sensor_version: measurement.sensor_version.clone(),
                 measurement_kind,
-                left_measurements: canonical_sources(&definition.left_measurements, &left, "left")?,
+                left_measurements: canonical_sources(definition.left_measurements, &left, "left")?,
                 right_measurements: canonical_sources(
-                    &definition.right_measurements,
+                    definition.right_measurements,
                     &right,
                     "right",
                 )?,
@@ -198,7 +197,7 @@ impl crate::Engine {
                 expected: definition.expected,
             });
         }
-        if selected != product.keys().cloned().collect() {
+        if !selected.iter().eq(product.keys().copied()) {
             return Err(invalid(
                 "independence definitions must cover every product measurement exactly once",
             ));

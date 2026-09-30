@@ -147,7 +147,7 @@ impl CandidateGenerator for CommunityCandidateGenerator {
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
         let params: CommunityParameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if params.minimum_samples.get() < 2 || params.minimum_members.get() < 2 {
             return Err(invalid(
                 "community candidates require at least two members and samples",
@@ -211,7 +211,7 @@ impl CandidateGenerator for LatentAxisGenerator {
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
         let params: LatentParameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if params.minimum_samples.get() < 2
             || !params.minimum_absolute_eigenvalue.is_finite()
             || params.minimum_absolute_eigenvalue <= 0.0

@@ -108,7 +108,8 @@ impl CandidateGenerator for CrossDomainCandidateGenerator {
         ctx: &CandidateCtx<'_>,
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
-        let _: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        let _: Parameters =
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if ctx.domain_version_id().trim().is_empty() {
             return Err(invalid(
                 "cross-domain candidates require a target source-domain version",

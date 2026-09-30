@@ -107,17 +107,14 @@ struct AtomicPattern {
 }
 /// Deserialize a required field of a candidate proposal, naming what is missing.
 ///
-/// Four call sites open-coded this chain — `get`, `ok_or_else`, `clone`,
-/// `from_value`, `map_err` — which is what made those lines unreadable and put
-/// the message that explains the failure at the far end of the line from the
-/// field it describes.
+/// Deserialize directly from the borrowed JSON field without copying its tree.
 fn required_field<T: serde::de::DeserializeOwned>(
     proposal: &serde_json::Map<String, serde_json::Value>,
     field: &str,
     missing: &str,
 ) -> Result<T> {
     let value = proposal.get(field).ok_or_else(|| invalid(missing))?;
-    serde_json::from_value(value.clone()).map_err(invalid)
+    serde::Deserialize::deserialize(value).map_err(invalid)
 }
 impl crate::Engine {
     /// Apply a supported proposal to a clone. The caller supplies a unique run ID.
@@ -259,7 +256,7 @@ impl crate::Engine {
         match proposal.kind {
             CandidateKind::AtomicMeaning => {
                 let pattern: AtomicPattern =
-                    serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                    serde::Deserialize::deserialize(pattern_value).map_err(invalid)?;
                 if pattern.matching != "exact_observed_label"
                     || pattern.observed_label.trim().is_empty()
                 {
@@ -301,7 +298,7 @@ impl crate::Engine {
             }
             CandidateKind::CompositeMeaning => {
                 let pattern: CommunityPattern =
-                    serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                    serde::Deserialize::deserialize(pattern_value).map_err(invalid)?;
                 if pattern.matching != "empirical_community"
                     || pattern.members.len() < 2
                     || pattern.members.windows(2).any(|pair| pair[0] >= pair[1])
@@ -381,7 +378,7 @@ impl crate::Engine {
             }
             CandidateKind::LatentAxis => {
                 let pattern: LatentPattern =
-                    serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                    serde::Deserialize::deserialize(pattern_value).map_err(invalid)?;
                 if pattern.matching != "empirical_spectral_axis"
                     || pattern.units.len() < 2
                     || pattern
@@ -660,7 +657,7 @@ impl crate::Engine {
             }
             CandidateKind::Relation => {
                 let pattern: RelationPattern =
-                    serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                    serde::Deserialize::deserialize(pattern_value).map_err(invalid)?;
                 if pattern.matching != "exact_directed_observed_relation"
                     || pattern.source_label.trim().is_empty()
                     || pattern.target_label.trim().is_empty()
@@ -730,7 +727,7 @@ impl crate::Engine {
             }
             CandidateKind::WeightRevision => {
                 let pattern: WeightPattern =
-                    serde_json::from_value(pattern_value.clone()).map_err(invalid)?;
+                    serde::Deserialize::deserialize(pattern_value).map_err(invalid)?;
                 if pattern.matching != "numeric_property_revision"
                     || pattern.property.trim().is_empty()
                 {

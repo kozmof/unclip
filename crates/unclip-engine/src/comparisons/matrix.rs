@@ -68,7 +68,7 @@ impl Comparator for PairwiseMatrixComparator {
     }
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if params.minimum_samples < 2 {
             return Err(invalid(
                 "matrix comparisons require at least two samples per measured cell",

@@ -67,7 +67,7 @@ impl NullModel for WeightChangeNull {
     }
     fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if !params.absolute_tolerance.is_finite() || params.absolute_tolerance < 0.0 {
             return Err(invalid("absolute tolerance must be finite and nonnegative"));
         }
@@ -81,8 +81,8 @@ impl NullModel for WeightChangeNull {
                 reason: "requires an explicit numeric-property weight revision".into(),
             }));
         };
-        let pattern: Pattern =
-            serde_json::from_value(raw.clone()).map_err(|e| PluginError::Message(e.to_string()))?;
+        let pattern: Pattern = serde::Deserialize::deserialize(raw)
+            .map_err(|e| PluginError::Message(e.to_string()))?;
         if pattern.property.trim().is_empty() {
             return Err(invalid("weight property must be explicit and nonempty"));
         }

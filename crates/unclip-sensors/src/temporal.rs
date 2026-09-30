@@ -176,15 +176,15 @@ impl Sensor for TemporalSensor {
     ) -> Result<Vec<Calculated<Measurement>>> {
         let params = match self.statistic {
             TemporalStatistic::LaggedDependency => Parameters::Lag(
-                serde_json::from_value(ctx.params().clone())
+                serde::Deserialize::deserialize(ctx.params())
                     .map_err(crate::support::invalid_params)?,
             ),
             TemporalStatistic::DynamicTimeWarping => Parameters::Dtw(
-                serde_json::from_value(ctx.params().clone())
+                serde::Deserialize::deserialize(ctx.params())
                     .map_err(crate::support::invalid_params)?,
             ),
             TemporalStatistic::ChangePoints => Parameters::Change(
-                serde_json::from_value(ctx.params().clone())
+                serde::Deserialize::deserialize(ctx.params())
                     .map_err(crate::support::invalid_params)?,
             ),
         };

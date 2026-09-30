@@ -239,7 +239,7 @@ impl Comparator for KendallComparator {
         &self.descriptor
     }
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
-        let _: Empty = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        let _: Empty = serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         emit(&self.descriptor.id, compare(ctx, None)?, token)
     }
 }
@@ -249,7 +249,7 @@ impl Comparator for RboComparator {
     }
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
         let params: RboParams =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if !params.p.is_finite() || params.p <= 0.0 || params.p >= 1.0 {
             return Err(invalid(
                 "RBO p must be finite and strictly between zero and one",

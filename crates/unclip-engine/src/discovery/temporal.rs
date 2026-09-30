@@ -50,7 +50,7 @@ impl CandidateGenerator for TemporalCouplingGenerator {
         token: CalculationToken,
     ) -> Result<Vec<Calculated<CandidateProposal>>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if ctx.domain_version_id().is_empty()
             || params.minimum_samples.get() < 2
             || !params.threshold.is_finite()

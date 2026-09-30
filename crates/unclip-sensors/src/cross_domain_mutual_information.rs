@@ -57,7 +57,8 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
         let config: CrossDomainMutualInformationConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params())
+                .map_err(crate::support::invalid_params)?;
         let product = ctx.product();
         let frame = ctx.frame();
         if frame.product != product.id

@@ -139,7 +139,7 @@ impl Sensor for SelectedPairSensor {
     ) -> Result<Vec<Calculated<Measurement>>> {
         let (left, right, condition, foreground) = match self.statistic {
             SelectedPairStatistic::CoForeground => {
-                let params: ForegroundParams = serde_json::from_value(ctx.params().clone())
+                let params: ForegroundParams = serde::Deserialize::deserialize(ctx.params())
                     .map_err(|e| invalid(e.to_string()))?;
                 (
                     params.left,
@@ -149,7 +149,7 @@ impl Sensor for SelectedPairSensor {
                 )
             }
             _ => {
-                let params: ConditionalParams = serde_json::from_value(ctx.params().clone())
+                let params: ConditionalParams = serde::Deserialize::deserialize(ctx.params())
                     .map_err(|e| invalid(e.to_string()))?;
                 if params.conditioning_variables.len() > 1 {
                     return Err(invalid(

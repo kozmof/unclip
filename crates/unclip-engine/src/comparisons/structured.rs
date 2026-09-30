@@ -50,7 +50,8 @@ impl Comparator for StructuredIdentityComparator {
     }
 
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
-        let _: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        let _: Parameters =
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         let expected = ctx.before();
         let observed = ctx.after();
         if expected.sensor != observed.sensor

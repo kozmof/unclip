@@ -107,7 +107,7 @@ fn events(
     let mut events = Vec::new();
     let mut indices = BTreeSet::new();
     for value in values {
-        let event: ChangePoint = serde_json::from_value(value.clone()).map_err(invalid)?;
+        let event: ChangePoint = serde::Deserialize::deserialize(value).map_err(invalid)?;
         if !indices.insert(event.index)
             || event.index < window
             || event
@@ -139,7 +139,7 @@ impl Comparator for ChangePointAlignmentComparator {
     }
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         let before = ctx.before();
         let after = ctx.after();
         if before.sensor != after.sensor

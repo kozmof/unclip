@@ -41,7 +41,7 @@ impl NullModel for CouplingZeroNull {
 
     fn evaluate(&self, ctx: &NullCtx<'_>, token: CalculationToken) -> Result<Calculated<Reading>> {
         let params: Parameters =
-            serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         if !params.absolute_tolerance.is_finite() || params.absolute_tolerance < 0.0 {
             return Err(invalid(
                 "coupling zero tolerance must be finite and nonnegative",

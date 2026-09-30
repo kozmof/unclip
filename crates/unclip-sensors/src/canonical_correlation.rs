@@ -64,10 +64,10 @@ fn frame_units(ctx: &ProductMeasureCtx<'_>) -> Result<(Vec<UnitId>, Vec<UnitId>)
     let mut left = Vec::new();
     let mut right = Vec::new();
     for axis in &frame.axes {
-        if seen_left.insert(axis.left.clone()) {
+        if seen_left.insert(&axis.left) {
             left.push(axis.left.clone());
         }
-        if seen_right.insert(axis.right.clone()) {
+        if seen_right.insert(&axis.right) {
             right.push(axis.right.clone());
         }
     }
@@ -84,8 +84,8 @@ impl ProductSensor for CanonicalCorrelationSensor {
         ctx: &ProductMeasureCtx<'_>,
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
-        let config: CanonicalCorrelationConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
+        let config: CanonicalCorrelationConfig = serde::Deserialize::deserialize(ctx.params())
+            .map_err(crate::support::invalid_params)?;
         let (left_units, right_units) = frame_units(ctx)?;
         let samples = ctx
             .samples()

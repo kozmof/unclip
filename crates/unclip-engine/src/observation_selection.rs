@@ -94,7 +94,7 @@ pub fn select_observations(
         }
         // Pool membership and duplicate detection are also actual reads.
         let value = dependencies.read(input);
-        if value.id.0.trim().is_empty() || available.insert(value.id.clone(), input).is_some() {
+        if value.id.0.trim().is_empty() || available.insert(&value.id, input).is_some() {
             return Err(invalid(
                 "available observations require unique nonempty observation identities",
             ));

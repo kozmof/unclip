@@ -58,7 +58,7 @@ impl Default for GraphIdentityComparator {
 #[serde(deny_unknown_fields)]
 struct Parameters {}
 fn graph(value: &serde_json::Value) -> Result<NamedDirectedGraph> {
-    let mut graph: NamedDirectedGraph = serde_json::from_value(value.clone()).map_err(invalid)?;
+    let mut graph: NamedDirectedGraph = serde::Deserialize::deserialize(value).map_err(invalid)?;
     let nodes = graph.nodes.iter().collect::<BTreeSet<_>>();
     let edges = graph.edges.iter().collect::<BTreeSet<_>>();
     if nodes.len() != graph.nodes.len() || nodes.iter().any(|n| n.trim().is_empty()) {
@@ -82,7 +82,8 @@ impl Comparator for GraphIdentityComparator {
         &self.descriptor
     }
     fn compare(&self, ctx: &CompareCtx<'_>, token: CalculationToken) -> Result<Calculated<Delta>> {
-        let _: Parameters = serde_json::from_value(ctx.params().clone()).map_err(invalid_params)?;
+        let _: Parameters =
+            serde::Deserialize::deserialize(ctx.params()).map_err(invalid_params)?;
         let before = ctx.before();
         let after = ctx.after();
         if before.sensor != after.sensor

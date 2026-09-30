@@ -56,8 +56,8 @@ impl ProductSensor for CrossDomainCommunitySensor {
         ctx: &ProductMeasureCtx<'_>,
         token: CalculationToken,
     ) -> Result<Calculated<Measurement>> {
-        let config: CrossDomainCommunityConfig =
-            serde_json::from_value(ctx.params().clone()).map_err(crate::support::invalid_params)?;
+        let config: CrossDomainCommunityConfig = serde::Deserialize::deserialize(ctx.params())
+            .map_err(crate::support::invalid_params)?;
         let product = ctx.product();
         let frame = ctx.frame();
         let profile = ctx.mutual_information().ok_or_else(|| {
