@@ -105,6 +105,14 @@ pub type Params = serde_json::Value;
 pub enum PluginError {
     #[error("plugin id is already registered: {0}")]
     DuplicatePlugin(PluginId),
+    /// A plugin's declared `params_schema` is not a schema this crate can
+    /// enforce, so registration refused it.
+    ///
+    /// Separate from [`Self::InvalidParams`]: that one means a caller supplied
+    /// parameters the schema rejects, this one means the schema itself cannot
+    /// decide the question. The fixes go to different people.
+    #[error("plugin {plugin} declares an unusable params schema: {reason}")]
+    MalformedSchema { plugin: PluginId, reason: String },
     #[error("configured plugin is not registered: {0}")]
     MissingPlugin(PluginId),
     #[error("plugin {plugin} version {actual} does not satisfy {required}")]
@@ -1053,61 +1061,86 @@ impl Registry {
             || self.null_models.contains_key(id)
     }
 
-    /// Claim an id across every family, then insert into the family's own map.
+    /// Claim an id across every family, check the declared schema, then insert
+    /// into the family's own map.
+    ///
+    /// The schema is checked here rather than on first use because an unusable
+    /// schema is a defect in the plugin, not in the run that happened to reach
+    /// it. `validate_params` reports a bad schema as a violation, which
+    /// `classify_sensor` records as a sparse `NotApplicable` reading — so a
+    /// third-party plugin with a malformed schema used to produce a run of
+    /// plausible-looking "not applicable" results instead of refusing to load.
+    /// A registry-wide test held the first-party plugins to this; registration
+    /// holds everyone to it.
     fn register<T: ?Sized>(
         &mut self,
         id: PluginId,
+        schema: &'static str,
         plugin: Arc<T>,
         family: impl FnOnce(&mut Self) -> &mut BTreeMap<PluginId, Arc<T>>,
     ) -> Result<()> {
         if self.contains(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
+        if let Err(error) = check_schema(schema) {
+            return Err(PluginError::MalformedSchema {
+                plugin: id,
+                reason: error.to_string(),
+            });
+        }
         family(self).insert(id, plugin);
         Ok(())
     }
 
     pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.sensors)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.sensors)
     }
 
     pub fn register_product_sensor(&mut self, plugin: Arc<dyn ProductSensor>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.product_sensors)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.product_sensors)
     }
 
     pub fn register_cross_product_sensor(
         &mut self,
         plugin: Arc<dyn CrossProductSensor>,
     ) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.cross_product_sensors)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.cross_product_sensors)
     }
 
     pub fn register_inferrer(&mut self, plugin: Arc<dyn Inferrer>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.inferrers)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.inferrers)
     }
 
     pub fn register_comparator(&mut self, plugin: Arc<dyn Comparator>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.comparators)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.comparators)
     }
 
     pub fn register_interpreter(&mut self, plugin: Arc<dyn Interpreter>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.interpreters)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.interpreters)
     }
 
     pub fn register_generator(&mut self, plugin: Arc<dyn CandidateGenerator>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.generators)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.generators)
     }
 
     pub fn register_null_model(&mut self, plugin: Arc<dyn NullModel>) -> Result<()> {
-        let id = plugin.descriptor().id.clone();
-        self.register(id, plugin, |r| &mut r.null_models)
+        let descriptor = plugin.descriptor();
+        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
+        self.register(id, schema, plugin, |r| &mut r.null_models)
     }
 
     pub fn sensors(&self) -> impl Iterator<Item = &Arc<dyn Sensor>> {
@@ -1449,6 +1482,40 @@ mod tests {
             );
             assert_eq!(ctx.evidence_gap(EvidenceRequirement::MinSamples(0)), None);
         }
+    }
+
+    /// A plugin whose schema cannot be enforced is refused at registration.
+    ///
+    /// Without this the schema was only consulted on the path that *uses* it,
+    /// where a malformed one degrades to a `NotApplicable` reading — the same
+    /// shape a legitimately inapplicable sensor produces. A run full of those
+    /// looks like sparse evidence rather than a broken plugin.
+    #[test]
+    fn a_plugin_declaring_an_unenforceable_schema_cannot_register() {
+        // `pattern` is a real JSON Schema keyword that `validate_params` does
+        // not implement, so honoring it here would be a lie to the caller.
+        const UNENFORCEABLE: &str = r#"{"type":"object","additionalProperties":false,
+            "properties":{"left":{"type":"string","pattern":"^a"}}}"#;
+
+        let mut registry = Registry::default();
+        let error = registry
+            .register_sensor(sensor_with_schema(&[], true, UNENFORCEABLE))
+            .expect_err("an unenforceable schema must not register");
+
+        let PluginError::MalformedSchema { plugin, reason } = error else {
+            panic!("expected MalformedSchema, got {error:?}");
+        };
+        assert_eq!(plugin, PluginId::new("sensor.stub"));
+        assert!(reason.contains("pattern"), "got: {reason}");
+
+        // The id is left unclaimed, so the same plugin registers once fixed.
+        assert!(registry
+            .register_sensor(sensor_with_schema(
+                &[],
+                true,
+                r#"{"type":"object","additionalProperties":false}"#,
+            ))
+            .is_ok());
     }
 
     #[test]
