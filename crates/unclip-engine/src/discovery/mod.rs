@@ -8,10 +8,10 @@
 //! [`residual`] is the general persistent-residual generator; the others are
 //! named for the structure they look for.
 
-pub(crate) mod cross_domain;
-pub(crate) mod motif;
-pub(crate) mod pairwise;
-pub(crate) mod relation;
-pub(crate) mod residual;
-pub(crate) mod structure;
-pub(crate) mod temporal;
+pub mod cross_domain;
+pub mod motif;
+pub mod pairwise;
+pub mod relation;
+pub mod residual;
+pub mod structure;
+pub mod temporal;

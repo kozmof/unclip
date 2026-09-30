@@ -275,6 +275,72 @@ pub struct PluginDescriptor {
     pub params_schema: &'static str,
 }
 
+/// The three things the registry needs from a plugin, whatever family it is in.
+///
+/// Every family declares its own descriptor type — a sensor's carries a stage
+/// and an applicability list, a comparator's the kinds it supports — but
+/// registration, id resolution and run records read only the identity, the
+/// version and the declared schema. Naming that subset lets those three share
+/// one implementation instead of one per family: `Registry::register` and
+/// `resolve_ids` were generic over `T: ?Sized` and took a closure at every call
+/// site to reach `descriptor().version`, which is this trait written out
+/// longhand, eight times, with no name.
+pub trait Described {
+    fn plugin_id(&self) -> &PluginId;
+    fn plugin_version(&self) -> &Version;
+    fn plugin_schema(&self) -> &'static str;
+}
+
+macro_rules! described_by_fields {
+    ($($descriptor:ty),+ $(,)?) => {$(
+        impl Described for $descriptor {
+            fn plugin_id(&self) -> &PluginId {
+                &self.id
+            }
+            fn plugin_version(&self) -> &Version {
+                &self.version
+            }
+            fn plugin_schema(&self) -> &'static str {
+                self.params_schema
+            }
+        }
+    )+};
+}
+
+described_by_fields!(
+    SensorDescriptor,
+    InferrerDescriptor,
+    ComparatorDescriptor,
+    PluginDescriptor,
+);
+
+macro_rules! described_by_descriptor {
+    ($($family:ident),+ $(,)?) => {$(
+        impl Described for dyn $family {
+            fn plugin_id(&self) -> &PluginId {
+                self.descriptor().plugin_id()
+            }
+            fn plugin_version(&self) -> &Version {
+                self.descriptor().plugin_version()
+            }
+            fn plugin_schema(&self) -> &'static str {
+                self.descriptor().plugin_schema()
+            }
+        }
+    )+};
+}
+
+described_by_descriptor!(
+    Sensor,
+    ProductSensor,
+    CrossProductSensor,
+    Inferrer,
+    Comparator,
+    Interpreter,
+    CandidateGenerator,
+    NullModel,
+);
+
 pub struct MeasureCtx<'a> {
     domain: &'a DomainSnapshot,
     frame: &'a MeasurementFrame,
@@ -447,14 +513,19 @@ pub enum SensorDecision {
     Record(Reading),
 }
 
-pub fn classify_sensor(
-    sensor: &dyn Sensor,
-    ctx: &MeasureCtx<'_>,
-    scheduled: bool,
-) -> SensorDecision {
-    if !scheduled {
-        return SensorDecision::Record(Reading::NotMeasured);
-    }
+/// Decide whether a scheduled sensor can run against the offered evidence.
+///
+/// Every caller reaches this with a sensor a `RunPlan` already selected, so the
+/// question is only whether the evidence supports it. This took a `scheduled`
+/// flag that returned [`Reading::NotMeasured`] when false; no caller ever
+/// passed false, because `RunPlan::sensors` holds selected sensors and nothing
+/// else. The flag was reachable only from the tests that exercised it, which is
+/// the shape of a guard that proves nothing.
+///
+/// `Reading::NotMeasured` remains a state a measurement can be *in* — an
+/// imported or hand-authored profile may record it — it is simply not a
+/// decision this function makes.
+pub fn classify_sensor(sensor: &dyn Sensor, ctx: &MeasureCtx<'_>) -> SensorDecision {
     // The descriptor's schema is checked before the sensor sees its parameters,
     // so it constrains third-party sensors on the same terms as first-party ones
     // rather than relying on each to re-validate its own contract. A violation is
@@ -572,6 +643,15 @@ pub trait InferenceIo: Send + Sync {
 /// - **Read inputs through the context.** `MeasureCtx::read` records each
 ///   input's identity in the emitted provenance. A value obtained another way
 ///   is missing from provenance and breaks verification.
+/// - **Count through the context too.** `MeasureCtx::observations()` and its
+///   siblings hand out the slice, and `.len()` on one records nothing — the
+///   collector sees a value only when it is read. That is deliberate for an
+///   *eligibility* question, which is about the shape of the offered evidence
+///   rather than its contents (see [`MeasureCtx::evidence_gap`]), but a
+///   measurement derived from a cardinality genuinely depends on the items
+///   counted. Read them, or emit the count in
+///   [`Measurement::sample_count`] rather than as the reading, so the value a
+///   sensor claims and the inputs its provenance names cannot disagree.
 /// - **Emit only through the token.** [`CalculationToken`] is the sole
 ///   constructor for `Calculated<T>`, which is what makes the result's
 ///   operation label trustworthy.
@@ -987,15 +1067,9 @@ pub mod conformance {
         );
     }
 
-    /// Run a sensor twice through the supplied fixture and assert the common
-    /// deterministic and descriptor contracts.
-    pub fn assert_planning(
-        sensor: &dyn Sensor,
-        ctx: &MeasureCtx<'_>,
-        scheduled: bool,
-        expected: SensorDecision,
-    ) {
-        assert_eq!(classify_sensor(sensor, ctx, scheduled), expected);
+    /// Assert the decision a sensor's descriptor and evidence produce.
+    pub fn assert_planning(sensor: &dyn Sensor, ctx: &MeasureCtx<'_>, expected: SensorDecision) {
+        assert_eq!(classify_sensor(sensor, ctx), expected);
     }
 
     pub fn assert_sensor<F>(sensor: &dyn Sensor, mut run: F)
@@ -1081,17 +1155,16 @@ impl Registry {
     /// plausible-looking "not applicable" results instead of refusing to load.
     /// A registry-wide test held the first-party plugins to this; registration
     /// holds everyone to it.
-    fn register<T: ?Sized>(
+    fn register<T: ?Sized + Described>(
         &mut self,
-        id: PluginId,
-        schema: &'static str,
         plugin: Arc<T>,
         family: impl FnOnce(&mut Self) -> &mut BTreeMap<PluginId, Arc<T>>,
     ) -> Result<()> {
+        let id = plugin.plugin_id().clone();
         if self.contains(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
-        if let Err(error) = check_schema(schema) {
+        if let Err(error) = check_schema(plugin.plugin_schema()) {
             return Err(PluginError::MalformedSchema {
                 plugin: id,
                 reason: error.to_string(),
@@ -1102,54 +1175,38 @@ impl Registry {
     }
 
     pub fn register_sensor(&mut self, plugin: Arc<dyn Sensor>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.sensors)
+        self.register(plugin, |r| &mut r.sensors)
     }
 
     pub fn register_product_sensor(&mut self, plugin: Arc<dyn ProductSensor>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.product_sensors)
+        self.register(plugin, |r| &mut r.product_sensors)
     }
 
     pub fn register_cross_product_sensor(
         &mut self,
         plugin: Arc<dyn CrossProductSensor>,
     ) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.cross_product_sensors)
+        self.register(plugin, |r| &mut r.cross_product_sensors)
     }
 
     pub fn register_inferrer(&mut self, plugin: Arc<dyn Inferrer>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.inferrers)
+        self.register(plugin, |r| &mut r.inferrers)
     }
 
     pub fn register_comparator(&mut self, plugin: Arc<dyn Comparator>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.comparators)
+        self.register(plugin, |r| &mut r.comparators)
     }
 
     pub fn register_interpreter(&mut self, plugin: Arc<dyn Interpreter>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.interpreters)
+        self.register(plugin, |r| &mut r.interpreters)
     }
 
     pub fn register_generator(&mut self, plugin: Arc<dyn CandidateGenerator>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.generators)
+        self.register(plugin, |r| &mut r.generators)
     }
 
     pub fn register_null_model(&mut self, plugin: Arc<dyn NullModel>) -> Result<()> {
-        let descriptor = plugin.descriptor();
-        let (id, schema) = (descriptor.id.clone(), descriptor.params_schema);
-        self.register(id, schema, plugin, |r| &mut r.null_models)
+        self.register(plugin, |r| &mut r.null_models)
     }
 
     pub fn sensors(&self) -> impl Iterator<Item = &Arc<dyn Sensor>> {
@@ -1208,34 +1265,19 @@ impl Registry {
             }
         }
         Ok(RunPlan {
-            sensors: resolve_ids(&self.sensors, &profile.sensors, |plugin| {
-                &plugin.descriptor().version
-            })?,
-            inferrers: resolve_ids(&self.inferrers, &profile.inferrers, |plugin| {
-                &plugin.descriptor().version
-            })?,
-            comparators: resolve_ids(&self.comparators, &profile.comparators, |plugin| {
-                &plugin.descriptor().version
-            })?,
-            interpreters: resolve_ids(&self.interpreters, &profile.interpreters, |plugin| {
-                &plugin.descriptor().version
-            })?,
-            candidate_generators: resolve_ids(
-                &self.generators,
-                &profile.candidate_generators,
-                |plugin| &plugin.descriptor().version,
-            )?,
-            null_models: resolve_ids(&self.null_models, &profile.null_models, |plugin| {
-                &plugin.descriptor().version
-            })?,
+            sensors: resolve_ids(&self.sensors, &profile.sensors)?,
+            inferrers: resolve_ids(&self.inferrers, &profile.inferrers)?,
+            comparators: resolve_ids(&self.comparators, &profile.comparators)?,
+            interpreters: resolve_ids(&self.interpreters, &profile.interpreters)?,
+            candidate_generators: resolve_ids(&self.generators, &profile.candidate_generators)?,
+            null_models: resolve_ids(&self.null_models, &profile.null_models)?,
         })
     }
 }
 
-fn resolve_ids<T: ?Sized>(
+fn resolve_ids<T: ?Sized + Described>(
     entries: &BTreeMap<PluginId, Arc<T>>,
     selections: &[PluginSelection],
-    version_of: impl Fn(&T) -> &Version,
 ) -> Result<Vec<Arc<T>>> {
     selections
         .iter()
@@ -1243,7 +1285,7 @@ fn resolve_ids<T: ?Sized>(
             let plugin = entries
                 .get(&selection.id)
                 .ok_or_else(|| PluginError::MissingPlugin(selection.id.clone()))?;
-            let actual = version_of(plugin);
+            let actual = plugin.plugin_version();
             if !selection.version.matches(actual) {
                 return Err(PluginError::IncompatibleVersion {
                     plugin: selection.id.clone(),
@@ -1271,6 +1313,24 @@ impl PluginSelection {
     }
 }
 
+/// The plugins a run selects, by id and version requirement.
+///
+/// # Why the product-sensor families are absent
+///
+/// `ProductSensor` and `CrossProductSensor` register into the [`Registry`] and
+/// claim their ids across every family like any other plugin, but they have no
+/// field here and [`Registry::resolve`] does not resolve them. They are reached
+/// by id at the point of use — `unclip_engine::cross_domain` looks one up per
+/// operation through [`Registry::product_sensor`] — because a product
+/// measurement names the two domains it spans in the same request that names
+/// the sensor. There is no run-wide "the product sensors for this run" the way
+/// there is for the six families above, so a profile field would have to be
+/// either ignored or re-stated per operation.
+///
+/// The consequence to know: the duplicate-id check in `resolve` never sees
+/// these two families, and a version requirement cannot be expressed for them.
+/// Registration still rejects an id collision across all eight families, so the
+/// id a caller passes resolves to exactly one plugin.
 #[derive(Debug, Clone, Default)]
 pub struct EngineProfile {
     pub sensors: Vec<PluginSelection>,
@@ -1475,7 +1535,6 @@ mod tests {
             let decision = classify_sensor(
                 sensor_with(&[EvidenceRequirement::MinConditioningVariables(2)], true).as_ref(),
                 &ctx,
-                true,
             );
             assert_eq!(
                 decision,
@@ -1559,7 +1618,7 @@ mod tests {
             DependencyCollector::default(),
         );
         let SensorDecision::Record(Reading::NotApplicable { reason }) =
-            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx, true)
+            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx)
         else {
             panic!("a schema violation must be recorded rather than run");
         };
@@ -1577,7 +1636,7 @@ mod tests {
             DependencyCollector::default(),
         );
         assert_eq!(
-            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx, true),
+            classify_sensor(sensor_with_schema(&[], true, SCHEMA).as_ref(), &ctx),
             SensorDecision::Run
         );
     }
@@ -1611,11 +1670,7 @@ mod tests {
         );
 
         assert_eq!(
-            classify_sensor(sensor().as_ref(), &ctx, false),
-            SensorDecision::Record(Reading::NotMeasured)
-        );
-        assert_eq!(
-            classify_sensor(sensor_with(&[], false).as_ref(), &ctx, true),
+            classify_sensor(sensor_with(&[], false).as_ref(), &ctx),
             SensorDecision::Record(Reading::NotApplicable {
                 reason: "unsupported fixture".into()
             })
@@ -1623,13 +1678,12 @@ mod tests {
         assert_eq!(
             classify_sensor(
                 sensor_with(&[EvidenceRequirement::MinSamples(2)], true).as_ref(),
-                &ctx,
-                true
+                &ctx
             ),
             SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 2 })
         );
         assert_eq!(
-            classify_sensor(sensor().as_ref(), &ctx, true),
+            classify_sensor(sensor().as_ref(), &ctx),
             SensorDecision::Run
         );
 

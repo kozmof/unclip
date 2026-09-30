@@ -7,11 +7,12 @@ authors.workspace = true
 repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
-description = "Pattern dictionary matching and o2m suggestion support for unclip."
+description = "Pattern dictionary types and multi-pattern text matching for unclip."
 
+# A leaf: no unclip crate below it, and nothing here knows what a branch or an
+# observation is. Both subsystems match text, so the matcher belongs beneath
+# both rather than inside either — see the module docs in `dictionary.rs`.
 [dependencies]
-unclip-core.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 anyhow.workspace = true
 daachorse.workspace = true

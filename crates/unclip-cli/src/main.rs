@@ -10,6 +10,7 @@ mod leveling;
 mod matching;
 mod output;
 mod sampling;
+mod suggest;
 mod usage;
 
 #[tokio::main(flavor = "current_thread")]

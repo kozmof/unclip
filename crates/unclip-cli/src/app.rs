@@ -11,15 +11,34 @@ use crate::{commands, db, matching, sampling, usage};
 use commands::QueryInput;
 use sampling::{ComposeInput, FilterInput, SampleInput};
 
-pub async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    if matches!(
-        &cli.command,
+/// Whether a command needs the archive at all.
+///
+/// `level plugins` lists what is compiled into the binary, so it answers
+/// without opening anything — and must, since it is the one command that still
+/// works before `unclip init`. Asking here rather than returning early from
+/// `run` keeps that a property of the command, so a second archive-free command
+/// is one arm rather than a second early return.
+fn needs_database(command: &Command) -> bool {
+    !matches!(
+        command,
         Command::Level {
             action: LevelAction::Plugins
         }
-    ) {
-        return crate::leveling::plugins();
+    )
+}
+
+pub async fn run() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    if !needs_database(&cli.command) {
+        return match cli.command {
+            Command::Level {
+                action: LevelAction::Plugins,
+            } => crate::leveling::plugins(),
+            // `needs_database` named this command archive-free; dispatching it
+            // is the other half of that statement, and the two are edited
+            // together or this arm fires.
+            _ => unreachable!("a command excluded by `needs_database` has no archive-free handler"),
+        };
     }
     // Only `init` may create the database; other commands require it to exist.
     let create = matches!(cli.command, Command::Init);

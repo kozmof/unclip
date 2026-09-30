@@ -13,6 +13,9 @@ description = "Domain model, validation, frames, packets, and queries for unclip
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# For `PatternEntry`/`PatternTarget`, which core validates and re-exports but
+# no longer defines: the matcher is a leaf both subsystems reach.
+unclip-match.workspace = true
 
 [dev-dependencies]
 serde_norway.workspace = true

@@ -1,11 +1,98 @@
 //! Pattern dictionary types.
 //!
-//! The data types `PatternEntry`/`PatternTarget` live in `unclip-core` (so the
-//! store can persist them without depending on the matcher) and are re-exported
-//! here for matcher-facing code. `PatternHit` — a match result with offsets —
-//! is matcher-specific and defined here.
+//! `PatternEntry`/`PatternTarget` are plain data: a text pattern and the
+//! structured target a match maps to. They live here, at the bottom of the
+//! tree, rather than in `unclip-core`, because both subsystems match text and
+//! only one of them owns the branch archive.
+//!
+//! They were in `unclip-core`, which made this crate depend on it, which put
+//! the possibility space's foundation underneath the leveling stack:
+//! `unclip-infer` matches patterns, so `unclip-engine` linked `unclip-core` to
+//! reach one `&str` per hit. The types are no larger here and the arrow now
+//! runs the other way — `unclip-core` re-exports them and keeps
+//! `validate_pattern_entry`, because validating a `Branch` target against the
+//! branch-path rules is core's business, not the matcher's.
 
-pub use unclip_core::{PatternEntry, PatternTarget};
+use serde::{Deserialize, Serialize};
+
+/// Where a matched text pattern maps to in the structured model.
+///
+/// `Hash`/`Ord` are derived so scan results can be aggregated in a map keyed by
+/// `&PatternTarget` borrowed straight from the matcher, instead of by an owned
+/// `describe()` string rebuilt for every hit.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PatternTarget {
+    O2m {
+        name: String,
+        value: String,
+    },
+    O2o {
+        name: String,
+        value: String,
+    },
+    Branch {
+        path: String,
+    },
+    /// Reserved: a pattern that collapses a match down to a branch reference.
+    /// It can be stored and is surfaced by `scan`, but no automatic collapse
+    /// behavior is implemented yet — it carries no special matching semantics
+    /// beyond being reported.
+    CollapsePattern {
+        path: String,
+    },
+}
+
+impl PatternTarget {
+    /// Short, stable label for display (`o2m`, `o2o`, `branch`, `collapse`).
+    pub fn kind_label(&self) -> &'static str {
+        match self {
+            PatternTarget::O2m { .. } => "o2m",
+            PatternTarget::O2o { .. } => "o2o",
+            PatternTarget::Branch { .. } => "branch",
+            PatternTarget::CollapsePattern { .. } => "collapse",
+        }
+    }
+
+    /// Human-readable target, e.g. `o2m topic=locker` or `branch /a/b`.
+    pub fn describe(&self) -> String {
+        match self {
+            PatternTarget::O2m { name, value } => format!("o2m {name}={value}"),
+            PatternTarget::O2o { name, value } => format!("o2o {name}={value}"),
+            PatternTarget::Branch { path } => format!("branch {path}"),
+            PatternTarget::CollapsePattern { path } => format!("collapse {path}"),
+        }
+    }
+
+    /// The matched side of the target: an indexed value, or a branch path.
+    ///
+    /// Callers that treat every target uniformly — the pattern inferrer reports
+    /// what a hit *said*, not where it would be filed — need one string per
+    /// target without re-deriving the match per variant.
+    pub fn value(&self) -> &str {
+        match self {
+            PatternTarget::O2m { value, .. } | PatternTarget::O2o { value, .. } => value,
+            PatternTarget::Branch { path } | PatternTarget::CollapsePattern { path } => path,
+        }
+    }
+}
+
+/// A text pattern mapped to a structured target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternEntry {
+    pub pattern: String,
+    pub target: PatternTarget,
+}
+
+impl PatternEntry {
+    pub fn new(pattern: impl Into<String>, target: PatternTarget) -> Self {
+        Self {
+            pattern: pattern.into(),
+            target,
+        }
+    }
+}
 
 /// A single match of a pattern within scanned text.
 ///

@@ -9,14 +9,14 @@
 //! compared — a sparse reading on either side — is reported as such rather than
 //! as a zero delta.
 
-pub(crate) mod distribution;
-pub(crate) mod event;
-pub(crate) mod graph;
-pub(crate) mod independence;
-pub(crate) mod matrix;
-pub(crate) mod partition;
-pub(crate) mod profile;
-pub(crate) mod ranking;
-pub(crate) mod scalar;
-pub(crate) mod spectral;
-pub(crate) mod structured;
+pub mod distribution;
+pub mod event;
+pub mod graph;
+pub mod independence;
+pub mod matrix;
+pub mod partition;
+pub mod profile;
+pub mod ranking;
+pub mod scalar;
+pub mod spectral;
+pub mod structured;

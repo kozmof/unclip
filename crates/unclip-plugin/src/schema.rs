@@ -15,9 +15,10 @@
 //! # Supported subset
 //!
 //! `type` (`object`/`array`/`string`/`number`/`integer`/`boolean`/`null`),
-//! `properties`, `required`, `additionalProperties` (boolean form), `items`,
-//! `enum`, `const`, `minLength`, `minimum`, `maximum`, `exclusiveMinimum`,
-//! `exclusiveMaximum`, `minItems`, `maxItems`, `uniqueItems`, and `oneOf`.
+//! `properties`, `required`, `additionalProperties` (boolean form), `items`
+//! (single-schema form only), `enum`, `const`, `minLength`, `minimum`,
+//! `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minItems`, `maxItems`,
+//! `uniqueItems`, and `oneOf`.
 //!
 //! [`check_schema`] *rejects* any other keyword rather than ignoring it. An
 //! ignored keyword is the failure mode this module exists to prevent: a
@@ -29,6 +30,22 @@
 //! Adding a keyword therefore means two edits — teach [`validate_params`] to
 //! enforce it and add it to [`CONSTRAINT_KEYWORDS`] — and the registry-wide
 //! `check_schema` test fails until both are done.
+//!
+//! # Two rules the keyword list cannot state
+//!
+//! An allowlist catches an unenforced *keyword*. It does not catch a keyword
+//! that is enforced in one form and not another, nor one that is enforced only
+//! against values of a particular type. [`check_schema`] rejects both:
+//!
+//! - **An object schema must declare `"type":"object"`.** `validate` reaches
+//!   `required`, `properties` and `additionalProperties` only after
+//!   establishing the value is an object, and returns `Ok` for one that is
+//!   not. Without the declaration, `{"required":["left"], …}` accepted the
+//!   bare string `"x"` — every keyword present, none of them binding.
+//! - **`items` must be one schema, not an array.** The tuple form positions a
+//!   schema per index, which `validate` does not implement: it would pass the
+//!   array to itself as a schema, fail `as_object()`, and accept every
+//!   element.
 
 use serde_json::Value;
 
@@ -331,10 +348,25 @@ fn check(schema: &Value, path: &str) -> Result<(), MalformedSchema> {
         // Fall through rather than returning: `validate` applies a `oneOf`
         // schema's sibling keywords too, so they have to be checked as well.
     }
-    let declares_object = object.get("type") == Some(&Value::String("object".into()))
-        || object.contains_key("properties");
+    let names_object = object.get("type") == Some(&Value::String("object".into()));
+    let describes_object = object.contains_key("properties") || object.contains_key("required");
     let properties = object.get("properties").and_then(Value::as_object);
-    if declares_object && !object.contains_key("additionalProperties") {
+    // `validate` applies `required`, `properties` and `additionalProperties`
+    // only after establishing that the value *is* an object, and returns `Ok`
+    // for one that is not. A schema that describes an object without declaring
+    // `type` therefore enforces none of the three against a string, array or
+    // number: `{"required":["left"],...}` accepted the bare string `"x"`. The
+    // keyword allowlist below cannot catch this — every keyword involved is
+    // enforced — so the declaration is required here instead.
+    if describes_object && !names_object {
+        return Err(MalformedSchema(format!(
+            "{}: a schema with `properties` or `required` must declare \
+             `\"type\":\"object\"`, or those keywords bind only when the value \
+             happens to be an object",
+            named(path)
+        )));
+    }
+    if (names_object || describes_object) && !object.contains_key("additionalProperties") {
         return Err(MalformedSchema(format!(
             "{}: object schema must state `additionalProperties`",
             named(path)
@@ -356,6 +388,19 @@ fn check(schema: &Value, path: &str) -> Result<(), MalformedSchema> {
         }
     }
     if let Some(items) = object.get("items") {
+        // JSON Schema's tuple form — `"items": [schemaA, schemaB]` — positions
+        // one schema per index. `validate` passes the whole array to itself as
+        // a schema, where `as_object()` fails and every element is accepted, so
+        // a declared tuple constrains nothing. That is the failure this module
+        // exists to prevent, one level below the keyword allowlist: `items` is
+        // an enforced keyword, but only in its single-schema form.
+        if items.is_array() {
+            return Err(MalformedSchema(format!(
+                "{}: array-form `items` (the tuple form) is not enforced by \
+                 validate_params; use one schema for every element",
+                named(&join(path, "items"))
+            )));
+        }
         check(items, &join(path, "items"))?;
     }
     Ok(())
@@ -635,5 +680,62 @@ mod tests {
         let schema = r#"{"type":"object","additionalProperties":true}"#;
         assert!(check_schema(schema).is_ok());
         assert!(validate_params(schema, &json!({"temperature": 0})).is_ok());
+    }
+
+    /// An object schema that omits `type` binds none of its keywords against a
+    /// value that is not an object, so registration refuses it.
+    ///
+    /// Without the declaration this schema accepted the bare string `"x"`,
+    /// the array `[1,2,3]` and the number `42` — `validate` establishes the
+    /// value is an object before it reaches `required`, `properties` or
+    /// `additionalProperties`, and returns `Ok` for one that is not.
+    #[test]
+    fn rejects_an_object_schema_that_does_not_declare_its_type() {
+        let untyped = r#"{"additionalProperties":false,"required":["left"],
+            "properties":{"left":{"type":"string","minLength":1}}}"#;
+        let error = check_schema(untyped).expect_err("untyped object schema").0;
+        assert!(error.contains("must declare"), "{error}");
+
+        // The same schema with the declaration is accepted, and now rejects
+        // every non-object rather than passing it through.
+        let typed = r#"{"type":"object","additionalProperties":false,"required":["left"],
+            "properties":{"left":{"type":"string","minLength":1}}}"#;
+        assert!(check_schema(typed).is_ok());
+        for value in [json!("x"), json!([1, 2, 3]), json!(42), json!(null)] {
+            assert!(
+                validate_params(typed, &value).is_err(),
+                "a schema requiring `left` accepted {value}"
+            );
+        }
+        assert!(validate_params(typed, &json!({"left": "a"})).is_ok());
+    }
+
+    /// `required` alone is enough to describe an object, so it carries the same
+    /// obligation as `properties`.
+    #[test]
+    fn required_without_properties_is_still_an_object_schema() {
+        let error = check_schema(r#"{"required":["left"]}"#)
+            .expect_err("`required` describes an object")
+            .0;
+        assert!(error.contains("must declare"), "{error}");
+    }
+
+    /// The tuple form of `items` positions one schema per index, which
+    /// `validate` does not implement: it passes the whole array to itself as a
+    /// schema, where `as_object()` fails and every element is accepted.
+    #[test]
+    fn rejects_the_tuple_form_of_items() {
+        let tuple = r#"{"type":"object","additionalProperties":false,
+            "properties":{"pair":{"type":"array",
+                "items":[{"type":"string"},{"type":"number"}]}}}"#;
+        let error = check_schema(tuple).expect_err("tuple-form items").0;
+        assert!(error.contains("tuple form"), "{error}");
+        assert!(error.contains("pair/items"), "{error}");
+
+        // The single-schema form still works and still constrains elements.
+        let single = r#"{"type":"object","additionalProperties":false,
+            "properties":{"pair":{"type":"array","items":{"type":"string"}}}}"#;
+        assert!(check_schema(single).is_ok());
+        assert!(validate_params(single, &json!({"pair": ["a", 1]})).is_err());
     }
 }

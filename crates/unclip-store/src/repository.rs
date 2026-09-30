@@ -83,7 +83,17 @@ impl PageCursor {
     }
 
     /// A cursor with an explicit page size.
+    ///
+    /// # Panics
+    ///
+    /// If `page_size` is zero. Every query would return an empty page, which
+    /// the cursor reports as `None` — indistinguishable from "no matches" — so
+    /// a caller would silently process nothing over a non-empty archive.
+    /// A page size of zero has no correct behaviour to fall back on, and it can
+    /// only come from a caller's own constant or arithmetic, so it is a bug at
+    /// the call site rather than a condition to report.
     pub fn with_page_size(page_size: u64) -> Self {
+        assert!(page_size > 0, "page size must be at least 1");
         Self {
             after_path: None,
             page_size,

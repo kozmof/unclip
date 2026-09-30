@@ -265,13 +265,6 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
             );
             Ok(values)
         });
-        let ctx = inputs.ctx(&fixture, &params);
-        conformance::assert_planning(
-            sensor.as_ref(),
-            &ctx,
-            false,
-            SensorDecision::Record(Reading::NotMeasured),
-        );
         let mut empty = fixture.clone();
         empty.observations.clear();
         empty.alignments.clear();
@@ -285,16 +278,11 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
         conformance::assert_planning(
             sensor.as_ref(),
             &empty_inputs.ctx(&empty, &params),
-            true,
             SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need }),
         );
         empty.frame.axes.clear();
         assert!(matches!(
-            unclip_plugin::classify_sensor(
-                sensor.as_ref(),
-                &empty_inputs.ctx(&empty, &params),
-                true
-            ),
+            unclip_plugin::classify_sensor(sensor.as_ref(), &empty_inputs.ctx(&empty, &params)),
             SensorDecision::Record(Reading::NotApplicable { .. })
         ));
     }
@@ -980,7 +968,6 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
             conformance::assert_planning(
                 sensor.as_ref(),
                 &ctx,
-                true,
                 SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 1 }),
             );
             let result = sensor
@@ -1356,7 +1343,6 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
         conformance::assert_planning(
             sensor.as_ref(),
             &ctx,
-            true,
             SensorDecision::Record(Reading::InsufficientEvidence { have: 0, need: 1 }),
         );
         assert_eq!(

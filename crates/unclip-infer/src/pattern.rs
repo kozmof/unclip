@@ -5,7 +5,7 @@ use semver::Version;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use unclip_domain::{RelationId, UnitId};
-use unclip_match::{Matcher, PatternEntry, PatternTarget};
+use unclip_match::{Matcher, PatternEntry};
 use unclip_observe::{
     Alignment, AlignmentCandidate, Observation, ObservationId, ObservedRelation,
     ObservedRelationId, ObservedUnit, ObservedUnitId,
@@ -50,12 +50,6 @@ impl Default for PatternInferrer {
         }
     }
 }
-fn value(target: &PatternTarget) -> &str {
-    match target {
-        PatternTarget::O2m { value, .. } | PatternTarget::O2o { value, .. } => value,
-        PatternTarget::Branch { path } | PatternTarget::CollapsePattern { path } => path,
-    }
-}
 
 #[async_trait]
 impl Inferrer for PatternInferrer {
@@ -95,7 +89,7 @@ impl Inferrer for PatternInferrer {
             let domain_units: Vec<_> = hits
                 .iter()
                 .filter_map(|hit| {
-                    let id = UnitId::new(value(&hit.target));
+                    let id = UnitId::new(hit.target.value());
                     ctx.domain()
                         .units
                         .contains_key(&id)
@@ -103,7 +97,7 @@ impl Inferrer for PatternInferrer {
                 })
                 .collect();
             for hit in &hits {
-                let id = RelationId::new(value(&hit.target));
+                let id = RelationId::new(hit.target.value());
                 if ctx.domain().relations.contains_key(&id) {
                     relation_hits.insert(id);
                 }

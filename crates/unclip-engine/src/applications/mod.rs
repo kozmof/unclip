@@ -6,8 +6,8 @@
 //! successor is only ever written by the revision ladder, after held-out
 //! evidence has been recorded.
 
-pub(crate) mod candidate;
-pub(crate) mod coupling;
-pub(crate) mod motif;
-pub(crate) mod role;
-pub(crate) mod transformation;
+pub mod candidate;
+pub mod coupling;
+pub mod motif;
+pub mod role;
+pub mod transformation;

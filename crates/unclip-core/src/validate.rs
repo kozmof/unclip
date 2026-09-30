@@ -27,6 +27,40 @@ pub const MAX_FRAME_COLLECTION_ITEMS: usize = 10_000;
 /// shape binds each logical item more than once.
 pub const MAX_QUERY_FILTER_ITEMS: usize = 400;
 
+/// Why a domain string is not storable.
+///
+/// Returned rather than rendered, so each caller words the failure in its own
+/// vocabulary — "o2o name", "reference type", "target value" — while the rule
+/// itself is stated once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DomainStringFault {
+    Empty,
+    Oversized,
+    ControlCharacters,
+}
+
+/// The rule every stored name and value satisfies: non-empty, within
+/// [`MAX_DOMAIN_STRING_BYTES`], and free of control characters.
+///
+/// This was the same three-condition `if` written out seven times — for o2o
+/// names and values, o2m names and values, reference types and values, and
+/// pattern targets — each with its own hand-written message. Seven copies of a
+/// rule is seven places to forget a condition when the rule changes, and the
+/// copies had already drifted: the branch title/description checks test the
+/// same two bounds in the opposite order and report them separately.
+pub fn validate_domain_string(value: &str) -> std::result::Result<(), DomainStringFault> {
+    if value.is_empty() {
+        return Err(DomainStringFault::Empty);
+    }
+    if value.len() > MAX_DOMAIN_STRING_BYTES {
+        return Err(DomainStringFault::Oversized);
+    }
+    if value.chars().any(char::is_control) {
+        return Err(DomainStringFault::ControlCharacters);
+    }
+    Ok(())
+}
+
 /// Validate a branch path address.
 ///
 /// A path must be absolute (`/`-prefixed), have no empty segments (no `//`),
@@ -108,18 +142,12 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
     }
 
     for (name, value) in &branch.o2o {
-        if name.is_empty()
-            || name.len() > MAX_DOMAIN_STRING_BYTES
-            || name.chars().any(char::is_control)
-        {
+        if validate_domain_string(name).is_err() {
             return Err(invalid(
                 "o2o name must not be empty or contain control characters".to_string(),
             ));
         }
-        if value.is_empty()
-            || value.len() > MAX_DOMAIN_STRING_BYTES
-            || value.chars().any(char::is_control)
-        {
+        if validate_domain_string(value).is_err() {
             return Err(invalid(format!(
                 "o2o `{name}` value must not be empty or contain control characters"
             )));
@@ -127,19 +155,13 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
     }
 
     for (name, values) in &branch.o2m {
-        if name.is_empty()
-            || name.len() > MAX_DOMAIN_STRING_BYTES
-            || name.chars().any(char::is_control)
-        {
+        if validate_domain_string(name).is_err() {
             return Err(invalid(
                 "o2m name must not be empty or contain control characters".to_string(),
             ));
         }
         for value in values {
-            if value.is_empty()
-                || value.len() > MAX_DOMAIN_STRING_BYTES
-                || value.chars().any(char::is_control)
-            {
+            if validate_domain_string(value).is_err() {
                 return Err(invalid(format!(
                     "o2m `{name}` value must not be empty or contain control characters"
                 )));
@@ -162,19 +184,13 @@ pub fn validate_branch_record(branch: &Branch) -> Result<()> {
 
 /// Validate a reference before storing it independently of a full branch.
 pub fn validate_reference(reference: &Reference) -> Result<()> {
-    if reference.kind.is_empty()
-        || reference.kind.len() > MAX_DOMAIN_STRING_BYTES
-        || reference.kind.chars().any(char::is_control)
-    {
+    if validate_domain_string(&reference.kind).is_err() {
         return Err(CoreError::InvalidBranch {
             path: "<reference>".to_string(),
             reason: "reference type must not be empty or contain control characters".to_string(),
         });
     }
-    if reference.value.is_empty()
-        || reference.value.len() > MAX_DOMAIN_STRING_BYTES
-        || reference.value.chars().any(char::is_control)
-    {
+    if validate_domain_string(&reference.value).is_err() {
         return Err(CoreError::InvalidBranch {
             path: "<reference>".to_string(),
             reason: "reference value must not be empty or contain control characters".to_string(),

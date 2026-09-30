@@ -1,19 +1,41 @@
 //! Stage orchestration and run planning for the semantic leveling engine.
+//!
+//! # Finding things
+//!
+//! The plugin families live in four modules named for what they do, and the
+//! group is where a new one goes:
+//!
+//! - [`nulls`] — what the domain already accounts for
+//! - [`comparisons`] — the typed difference between two measurements
+//! - [`discovery`] — what the domain does not yet account for
+//! - [`applications`] — applying a candidate to build its counterfactual
+//!
+//! Prefer the grouped path: `comparisons::ranking::KendallComparator` says
+//! which family a type belongs to and which kind it compares, and it reads
+//! once rather than twice — the submodules are named for their subject, not
+//! their group.
+//!
+//! Everything in those modules is also re-exported at the crate root, because
+//! that is where callers have always found it. The root is additionally the
+//! home of what belongs to no family: the stage orchestration on [`Engine`],
+//! the revision ladder, and the free functions that take a [`RunPlan`] and
+//! construct nothing, so a caller wanting a pure calculation need not build a
+//! registry to reach one.
 
 #![forbid(unsafe_code)]
 
-mod applications;
-mod comparisons;
+pub mod applications;
+pub mod comparisons;
 mod composition_measurement;
 mod constraints;
 mod cross_domain;
 pub use cross_domain::{CrossDomainRun, CrossProductTransferInputs, TransferSide};
-mod discovery;
+pub mod discovery;
 mod empirical;
 mod experiment;
 mod held_out;
 mod independence;
-mod nulls;
+pub mod nulls;
 mod observation_selection;
 mod pareto;
 mod product_domain;
@@ -462,7 +484,7 @@ impl Engine {
                 params,
                 run.timestamp.clone(),
             );
-            match classify_sensor(sensor.as_ref(), &ctx, true) {
+            match classify_sensor(sensor.as_ref(), &ctx) {
                 SensorDecision::Run => {
                     measurements.extend(sensor.measure(&ctx, ctx.calculation_token(metadata))?);
                 }
@@ -590,80 +612,42 @@ pub fn run_record(
     started_at: Timestamp,
     metadata: serde_json::Value,
 ) -> unclip_record::EngineRunRecord {
-    fn entry(
-        id: &PluginId,
-        version: &semver::Version,
+    /// One family's entries, in id order.
+    ///
+    /// Generic over the family through [`Described`], which is the only thing
+    /// a record needs from a plugin. This was written out six times — build the
+    /// entries, then sort them — and the sorts lived twenty lines below the
+    /// builds, so the two lists had to be kept in step by eye.
+    fn entries<T: ?Sized + unclip_plugin::Described>(
+        plugins: &[std::sync::Arc<T>],
         params: &BTreeMap<PluginId, serde_json::Value>,
-    ) -> serde_json::Value {
-        let values = params
-            .get(id)
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        serde_json::json!({
-            "id": id,
-            "version": version,
-            "params_hash": hash_params(&values),
-            "params": values,
-        })
+    ) -> Vec<serde_json::Value> {
+        let mut entries = plugins
+            .iter()
+            .map(|plugin| {
+                let id = plugin.plugin_id();
+                let values = params
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                serde_json::json!({
+                    "id": id,
+                    "version": plugin.plugin_version(),
+                    "params_hash": hash_params(&values),
+                    "params": values,
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+        entries
     }
 
-    let mut inferrers = plan
-        .inferrers
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let mut sensors = plan
-        .sensors
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let mut comparators = plan
-        .comparators
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let mut interpreters = plan
-        .interpreters
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let mut candidate_generators = plan
-        .candidate_generators
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let mut null_models = plan
-        .null_models
-        .iter()
-        .map(|plugin| {
-            let descriptor = plugin.descriptor();
-            entry(&descriptor.id, &descriptor.version, params)
-        })
-        .collect::<Vec<_>>();
-    let by_id = |left: &serde_json::Value, right: &serde_json::Value| {
-        left["id"].as_str().cmp(&right["id"].as_str())
-    };
-    inferrers.sort_by(by_id);
-    sensors.sort_by(by_id);
-    comparators.sort_by(by_id);
-    interpreters.sort_by(by_id);
-    candidate_generators.sort_by(by_id);
-    null_models.sort_by(by_id);
+    let inferrers = entries(&plan.inferrers, params);
+    let sensors = entries(&plan.sensors, params);
+    let comparators = entries(&plan.comparators, params);
+    let interpreters = entries(&plan.interpreters, params);
+    let candidate_generators = entries(&plan.candidate_generators, params);
+    let null_models = entries(&plan.null_models, params);
 
     unclip_record::EngineRunRecord {
         id: id.into(),

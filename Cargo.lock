@@ -2588,6 +2588,7 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "thiserror",
+ "unclip-match",
 ]
 
 [[package]]
@@ -2691,8 +2692,6 @@ dependencies = [
  "anyhow",
  "daachorse",
  "serde",
- "serde_json",
- "unclip-core",
 ]
 
 [[package]]

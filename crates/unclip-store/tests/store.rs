@@ -318,6 +318,15 @@ async fn headers_page_walks_a_scope_in_order_across_page_boundaries() {
     assert_eq!(trailing, paths);
 }
 
+/// A zero page size would report a non-empty archive as exhausted on the first
+/// call, so it is refused at construction rather than silently returning
+/// nothing.
+#[test]
+#[should_panic(expected = "page size must be at least 1")]
+fn a_zero_page_size_is_refused() {
+    let _ = PageCursor::with_page_size(0);
+}
+
 #[tokio::test]
 async fn hydrates_archives_across_sqlite_parameter_chunks() {
     let repo = repo().await;

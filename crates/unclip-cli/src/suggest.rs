@@ -3,9 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use unclip_core::Branch;
-
-use crate::dictionary::PatternTarget;
-use crate::matcher::Matcher;
+use unclip_match::{Matcher, PatternTarget};
 
 /// The scannable free text of a branch: title, description, and metadata.
 ///
@@ -63,7 +61,7 @@ pub fn suggest_o2m(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dictionary::{PatternEntry, PatternTarget};
+    use unclip_match::{PatternEntry, PatternTarget};
 
     fn matcher() -> Matcher {
         Matcher::build(vec![

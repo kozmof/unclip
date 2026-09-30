@@ -8,13 +8,13 @@
 //! [`exact_pattern`] holds the body shared by the role and transformation
 //! nulls. Its module docs say why the motif null is not routed through it.
 
-pub(crate) mod context;
-pub(crate) mod coupling;
-pub(crate) mod domain;
-pub(crate) mod exact_pattern;
-pub(crate) mod models;
-pub(crate) mod motif;
-pub(crate) mod ranking;
-pub(crate) mod role;
-pub(crate) mod transformation;
-pub(crate) mod weight;
+pub mod context;
+pub mod coupling;
+pub mod domain;
+pub mod exact_pattern;
+pub mod models;
+pub mod motif;
+pub mod ranking;
+pub mod role;
+pub mod transformation;
+pub mod weight;

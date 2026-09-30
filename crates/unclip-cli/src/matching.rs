@@ -6,7 +6,9 @@ use std::path::Path;
 
 use anyhow::{bail, Context};
 use unclip_core::validate_pattern_entry;
-use unclip_match::{branch_text, suggest_o2m, Matcher, PatternEntry, PatternTarget};
+use unclip_match::{Matcher, PatternEntry, PatternTarget};
+
+use crate::suggest::{branch_text, suggest_o2m};
 use unclip_store::{BranchReader, SeaOrmPatternRepository};
 
 /// Build a matcher from database state: o2o/o2m catalogs, branch titles, and
