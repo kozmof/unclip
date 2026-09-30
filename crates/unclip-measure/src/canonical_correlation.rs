@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
 use unclip_observe::ObservationId;
 
+use crate::jacobi::Eigen;
+
 /// One observation of numeric variables from each side of a product domain.
 ///
 /// An absent unit is missing evidence. It is never filled with zero.
@@ -353,51 +355,22 @@ fn diagonal_sum(matrix: &[Vec<f64>]) -> f64 {
     matrix.iter().enumerate().map(|(i, row)| row[i]).sum()
 }
 
-#[derive(Debug)]
-struct EigenComponent {
-    value: f64,
-    vector: Vec<f64>,
-}
-
+/// Diagonalize a symmetric matrix, then apply the two conditions this module's
+/// callers rely on: every eigenvalue finite, and components in descending order.
+///
+/// `inverse_square_root` and the gram-eigenvalue loop both read the components
+/// as ranked, so the sort is part of the contract here rather than a
+/// presentation choice — which is why it lives with the caller and not in
+/// [`crate::jacobi`], whose other caller sorts by a different key.
 fn symmetric_eigen(
-    mut matrix: Vec<Vec<f64>>,
+    matrix: Vec<Vec<f64>>,
     tolerance: f64,
     max_sweeps: usize,
-) -> Result<(Vec<EigenComponent>, usize), CanonicalCorrelationError> {
-    let n = matrix.len();
-    let scale = matrix
-        .iter()
-        .flatten()
-        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
-    if scale > 0.0 {
-        for value in matrix.iter_mut().flatten() {
-            *value /= scale;
-        }
-    }
-    let mut vectors = vec![vec![0.0; n]; n];
-    for (index, row) in vectors.iter_mut().enumerate() {
-        row[index] = 1.0;
-    }
-    let mut sweeps = 0;
-    while max_off_diagonal(&matrix) > tolerance {
-        if sweeps == max_sweeps {
-            return Err(CanonicalCorrelationError::DidNotConverge { sweeps });
-        }
-        for left in 0..n {
-            for right in left + 1..n {
-                if matrix[left][right].abs() > tolerance {
-                    rotate(&mut matrix, &mut vectors, left, right);
-                }
-            }
-        }
-        sweeps += 1;
-    }
-    let mut components = (0..n)
-        .map(|column| EigenComponent {
-            value: matrix[column][column] * scale,
-            vector: vectors.iter().map(|row| row[column]).collect(),
-        })
-        .collect::<Vec<_>>();
+) -> Result<(Vec<Eigen>, usize), CanonicalCorrelationError> {
+    let (mut components, sweeps) = crate::jacobi::symmetric_eigen(matrix, tolerance, max_sweeps)
+        .map_err(|error| CanonicalCorrelationError::DidNotConverge {
+            sweeps: error.sweeps,
+        })?;
     if components
         .iter()
         .any(|component| !component.value.is_finite())
@@ -408,48 +381,8 @@ fn symmetric_eigen(
     Ok((components, sweeps))
 }
 
-fn max_off_diagonal(matrix: &[Vec<f64>]) -> f64 {
-    matrix
-        .iter()
-        .enumerate()
-        .flat_map(|(row, values)| values.iter().skip(row + 1))
-        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
-}
-
-fn rotate(matrix: &mut [Vec<f64>], vectors: &mut [Vec<f64>], left: usize, right: usize) {
-    let off_diagonal = matrix[left][right];
-    let delta = (matrix[right][right] - matrix[left][left]) / 2.0;
-    let tangent = off_diagonal / (delta + delta.hypot(off_diagonal).copysign(delta));
-    let cosine = 1.0 / 1.0_f64.hypot(tangent);
-    let sine = tangent * cosine;
-    matrix[left][left] -= tangent * off_diagonal;
-    matrix[right][right] += tangent * off_diagonal;
-    matrix[left][right] = 0.0;
-    matrix[right][left] = 0.0;
-    #[allow(
-        clippy::needless_range_loop,
-        reason = "Jacobi rotation updates symmetric rows and columns"
-    )]
-    for index in 0..matrix.len() {
-        if index != left && index != right {
-            let index_left = matrix[index][left];
-            let index_right = matrix[index][right];
-            matrix[index][left] = cosine * index_left - sine * index_right;
-            matrix[left][index] = matrix[index][left];
-            matrix[index][right] = sine * index_left + cosine * index_right;
-            matrix[right][index] = matrix[index][right];
-        }
-    }
-    for row in vectors {
-        let vector_left = row[left];
-        let vector_right = row[right];
-        row[left] = cosine * vector_left - sine * vector_right;
-        row[right] = sine * vector_left + cosine * vector_right;
-    }
-}
-
 fn inverse_square_root(
-    components: &[EigenComponent],
+    components: &[Eigen],
     tolerance: f64,
 ) -> Result<Vec<Vec<f64>>, CanonicalCorrelationError> {
     let n = components.len();

@@ -64,7 +64,6 @@ pub fn spectral_decomposition(
         return Ok(None);
     }
     let mut a = vec![vec![0.0; n]; n];
-    let mut scale = 0.0_f64;
     let mut minimum_cell_samples = usize::MAX;
     for (i, row) in matrix.cells().iter().enumerate() {
         for (j, cell) in row.iter().enumerate() {
@@ -79,45 +78,25 @@ pub fn spectral_decomposition(
                 return Ok(None);
             }
             minimum_cell_samples = minimum_cell_samples.min(*sample_count);
-            scale = scale.max(value.abs());
             a[i][j] = *value;
         }
     }
-    if scale > 0.0 {
-        for row in &mut a {
-            for value in row {
-                *value /= scale;
-            }
-        }
-    }
-    let mut vectors = vec![vec![0.0; n]; n];
-    for (i, row) in vectors.iter_mut().enumerate() {
-        row[i] = 1.0;
-    }
-    let mut sweeps = 0;
-    while max_off_diagonal(&a) > tolerance {
-        if sweeps == max_sweeps.get() {
-            return Err(SpectralError::DidNotConverge { sweeps });
-        }
-        for p in 0..n {
-            for q in p + 1..n {
-                if a[p][q].abs() <= tolerance {
-                    continue;
-                }
-                rotate(&mut a, &mut vectors, p, q);
-            }
-        }
-        sweeps += 1;
-    }
+    let (components, sweeps) = crate::jacobi::symmetric_eigen(a, tolerance, max_sweeps.get())
+        .map_err(|error| SpectralError::DidNotConverge {
+            sweeps: error.sweeps,
+        })?;
+
     let mut eigenpairs = Vec::with_capacity(n);
-    for (column, row) in a.iter().enumerate() {
-        let eigenvalue = row[column] * scale;
-        if !eigenvalue.is_finite() {
+    for component in components {
+        if !component.value.is_finite() {
             return Err(SpectralError::NonFiniteResult);
         }
-        let mut loadings = vectors.iter().map(|row| row[column]).collect::<Vec<_>>();
+        let mut loadings = component.vector;
+        // An eigenvector is only determined up to sign, so the solver's choice
+        // is an artifact. Flipping on the first largest-magnitude loading gives
+        // equivalent inputs the same reported basis.
         let mut pivot = 0;
-        for i in 1..n {
+        for i in 1..loadings.len() {
             if loadings[i].abs() > loadings[pivot].abs() {
                 pivot = i;
             }
@@ -127,13 +106,17 @@ pub fn spectral_decomposition(
                 *value = -*value;
             }
         }
+        // Normalize negative zero to positive zero: `-0.0 == 0.0` is true, so
+        // this assignment replaces the sign bit that a flip above may have left
+        // on an exact zero. Two runs that agree numerically then also serialize
+        // identically.
         for value in &mut loadings {
             if *value == 0.0 {
                 *value = 0.0;
             }
         }
         eigenpairs.push(Eigenpair {
-            eigenvalue,
+            eigenvalue: component.value,
             loadings,
         });
     }
@@ -146,48 +129,6 @@ pub fn spectral_decomposition(
         tolerance,
         sweeps,
     }))
-}
-
-fn max_off_diagonal(matrix: &[Vec<f64>]) -> f64 {
-    matrix
-        .iter()
-        .enumerate()
-        .flat_map(|(i, row)| row.iter().skip(i + 1))
-        .fold(0.0, |largest, value| largest.max(value.abs()))
-}
-
-fn rotate(a: &mut [Vec<f64>], vectors: &mut [Vec<f64>], p: usize, q: usize) {
-    let off_diagonal = a[p][q];
-    let delta = (a[q][q] - a[p][p]) / 2.0;
-    // The denominator adds equal-sign terms, avoiding cancellation and a
-    // potentially overflowing ratio delta / off_diagonal.
-    let t = off_diagonal / (delta + delta.hypot(off_diagonal).copysign(delta));
-    let c = 1.0 / 1.0_f64.hypot(t);
-    let s = t * c;
-    a[p][p] -= t * off_diagonal;
-    a[q][q] += t * off_diagonal;
-    a[p][q] = 0.0;
-    a[q][p] = 0.0;
-    #[allow(
-        clippy::needless_range_loop,
-        reason = "Jacobi rotation updates both row and column entries of the same matrix"
-    )]
-    for k in 0..a.len() {
-        if k != p && k != q {
-            let kp = a[k][p];
-            let kq = a[k][q];
-            a[k][p] = c * kp - s * kq;
-            a[p][k] = a[k][p];
-            a[k][q] = s * kp + c * kq;
-            a[q][k] = a[k][q];
-        }
-    }
-    for row in vectors {
-        let vp = row[p];
-        let vq = row[q];
-        row[p] = c * vp - s * vq;
-        row[q] = s * vp + c * vq;
-    }
 }
 
 #[cfg(test)]

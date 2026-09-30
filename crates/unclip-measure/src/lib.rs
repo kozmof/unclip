@@ -84,6 +84,7 @@ pub use pairwise::{
 mod regime;
 pub use regime::{InvalidRegimePartition, RegimePartition};
 
+mod jacobi;
 mod spectral;
 pub use spectral::{spectral_decomposition, Eigenpair, SpectralDecomposition, SpectralError};
 
