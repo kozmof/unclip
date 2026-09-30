@@ -53,6 +53,15 @@ async fn database() -> DatabaseConnection {
     db
 }
 
+/// How many migrations sit above `create_experiments`, and therefore how far
+/// `down` has to roll back to remove the tables it created.
+///
+/// This is positional: appending a migration to the `Migrator` list adds one
+/// step here. The failure is unambiguous — `candidates` is still present after
+/// the rollback — but it is this constant that needs updating, not the
+/// assertion below it.
+const STEPS_ABOVE_EXPERIMENTS: u32 = 4;
+
 #[tokio::test]
 async fn upgrade_and_rollback_preserve_existing_measurement_data() {
     let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -70,7 +79,9 @@ async fn upgrade_and_rollback_preserve_existing_measurement_data() {
     );
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('candidates','experiments','experiment_observations','experiment_deltas','domain_revisions')").await,5);
     assert_eq!(count(&db,"SELECT count(*) AS count FROM sqlite_master WHERE type='index' AND name LIKE 'idx_experiment%'").await,7);
-    unclip_migration::down(&db, Some(3)).await.unwrap();
+    unclip_migration::down(&db, Some(STEPS_ABOVE_EXPERIMENTS))
+        .await
+        .unwrap();
     assert_eq!(
         count(&db, "SELECT count(*) AS count FROM measurement_profiles").await,
         2

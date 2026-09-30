@@ -19,6 +19,7 @@ mod m20260918_000012_create_measurements;
 mod m20260919_000013_create_experiments;
 mod m20260923_000014_enforce_linear_domain_versions;
 mod m20260923_000015_create_revision_ledger;
+mod m20260929_000016_drop_redundant_branch_path_index;
 
 struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260919_000013_create_experiments::Migration),
             Box::new(m20260923_000014_enforce_linear_domain_versions::Migration),
             Box::new(m20260923_000015_create_revision_ledger::Migration),
+            Box::new(m20260929_000016_drop_redundant_branch_path_index::Migration),
         ]
     }
 }
