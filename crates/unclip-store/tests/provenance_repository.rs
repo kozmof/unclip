@@ -98,3 +98,37 @@ async fn rejects_duplicate_inputs_before_writing() {
     assert!(matches!(error, StoreError::InvalidRequest { .. }));
     assert!(repo.get_provenance(&duplicate.id).await.unwrap().is_none());
 }
+
+/// `restore_tracked` reads the operation instead of taking the caller's word,
+/// so a table that admits rows from several paths labels each row correctly.
+#[tokio::test]
+async fn restored_values_carry_the_operation_their_provenance_records() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let repo = SeaOrmProvenanceRepository::new(db);
+
+    for (id, operation) in [
+        ("calc", Operation::Calculated),
+        ("inf", Operation::Inferred),
+        ("exp", Operation::Experimental),
+        ("interp", Operation::Interpreted),
+    ] {
+        let mut row = stored(id, &[]);
+        row.provenance.operation = operation;
+        repo.insert_provenance(row).await.unwrap();
+
+        let tracked = repo
+            .restore_tracked(DerivedId::new(id), id.to_owned())
+            .await
+            .unwrap();
+        assert_eq!(tracked.id(), &DerivedId::new(id));
+        assert_eq!(tracked.operation(), Some(operation));
+    }
+
+    // A row with no provenance makes no claim, which is the state an import
+    // leaves behind — an absent row is not a read failure.
+    let unlabeled = repo
+        .restore_tracked(DerivedId::new("absent"), 0)
+        .await
+        .unwrap();
+    assert_eq!(unlabeled.operation(), None);
+}

@@ -52,6 +52,12 @@ impl MigratorTrait for Migrator {
 /// SeaORM intentionally does not create an outer transaction for SQLite
 /// migrations. Running the migrator on a transaction here keeps every schema
 /// change and the corresponding migration-ledger row in one atomic unit.
+///
+/// Every command migrates on open, including read-only ones, so opening an
+/// archive written by a *newer* build would be a one-way upgrade performed by
+/// the build that understands it least. It is not: the migrator refuses a
+/// ledger row it has no migration file for, which is what
+/// `a_database_newer_than_this_build_is_refused_rather_than_migrated` pins.
 pub async fn up(
     db: &sea_orm::DatabaseConnection,
     steps: Option<u32>,

@@ -57,10 +57,23 @@ pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
     unclip_store::connect_and_migrate_with_options(db_options(path, false)?)
         .await
         .with_context(|| {
-            format!(
-                "database not found or could not be opened: {} (run `unclip init` to create it)",
-                path.display()
-            )
+            // The existence check is only for wording the failure, and runs
+            // after the open has already failed — it is not the preflight
+            // check `db_options` deliberately avoids, and cannot reintroduce
+            // the race that one would. It is here because the message used to
+            // advise `unclip init` for every failure, including a database
+            // that plainly exists and could not be opened for some other
+            // reason: a schema newer than this build, a permissions problem, a
+            // corrupt file. Telling someone to create an archive they already
+            // have sends them looking in the wrong place.
+            if path.exists() {
+                format!("database could not be opened: {}", path.display())
+            } else {
+                format!(
+                    "database not found: {} (run `unclip init` to create it)",
+                    path.display()
+                )
+            }
         })
 }
 
@@ -149,6 +162,34 @@ mod tests {
         let error = open_existing(&path).await.unwrap_err().to_string();
 
         assert!(error.contains("database not found"), "got: {error}");
+        assert!(error.contains("unclip init"), "got: {error}");
         assert!(!path.exists());
+    }
+
+    /// A file that exists but cannot be opened is not a missing database, and
+    /// advising `unclip init` for it sends the reader to the wrong problem.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_existing_does_not_advise_init_for_a_database_that_exists() {
+        let path = std::env::temp_dir().join(format!(
+            "unclip-unopenable-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock is before Unix epoch")
+                .as_nanos()
+        ));
+        // A directory at the path exists and is not a SQLite database, so the
+        // open fails for a reason that has nothing to do with absence.
+        std::fs::create_dir(&path).unwrap();
+
+        let error = open_existing(&path).await.unwrap_err().to_string();
+        std::fs::remove_dir(&path).unwrap();
+
+        assert!(error.contains("could not be opened"), "got: {error}");
+        assert!(
+            !error.contains("unclip init"),
+            "a database that exists must not be reported as one to create: {error}"
+        );
     }
 }

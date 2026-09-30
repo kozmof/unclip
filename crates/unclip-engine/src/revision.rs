@@ -662,7 +662,7 @@ pub fn record_dynamic_coupling_test(
         || unit.properties.get("causal_claim")
             != Some(&unclip_domain::PropertyValue::Boolean(false))
         || unit.properties.get("candidate_evidence")
-            != Some(&unclip_domain::PropertyValue::Structured(
+            != Some(&unclip_domain::PropertyValue::structured(
                 serde_json::Value::Object(proposal.value.clone()),
             ))
     {
@@ -716,7 +716,7 @@ pub fn record_structural_test(
         .get("pattern")
         .ok_or_else(|| invalid("structural candidate requires a pattern"))?;
     let common_evidence = unit.properties.get("candidate_evidence")
-        == Some(&unclip_domain::PropertyValue::Structured(
+        == Some(&unclip_domain::PropertyValue::structured(
             serde_json::Value::Object(proposal.value.clone()),
         ));
     match proposal.kind {
@@ -724,7 +724,7 @@ pub fn record_structural_test(
             if unit.kind != unclip_domain::UnitKind::GraphMotif
                 || unit.label.is_some()
                 || unit.properties.get("graph_pattern")
-                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
                 || !common_evidence
             {
                 return Err(invalid(
@@ -746,7 +746,7 @@ pub fn record_structural_test(
             if unit.kind != unclip_domain::UnitKind::SemanticRole
                 || unit.label.is_some()
                 || unit.properties.get("role_pattern")
-                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
                 || !common_evidence
             {
                 return Err(invalid(
@@ -768,7 +768,7 @@ pub fn record_structural_test(
             if unit.kind != unclip_domain::UnitKind::Transformation
                 || unit.label.is_some()
                 || unit.properties.get("transformation_pattern")
-                    != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+                    != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
                 || unit.properties.get("causal_claim")
                     != Some(&unclip_domain::PropertyValue::Boolean(false))
                 || !common_evidence
@@ -853,9 +853,9 @@ pub fn record_delta_v_test(
                 candidate.id().0.clone(),
             ))
         || unit.properties.get("candidate_pattern")
-            != Some(&unclip_domain::PropertyValue::Structured(pattern.clone()))
+            != Some(&unclip_domain::PropertyValue::structured(pattern.clone()))
         || unit.properties.get("candidate_evidence")
-            != Some(&unclip_domain::PropertyValue::Structured(
+            != Some(&unclip_domain::PropertyValue::structured(
                 serde_json::Value::Object(proposal.value.clone()),
             ))
     {

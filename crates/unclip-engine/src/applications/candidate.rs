@@ -237,17 +237,17 @@ impl crate::Engine {
                         ),
                         (
                             "candidate_pattern".into(),
-                            PropertyValue::Structured(pattern_value.clone()),
+                            PropertyValue::structured(pattern_value.clone()),
                         ),
                         (
                             "candidate_evidence".into(),
-                            PropertyValue::Structured(serde_json::Value::Object(
+                            PropertyValue::structured(serde_json::Value::Object(
                                 proposal.value.clone(),
                             )),
                         ),
                         (
                             "product_binding".into(),
-                            PropertyValue::Structured(
+                            PropertyValue::structured(
                                 serde_json::to_value(product_binding).map_err(invalid)?,
                             ),
                         ),
@@ -286,11 +286,11 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
@@ -360,17 +360,17 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "members".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.members).map_err(invalid)?,
                                 ),
                             ),
@@ -443,17 +443,17 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "units".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.units).map_err(invalid)?,
                                 ),
                             ),
@@ -463,7 +463,7 @@ impl crate::Engine {
                             ),
                             (
                                 "loadings".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.loadings).map_err(invalid)?,
                                 ),
                             ),
@@ -493,17 +493,17 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "units".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&coupling_units).map_err(invalid)?,
                                 ),
                             ),
@@ -534,17 +534,17 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "graph_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                         ]),
                     },
@@ -572,33 +572,33 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "role_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "members".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.members).map_err(invalid)?,
                                 ),
                             ),
                             (
                                 "incoming_relation_kinds".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.incoming).map_err(invalid)?,
                                 ),
                             ),
                             (
                                 "outgoing_relation_kinds".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.outgoing).map_err(invalid)?,
                                 ),
                             ),
@@ -628,27 +628,27 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),
                             (
                                 "transformation_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "before_units".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.before).map_err(invalid)?,
                                 ),
                             ),
                             (
                                 "after_units".into(),
-                                PropertyValue::Structured(
+                                PropertyValue::structured(
                                     serde_json::to_value(&pattern.after).map_err(invalid)?,
                                 ),
                             ),
@@ -715,11 +715,11 @@ impl crate::Engine {
                             ),
                             (
                                 "candidate_pattern".into(),
-                                PropertyValue::Structured(pattern_value.clone()),
+                                PropertyValue::structured(pattern_value.clone()),
                             ),
                             (
                                 "candidate_evidence".into(),
-                                PropertyValue::Structured(serde_json::Value::Object(
+                                PropertyValue::structured(serde_json::Value::Object(
                                     proposal.value.clone(),
                                 )),
                             ),

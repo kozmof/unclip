@@ -91,7 +91,7 @@ impl ExactPatternNull {
             .filter(|unit| {
                 unit.kind == self.unit_kind
                     && unit.properties.get(self.property)
-                        == Some(&PropertyValue::Structured(pattern.clone()))
+                        == Some(&PropertyValue::structured(pattern.clone()))
             })
             .map(|unit| unit.id.clone())
             .collect::<Vec<_>>();

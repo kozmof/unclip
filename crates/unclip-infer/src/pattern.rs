@@ -12,6 +12,16 @@ use unclip_observe::{
 };
 use unclip_plugin::{InferCtx, InferenceOutput, Inferrer, InferrerDescriptor, PluginError, Result};
 
+/// `file` is the shared inference I/O parameter — see [`crate::PARAMS_SCHEMA_IO_ONLY`].
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "properties":{
+        "min_confidence":{"type":"number","minimum":0.0,"maximum":1.0},
+        "file":{"type":"string","minLength":1}
+    },
+    "additionalProperties":false
+}"#;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PatternInput {
@@ -35,7 +45,7 @@ impl Default for PatternInferrer {
             descriptor: InferrerDescriptor {
                 id: unclip_epistemic::PluginId::new("infer.pattern"),
                 version: Version::new(1, 0, 0),
-                params_schema: "{\"type\":\"object\",\"properties\":{\"min_confidence\":{\"type\":\"number\",\"minimum\":0.0,\"maximum\":1.0}},\"additionalProperties\":false}",
+                params_schema: PARAMS_SCHEMA,
             },
         }
     }

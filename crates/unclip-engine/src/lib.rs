@@ -429,16 +429,7 @@ impl Engine {
         run: MeasurementRun<'_>,
         seed: impl Fn(&DependencyCollector),
     ) -> Result<Vec<Calculated<Measurement>>> {
-        // Every emitted `DerivedId` is `{run_id}/{plugin_id}`, so an empty run
-        // id silently produces ids like `/sensor.coverage` — indistinguishable
-        // between runs and unusable as a provenance key. `interpret` and the
-        // crate's free functions already refuse this; the measure path did not,
-        // which made the weakest check the one on the most-used stage.
-        if run.id.trim().is_empty() {
-            return Err(unclip_plugin::PluginError::Message(
-                "measurement requires a non-empty run ID".into(),
-            ));
-        }
+        support::require_run_id("measurement", run.id)?;
         let mut sensors = plan.sensors.iter().collect::<Vec<_>>();
         sensors.sort_by(|left, right| {
             let left = left.descriptor();
@@ -497,11 +488,13 @@ impl Engine {
         domain: &DomainSnapshot,
         run: InferenceRun<'_>,
     ) -> Result<InferenceResults> {
+        support::require_run_id("inference", run.id)?;
         let empty_params = serde_json::json!({});
         let mut results = InferenceResults::default();
         for inferrer in &plan.inferrers {
             let descriptor = inferrer.descriptor();
             let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
             let ctx = unclip_plugin::InferCtx::new(run.source.clone(), domain, params, run.io);
             let metadata = EmitMetadata::new(
                 DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
@@ -536,9 +529,10 @@ impl Engine {
         if plan.interpreters.is_empty() {
             return Ok(Vec::new());
         }
-        if run.id.is_empty() || structures.is_empty() {
+        support::require_run_id("interpretation", run.id)?;
+        if structures.is_empty() {
             return Err(unclip_plugin::PluginError::Message(
-                "interpretation requires a run ID and empirical structures".into(),
+                "interpretation requires empirical structures".into(),
             ));
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -565,6 +559,7 @@ impl Engine {
         for interpreter in interpreters {
             let descriptor = interpreter.descriptor();
             let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
             let model = interpreter.model_ref(params)?;
             for source in &sources {
                 let ctx = InterpretCtx::new(source, params, run.io, DependencyCollector::default());
@@ -883,6 +878,233 @@ mod tests {
             assert!(measurement.provenance().inputs.is_empty());
         }
     }
+    /// Every stage mints `{run_id}/{plugin_id}`, so every stage must refuse a
+    /// run id that is blank — including one that is whitespace rather than
+    /// empty. `measure` rejected both, `interpret` only the empty case, and
+    /// `infer` neither; this pins all three to one rule.
+    #[tokio::test]
+    async fn every_stage_refuses_a_blank_run_id() {
+        let engine = Engine::with_builtins().unwrap();
+        let profile = EngineProfile {
+            inferrers: vec![PluginSelection::any("infer.pattern")],
+            sensors: vec![PluginSelection::any("sensor.coverage")],
+            interpreters: vec![PluginSelection::any("interpret.llm-label")],
+            ..EngineProfile::default()
+        };
+        let plan = engine.plan(&profile).unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("blank"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("blank.general"),
+            version: FrameVersion::new("frame-1"),
+            axes: Vec::new(),
+        };
+        let params = BTreeMap::new();
+        let structures = [Tracked::from_calculated(
+            DerivedId::new("structure/1"),
+            EmpiricalStructure {
+                kind: "latent-axis".into(),
+                value: serde_json::json!({}),
+            },
+        )];
+
+        for id in ["", "   ", "\t\n"] {
+            let measure = engine
+                .measure(
+                    &plan,
+                    MeasurementInputs {
+                        domain: &domain,
+                        frame: &frame,
+                        observations: &[],
+                        alignments: &[],
+                        rankings: &[],
+                    },
+                    MeasurementRun {
+                        id,
+                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        params: &params,
+                    },
+                )
+                .expect_err("measurement must refuse a blank run id");
+            assert!(
+                measure.to_string().contains("measurement requires"),
+                "got: {measure}"
+            );
+
+            let infer = engine
+                .infer(
+                    &plan,
+                    &domain,
+                    InferenceRun {
+                        id,
+                        source: SourceRef::new("notes/blank.txt"),
+                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        params: &params,
+                        io: &OrdinaryTextIo,
+                    },
+                )
+                .await
+                .expect_err("inference must refuse a blank run id");
+            assert!(
+                infer.to_string().contains("inference requires"),
+                "got: {infer}"
+            );
+
+            let interpret = engine
+                .interpret(
+                    &plan,
+                    &structures,
+                    InterpretationRun {
+                        id,
+                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        params: &params,
+                        io: &RefusingInterpretationIo,
+                    },
+                )
+                .await
+                .expect_err("interpretation must refuse a blank run id");
+            assert!(
+                interpret.to_string().contains("interpretation requires"),
+                "got: {interpret}"
+            );
+        }
+    }
+
+    /// A declared `params_schema` has to bind every family, not just sensors.
+    ///
+    /// `classify_sensor` held the `Sensor` family to its schema and nothing
+    /// held the other five: an inferrer, comparator, interpreter, candidate
+    /// generator or null model could be handed parameters its own descriptor
+    /// forbids and would run anyway. Each of these assertions fails if that
+    /// enforcement is removed from one stage.
+    #[tokio::test]
+    async fn every_family_is_held_to_its_declared_params_schema() {
+        let engine = Engine::with_builtins().unwrap();
+        let profile = EngineProfile {
+            inferrers: vec![PluginSelection::any("infer.pattern")],
+            comparators: vec![PluginSelection::any("compare.scalar-difference")],
+            interpreters: vec![PluginSelection::any("interpret.llm-label")],
+            ..EngineProfile::default()
+        };
+        let plan = engine.plan(&profile).unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("schema"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+
+        // `min_confidence` is declared `number, 0.0..=1.0`.
+        let inferrer_params = BTreeMap::from([(
+            PluginId::new("infer.pattern"),
+            serde_json::json!({"min_confidence": 4}),
+        )]);
+        let error = engine
+            .infer(
+                &plan,
+                &domain,
+                InferenceRun {
+                    id: "run-schema",
+                    source: SourceRef::new("notes/schema.txt"),
+                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    params: &inferrer_params,
+                    io: &OrdinaryTextIo,
+                },
+            )
+            .await
+            .expect_err("an inferrer must be held to its declared schema");
+        assert!(
+            matches!(error, unclip_plugin::PluginError::InvalidParams(_)),
+            "got: {error:?}"
+        );
+        assert!(error.to_string().contains("min_confidence"), "got: {error}");
+
+        // `model` and `model_version` are declared required.
+        let interpreter_params = BTreeMap::from([(
+            PluginId::new("interpret.llm-label"),
+            serde_json::json!({"model": "m"}),
+        )]);
+        let structures = [Tracked::from_calculated(
+            DerivedId::new("structure/1"),
+            EmpiricalStructure {
+                kind: "latent-axis".into(),
+                value: serde_json::json!({}),
+            },
+        )];
+        let error = engine
+            .interpret(
+                &plan,
+                &structures,
+                InterpretationRun {
+                    id: "run-schema",
+                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    params: &interpreter_params,
+                    io: &RefusingInterpretationIo,
+                },
+            )
+            .await
+            .expect_err("an interpreter must be held to its declared schema");
+        assert!(
+            matches!(error, unclip_plugin::PluginError::InvalidParams(_)),
+            "got: {error:?}"
+        );
+
+        // `compare.scalar-difference` declares no parameters at all.
+        let comparator_params = BTreeMap::from([(
+            PluginId::new("compare.scalar-difference"),
+            serde_json::json!({"tolerance": 0.5}),
+        )]);
+        let measurement = |id: &str| {
+            Tracked::from_calculated(
+                DerivedId::new(id),
+                Measurement {
+                    sensor: PluginId::new("sensor.coverage"),
+                    sensor_version: semver::Version::new(0, 1, 0),
+                    reading: Reading::Value {
+                        value: unclip_measure::MeasurementValue::Scalar(1.0),
+                    },
+                    confidence: None,
+                    sample_count: Some(1),
+                    context: unclip_measure::MeasurementContext::default(),
+                },
+            )
+        };
+        let error = compare_measurements(
+            &plan,
+            &measurement("before"),
+            &measurement("after"),
+            MeasurementRun {
+                id: "run-schema",
+                timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                params: &comparator_params,
+            },
+        )
+        .expect_err("a comparator must be held to its declared schema");
+        assert!(
+            matches!(error, unclip_plugin::PluginError::InvalidParams(_)),
+            "got: {error:?}"
+        );
+        assert!(error.to_string().contains("tolerance"), "got: {error}");
+    }
+
+    /// Fails if it is ever called: the blank-run-id checks must refuse before
+    /// any stage reaches its I/O.
+    struct RefusingInterpretationIo;
+
+    #[async_trait::async_trait]
+    impl unclip_plugin::InterpretationIo for RefusingInterpretationIo {
+        async fn request(
+            &self,
+            _request: &unclip_plugin::InterpretationRequest,
+        ) -> unclip_plugin::Result<serde_json::Value> {
+            panic!("interpretation I/O must not be reached for a blank run id")
+        }
+    }
+
     struct OrdinaryTextIo;
 
     #[async_trait::async_trait]

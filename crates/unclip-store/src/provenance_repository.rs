@@ -11,7 +11,7 @@ use sea_orm::{
 use unclip_entity::{provenance, provenance_inputs};
 use unclip_epistemic::{
     hash_params, DerivedId, DomainVersion, FrameVersion, ModelRef, Operation, ParameterHash,
-    PluginId, Provenance, SourceRef, Timestamp,
+    PluginId, Provenance, SourceRef, Timestamp, Tracked,
 };
 
 use crate::{StoreError, StoreResult};
@@ -32,6 +32,31 @@ pub trait ProvenanceRepository: Sync {
     async fn direct_inputs(&self, id: &DerivedId) -> StoreResult<Vec<DerivedId>>;
     /// Return every reachable input once, breadth-first and deterministically.
     async fn ancestors(&self, id: &DerivedId) -> StoreResult<Vec<DerivedId>>;
+
+    /// Restore a persisted value under the operation its provenance row records.
+    ///
+    /// Use this instead of naming an operation wherever the source table admits
+    /// rows from more than one path. `empirical_structures` is the case that
+    /// matters: `insert_calculated_structure` and `insert_unverified_structure`
+    /// both write it, so neither [`Tracked::from_calculated`] nor
+    /// [`Tracked::from_recorded`] is right for every row — the first mislabels
+    /// an imported structure, the second leaves a calculated-evidence gate with
+    /// nothing to check. The provenance row is the record that settles it, and
+    /// every structure row carries a `NOT NULL` reference to one.
+    ///
+    /// A missing provenance row yields an unlabeled value rather than an error:
+    /// "no claim was made" is the same state an import leaves behind, and a
+    /// read should not fail on it.
+    ///
+    /// [`Tracked::from_calculated`]: unclip_epistemic::Tracked::from_calculated
+    /// [`Tracked::from_recorded`]: unclip_epistemic::Tracked::from_recorded
+    async fn restore_tracked<T: Send>(&self, id: DerivedId, value: T) -> StoreResult<Tracked<T>> {
+        let operation = self
+            .get_provenance(&id)
+            .await?
+            .map(|stored| stored.provenance.operation);
+        Ok(Tracked::from_stored(id, value, operation))
+    }
 }
 
 pub struct SeaOrmProvenanceRepository {

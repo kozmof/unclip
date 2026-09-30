@@ -93,10 +93,15 @@ impl super::Engine {
                 ));
             }
         }
+        // `ObservationSplit` holds `RecordedInference` entries, so these are
+        // inference products by construction — the same reasoning, and the same
+        // constructor, as the replay path in `Engine::verify`. They were
+        // restored unlabeled, which made one class of value carry two different
+        // claims depending on which entry point reached it.
         let observations = split
             .held_out
             .iter()
-            .map(|entry| Tracked::from_recorded(entry.provenance.clone(), entry.value.clone()))
+            .map(|entry| Tracked::from_inferred(entry.provenance.clone(), entry.value.clone()))
             .collect::<Vec<_>>();
         let results = self.measure_with_dependencies(
             plan,

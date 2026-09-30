@@ -66,7 +66,7 @@ impl NullModel for ExistingMotifNull {
         for unit in domain.units.values() {
             if unit.kind == UnitKind::GraphMotif
                 && unit.properties.get("graph_pattern")
-                    == Some(&PropertyValue::Structured(pattern.clone()))
+                    == Some(&PropertyValue::structured(pattern.clone()))
             {
                 matches.push(unit.id.clone());
             }

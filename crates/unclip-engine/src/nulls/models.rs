@@ -158,6 +158,7 @@ pub fn evaluate_null_models_with_inputs(
     for model in models {
         let descriptor = model.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        crate::support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
         let ctx = NullCtx::new(
             candidate,
             inputs.observations,

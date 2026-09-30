@@ -569,3 +569,116 @@ mod saturation_tests {
         )
     }
 }
+
+#[cfg(test)]
+mod equivalence {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn branch(path: &str, id: i64, weight: f64) -> Branch {
+        let mut b = Branch::new(path);
+        b.id = Some(id);
+        b.weight = weight;
+        b
+    }
+
+    /// Selection frequency per path over many independent seeded draws.
+    fn frequencies(
+        weights: &[f64],
+        take: usize,
+        trials: u64,
+        mut draw: impl FnMut(&[Rc<Branch>], usize, &mut StdRng) -> Vec<String>,
+    ) -> BTreeMap<String, f64> {
+        let candidates: Vec<Rc<Branch>> = weights
+            .iter()
+            .enumerate()
+            .map(|(i, weight)| Rc::new(branch(&format!("/b{i}"), i as i64, *weight)))
+            .collect();
+        let mut counts: BTreeMap<String, f64> = candidates
+            .iter()
+            .map(|candidate| (candidate.path.clone(), 0.0))
+            .collect();
+        for seed in 0..trials {
+            let mut rng = rng_from_seed(seed);
+            for path in draw(&candidates, take, &mut rng) {
+                *counts.get_mut(&path).expect("known path") += 1.0;
+            }
+        }
+        counts
+            .into_iter()
+            .map(|(path, count)| (path, count / trials as f64))
+            .collect()
+    }
+
+    /// The streaming and in-memory samplers must draw from the same
+    /// distribution.
+    ///
+    /// There are two implementations of weighted selection without replacement
+    /// because they are bounded differently: [`Reservoir`] holds `take`
+    /// candidates and lets `sample` stream pages, while [`sample`] keeps the
+    /// pool so `compose` can draw from it once per slot. Nothing asserted they
+    /// agree, so the two could drift into sampling differently — and which one
+    /// a command used would change its results for reasons unrelated to the
+    /// query.
+    ///
+    /// This compares empirical selection frequencies over 4,000 seeded draws.
+    /// The seeds are fixed, so the test is deterministic; the tolerance covers
+    /// sampling error at that trial count, not disagreement between the two
+    /// algorithms.
+    #[test]
+    fn reservoir_and_pool_samplers_agree_in_distribution() {
+        const TRIALS: u64 = 4_000;
+        let weights = [1.0, 2.0, 4.0, 8.0];
+        let query = SampleQuery::default();
+
+        for take in [1, 2, 3] {
+            let pooled = frequencies(&weights, take, TRIALS, |candidates, take, rng| {
+                let params = SampleParams {
+                    count: take,
+                    weighted: true,
+                    ..Default::default()
+                };
+                sample(candidates, &query, &params, &HashSet::new(), rng)
+                    .iter()
+                    .map(|candidate| candidate.path.clone())
+                    .collect()
+            });
+
+            let streamed = frequencies(&weights, take, TRIALS, |candidates, take, rng| {
+                let params = SampleParams {
+                    count: take,
+                    weighted: true,
+                    ..Default::default()
+                };
+                let mut reservoir = Reservoir::new(take);
+                for candidate in candidates {
+                    let score = score(candidate, &query, &params, &HashSet::new());
+                    reservoir.offer((**candidate).clone(), score, rng);
+                }
+                reservoir
+                    .into_branches()
+                    .iter()
+                    .map(|candidate| candidate.path.clone())
+                    .collect()
+            });
+
+            for (path, pooled_rate) in &pooled {
+                let streamed_rate = streamed[path];
+                assert!(
+                    (pooled_rate - streamed_rate).abs() < 0.03,
+                    "take={take} {path}: pool sampler {pooled_rate:.3} vs reservoir \
+                     {streamed_rate:.3} — the two samplers disagree by more than \
+                     sampling error at {TRIALS} trials"
+                );
+            }
+
+            // Both must also honour the weight ordering, so an agreement on two
+            // uniform distributions could not pass this.
+            let ordered = pooled.values().copied().collect::<Vec<_>>();
+            assert!(
+                ordered.windows(2).all(|pair| pair[0] < pair[1]),
+                "take={take}: selection rates must increase with weight, got {ordered:?}"
+            );
+        }
+    }
+}

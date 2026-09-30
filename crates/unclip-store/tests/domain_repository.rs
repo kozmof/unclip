@@ -165,3 +165,66 @@ async fn measurement_frame_versions_round_trip_with_ordered_axes() {
         .unwrap_err();
     assert!(matches!(error, StoreError::AlreadyExists { .. }));
 }
+
+/// A property written as a `structured` row holding a scalar hydrates as the
+/// scalar variant, which is what the same value decodes to from YAML or JSON.
+///
+/// Without this, one logical domain had two in-memory spellings depending on
+/// whether it was loaded from the database or from an import file, and the
+/// engine's revision checks — which compare property values structurally —
+/// would accept a candidate on one path and reject it on the other.
+#[tokio::test]
+async fn structured_rows_holding_scalars_hydrate_in_canonical_form() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let repo = SeaOrmDomainRepository::new(db);
+
+    let mut domain = snapshot();
+    let properties = &mut domain
+        .units
+        .get_mut(&UnitId::new("source"))
+        .unwrap()
+        .properties;
+    // `PropertyValue::structured` is canonicalizing, so these are stored under
+    // the scalar variants; the point is that they come back the same way.
+    properties.insert("flag".into(), PropertyValue::structured(json!(true)));
+    properties.insert("tally".into(), PropertyValue::structured(json!(9)));
+    properties.insert("label".into(), PropertyValue::structured(json!("x")));
+    properties.insert(
+        "composite".into(),
+        PropertyValue::structured(json!({"k": [1, 2]})),
+    );
+
+    repo.insert_domain_version(domain.clone()).await.unwrap();
+    let loaded = repo
+        .get_domain_version(&domain.id, &domain.version)
+        .await
+        .unwrap()
+        .expect("inserted domain version is readable");
+
+    assert_eq!(loaded, domain);
+    let loaded_properties = &loaded.units.get(&UnitId::new("source")).unwrap().properties;
+    assert_eq!(
+        loaded_properties.get("flag"),
+        Some(&PropertyValue::Boolean(true))
+    );
+    assert_eq!(
+        loaded_properties.get("tally"),
+        Some(&PropertyValue::Integer(9))
+    );
+    assert_eq!(
+        loaded_properties.get("label"),
+        Some(&PropertyValue::Text("x".into()))
+    );
+    assert_eq!(
+        loaded_properties.get("composite"),
+        Some(&PropertyValue::Structured(json!({"k": [1, 2]})))
+    );
+
+    // Each round-trips through the wire form to the same value it came back as,
+    // so the database and the import path now agree on every property.
+    for property in loaded_properties.values() {
+        let encoded = serde_json::to_string(property).unwrap();
+        let decoded: PropertyValue = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(&decoded, property, "database and wire form disagree");
+    }
+}

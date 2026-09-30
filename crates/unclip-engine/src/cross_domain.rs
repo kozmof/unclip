@@ -63,26 +63,15 @@ pub struct CrossProductTransferInputs<'a> {
 
 /// Hold a product sensor to its declared `params_schema` before invoking it.
 ///
-/// `classify_sensor` does this for the [`Sensor`] family, but product and
-/// cross-product sensors are dispatched here by fixed id and so never reach it.
-/// Without this call their schemas are decoration: the five descriptors below
-/// state bounds that nothing checks, and a third-party sensor registered under
-/// one of these ids is held to nothing at all.
-///
-/// The parameters are serialized from a typed config, so a violation is a
-/// disagreement between that struct and the descriptor rather than bad user
-/// input — which is exactly the drift the schema exists to catch, and why this
-/// is an error rather than a recorded sparse reading.
+/// Product and cross-product sensors are dispatched here by fixed id and so
+/// never reach `classify_sensor`. The check itself is
+/// [`support::require_declared_params`], which every family now shares; this
+/// wrapper only spells out which descriptor the call site has in hand.
 fn validate_sensor_params(
     descriptor: &unclip_plugin::SensorDescriptor,
     params: &serde_json::Value,
 ) -> Result<()> {
-    unclip_plugin::validate_params(descriptor.params_schema, params).map_err(|violation| {
-        PluginError::InvalidParams(format!(
-            "{} parameters do not satisfy the declared schema: {violation}",
-            descriptor.id
-        ))
-    })
+    crate::support::require_declared_params(&descriptor.id, descriptor.params_schema, params)
 }
 
 pub(super) fn validate_frame(

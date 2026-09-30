@@ -190,6 +190,7 @@ pub fn generate_candidates(
     for generator in generators {
         let descriptor = generator.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        crate::support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
         let ctx = CandidateCtx::new(
             inputs.domain_version_id,
             inputs.measurements,

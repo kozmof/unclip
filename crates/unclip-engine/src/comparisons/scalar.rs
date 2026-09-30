@@ -119,6 +119,7 @@ pub fn compare_measurements(
     for comparator in comparators {
         let descriptor = comparator.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
+        crate::support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
         let ctx = CompareCtx::new(before, after, params, DependencyCollector::default());
         let token = ctx.calculation_token(EmitMetadata::new(
             DerivedId::new(format!("{}/{}", run.id, descriptor.id)),

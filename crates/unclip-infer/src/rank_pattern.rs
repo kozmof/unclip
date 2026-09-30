@@ -17,6 +17,26 @@ struct RankPatternEvidence {
     uncertainty: f64,
 }
 
+/// `ties` and `unknown_tail` are pinned to `preserve`: this inferrer reports
+/// the ranking it was given and never breaks a tie or invents a tail.
+///
+/// The two `const` constraints replace a hand-written check that restated them
+/// in Rust. Both said the same thing, and nothing held them together — the
+/// exact failure mode `unclip_plugin::schema` exists to prevent. Now that the
+/// engine validates every inferrer against its declared schema before invoking
+/// it, the schema is the only statement of the rule.
+///
+/// `file` is the shared inference I/O parameter — see [`crate::PARAMS_SCHEMA_IO_ONLY`].
+const PARAMS_SCHEMA: &str = r#"{
+    "type":"object",
+    "properties":{
+        "ties":{"const":"preserve"},
+        "unknown_tail":{"const":"preserve"},
+        "file":{"type":"string","minLength":1}
+    },
+    "additionalProperties":false
+}"#;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RankPatternInput {
@@ -34,23 +54,10 @@ impl Default for RankPatternInferrer {
             descriptor: InferrerDescriptor {
                 id: unclip_epistemic::PluginId::new("infer.rank-pattern"),
                 version: Version::new(1, 0, 0),
-                params_schema: "{\"type\":\"object\",\"properties\":{\"ties\":{\"const\":\"preserve\"},\"unknown_tail\":{\"const\":\"preserve\"}},\"additionalProperties\":false}",
+                params_schema: PARAMS_SCHEMA,
             },
         }
     }
-}
-
-fn validate_params(params: &serde_json::Value) -> Result<()> {
-    for (name, expected) in [("ties", "preserve"), ("unknown_tail", "preserve")] {
-        if let Some(value) = params.get(name) {
-            if value.as_str() != Some(expected) {
-                return Err(PluginError::Message(format!(
-                    "rank-pattern {name} must be \"{expected}\""
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn rank_observation(
@@ -157,7 +164,6 @@ impl Inferrer for RankPatternInferrer {
         ctx: &InferCtx<'_>,
         token: unclip_epistemic::InferenceToken,
     ) -> Result<unclip_epistemic::Inferred<InferenceOutput>> {
-        validate_params(ctx.params())?;
         let input: RankPatternInput = serde_json::from_value(
             ctx.io().request(ctx.source(), ctx.params()).await?,
         )

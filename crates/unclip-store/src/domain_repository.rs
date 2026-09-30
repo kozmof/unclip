@@ -156,8 +156,14 @@ fn parse_property(
         "integer" => integer.map(PropertyValue::Integer).ok_or_else(malformed),
         "number" => number.map(PropertyValue::Number).ok_or_else(malformed),
         "text" => text.map(PropertyValue::Text).ok_or_else(malformed),
+        // `PropertyValue::structured` rather than the bare variant: a row
+        // written as `structured` may hold a scalar, and the canonical form of
+        // a scalar is its own variant. Hydrating it as `Structured` would make
+        // a value read from the database compare unequal to the same value read
+        // from a YAML import, which the untagged representation always
+        // canonicalizes.
         "structured" => structured.ok_or_else(malformed).and_then(|value| {
-            Ok(PropertyValue::Structured(
+            Ok(PropertyValue::structured(
                 serde_json::from_str(&value).map_err(anyhow::Error::from)?,
             ))
         }),

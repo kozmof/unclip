@@ -30,7 +30,7 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, PoisonError,
     },
 };
 
@@ -311,6 +311,28 @@ impl<T> Tracked<T> {
         }
     }
 
+    /// Restore a value under the operation its stored provenance records.
+    ///
+    /// The three constructors above ask the caller to *name* the operation,
+    /// which is sound only where the source table settles the question. Where a
+    /// table admits rows from more than one path — `empirical_structures` takes
+    /// both calculated and imported structures — naming it is a guess, and the
+    /// two wrong answers fail in opposite directions: `from_calculated` lets an
+    /// interpreted row through a calculated-evidence gate, and `from_recorded`
+    /// makes that gate inert.
+    ///
+    /// This constructor takes the operation as read rather than as claimed, so
+    /// a caller holding the row's provenance can pass the recorded fact and let
+    /// the gate check it. `None` still means "no claim", for the import and
+    /// legacy rows that genuinely have none.
+    pub fn from_stored(id: DerivedId, value: T, operation: Option<Operation>) -> Self {
+        Self {
+            id,
+            value,
+            operation,
+        }
+    }
+
     pub fn id(&self) -> &DerivedId {
         &self.id
     }
@@ -326,27 +348,31 @@ impl<T> Tracked<T> {
 pub struct DependencyCollector(Arc<Mutex<BTreeSet<DerivedId>>>);
 
 impl DependencyCollector {
+    /// Lock the input set, recovering its contents if the lock was poisoned.
+    ///
+    /// Poisoning means another thread panicked while holding this lock. The set
+    /// it guards is append-only and every insert completes under the lock, so a
+    /// panic cannot leave it half-written; the worst a poisoned lock implies
+    /// here is that one input was not recorded. Recovering is therefore
+    /// strictly better than propagating: panicking again while an earlier panic
+    /// unwinds aborts the process, and it would abort inside provenance
+    /// collection — the one place a failing run still needs to be able to
+    /// report what it had read.
+    fn guard(&self) -> std::sync::MutexGuard<'_, BTreeSet<DerivedId>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn read<'a, T>(&self, input: &'a Tracked<T>) -> &'a T {
-        self.0
-            .lock()
-            .expect("dependency collector poisoned")
-            .insert(input.id.clone());
+        self.guard().insert(input.id.clone());
         &input.value
     }
 
     pub fn snapshot(&self) -> Vec<DerivedId> {
-        self.0
-            .lock()
-            .expect("dependency collector poisoned")
-            .iter()
-            .cloned()
-            .collect()
+        self.guard().iter().cloned().collect()
     }
 
     pub fn take(&self) -> Vec<DerivedId> {
-        std::mem::take(&mut *self.0.lock().expect("dependency collector poisoned"))
-            .into_iter()
-            .collect()
+        std::mem::take(&mut *self.guard()).into_iter().collect()
     }
 }
 
@@ -586,6 +612,37 @@ mod tests {
         let second = token.emit(2);
         assert_eq!(first.id(), &DerivedId::new("measurement"));
         assert_eq!(second.id(), &DerivedId::new("measurement#1"));
+    }
+
+    /// A panic elsewhere must not turn provenance collection into a second
+    /// panic: the inputs recorded before the poisoning are still readable.
+    #[test]
+    fn a_poisoned_collector_still_reports_what_it_recorded() {
+        let collector = DependencyCollector::default();
+        collector.read(&Tracked {
+            id: DerivedId::new("before"),
+            value: 1,
+            operation: None,
+        });
+
+        let poisoned = collector.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.0.lock().expect("lock is not yet poisoned");
+            panic!("poison the collector");
+        })
+        .join();
+        assert!(collector.0.is_poisoned());
+
+        collector.read(&Tracked {
+            id: DerivedId::new("after"),
+            value: 2,
+            operation: None,
+        });
+        assert_eq!(
+            collector.snapshot(),
+            vec![DerivedId::new("after"), DerivedId::new("before")]
+        );
+        assert_eq!(collector.take().len(), 2);
     }
 
     #[test]

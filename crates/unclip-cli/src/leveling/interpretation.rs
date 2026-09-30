@@ -3,7 +3,7 @@
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use unclip_epistemic::{DerivedId, Timestamp, Tracked};
+use unclip_epistemic::{DerivedId, Timestamp};
 use unclip_store::{
     CandidateInterpretationRepository, CandidateRepository, EngineRunRepository, EngineRunStatus,
     MeasurementRepository, ProvenanceRepository,
@@ -145,7 +145,14 @@ pub(crate) async fn run(
         .await?;
 
     let io = FileInterpretationIo { document: response };
-    let source = Tracked::from_recorded(structure.provenance, structure.structure);
+    // `empirical_structures` takes both calculated and imported rows, so the
+    // operation is read off the structure's provenance rather than asserted
+    // here. Asserting `from_recorded` left the engine's calculated-evidence
+    // gate with nothing to check on the one first-party path that reaches it.
+    let source = repos
+        .provenance
+        .restore_tracked(structure.provenance, structure.structure)
+        .await?;
     let executed: anyhow::Result<_> = async {
         let mut outputs = engine
             .interpret(

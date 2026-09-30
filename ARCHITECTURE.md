@@ -137,6 +137,7 @@ restoring caller names:
 | `Tracked::from_calculated` | the source table admits only calculated values |
 | `Tracked::from_inferred` | a replayed inference product |
 | `Tracked::from_recorded` | the operation genuinely is not known here |
+| `Tracked::from_stored` | the operation as the provenance row records it |
 
 `require_calculated_evidence` rejects evidence *labeled* as inferred,
 experimental, or interpreted. It accepts the unlabeled case, because "no claim
@@ -146,10 +147,35 @@ persistence boundary the compile-time guarantee degrades to a convention:
 a repository read that restores derived values, that is the decision to get
 right.
 
+The first three constructors ask the caller to *name* the operation, which is
+sound only where one table means one operation. Where a table takes rows from
+more than one path it is a guess, and both wrong answers are bad in opposite
+directions: naming `calculated` lets an interpreted row through the gate, and
+naming `recorded` makes the gate inert. `empirical_structures` is that table —
+`insert_calculated_structure` and `insert_unverified_structure` both write it —
+so reads of it go through `ProvenanceRepository::restore_tracked`, which reads
+the operation off the structure's provenance row rather than asserting one.
+Prefer that wherever the provenance row is reachable; it is the record that
+settles the question the convention is otherwise asking you to answer.
+
 The same split shows up in writes. `MeasurementRepository::insert_calculated_structure`
 takes a `Calculated<EmpiricalStructure>` and writes provenance edges with it;
 `insert_unverified_structure` takes a plain record and writes none. The names say
 which is which.
+
+**Where it stops, part two: who claims a value.** The type pins the *operation*
+and nothing pins the *producer*. `MeasureCtx::new`, `MeasureCtx::calculation_token`
+and `EmitMetadata::new` are all public, so any caller holding a context can mint
+a `Calculated<T>` whose `provenance.producer`, `version` and `algorithm` say
+whatever it likes. The engine relies on this: when a sensor is skipped,
+`measure_with_dependencies` emits the sparse `Reading` under that sensor's
+identity, though the sensor never ran.
+
+That is deliberate — the alternative is that a skipped sensor produces no row at
+all, which is the sparse-reading design's whole objection — but it means
+`provenance.producer` is a convention on the same footing as the labeling
+constructors above, not a compile-time fact. A `Calculated<T>` proves that a
+calculation token produced it. It does not prove *which* plugin did.
 
 ## What `unclip level verify` proves
 
@@ -192,10 +218,36 @@ negotiable.
 selects by bare id: a registry that let one id mean two plugins could only ever
 expose one of them.
 
-A descriptor's `params_schema` is enforced, not decorative. `classify_sensor`
-validates parameters against it before invoking a sensor, so a third-party sensor
-is held to its own declared contract on the same terms as a first-party one, and
-a violation is recorded as a sparse reading naming the offending key.
+A descriptor's `params_schema` is enforced, not decorative, and it is enforced
+for **every** family — so a third-party plugin is held to its own declared
+contract on the same terms as a first-party one. Where the check lives, and what
+a violation means, follows from where the parameters came from:
+
+| family | checked by | a violation is |
+| --- | --- | --- |
+| `Sensor` | `classify_sensor` | a sparse reading naming the offending key |
+| `ProductSensor`, `CrossProductSensor` | `cross_domain::validate_sensor_params` | an error |
+| `Inferrer`, `Interpreter` | `Engine::infer` / `Engine::interpret` | an error |
+| `Comparator`, `CandidateGenerator`, `NullModel` | the crate's dispatch loop | an error |
+
+Only the `Sensor` family records a violation instead of failing, because only it
+is reached with parameters that may be thin user input; everywhere else the
+parameters come from a resolved profile, so a violation is a misconfigured
+profile or a descriptor that disagrees with the struct behind it. All five
+non-sensor call sites share one helper, `support::require_declared_params`.
+
+The check is per-family rather than central because each family is dispatched by
+a different loop, and the families that were *not* checked were not checked for
+exactly that reason: the enforcement lived in `classify_sensor`, which only
+sensors reach. A schema nothing enforces has the standing of a comment, which is
+the state `unclip_plugin::schema` exists to end.
+
+Note that an inferrer's parameters reach two places — the plugin and the
+`InferenceIo` the harness supplied — so `file`, which names the recorded model
+response, has to appear in every inferrer's schema. `unclip-infer`'s
+`stage_params_are_declared_by_every_inferrer` asserts that, because
+`additionalProperties: false` on a schema that omits it rejects the one key the
+stage itself reads.
 
 The schema itself is checked when the plugin registers, not when it is first
 used. `Registry::register_*` runs `check_schema` and returns

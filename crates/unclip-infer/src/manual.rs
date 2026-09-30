@@ -24,7 +24,7 @@ impl Default for ManualInferrer {
             descriptor: InferrerDescriptor {
                 id: unclip_epistemic::PluginId::new("infer.manual"),
                 version: Version::new(1, 0, 0),
-                params_schema: "{\"type\":\"object\",\"additionalProperties\":false}",
+                params_schema: crate::PARAMS_SCHEMA_IO_ONLY,
             },
         }
     }
