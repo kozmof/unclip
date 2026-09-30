@@ -41,27 +41,30 @@ Dependencies point strictly downward. No crate depends on one listed below it.
                        /          \
       possibility space            semantic leveling
             |                              |
-    unclip-sample   367            unclip-engine     24.6k   stage orchestration
+    unclip-sample   571            unclip-engine     25.2k   stage orchestration
     unclip-match    701                    |
     unclip-io      1.7k          ----------+----------
             |                   /          |          \
     unclip-store   9.1k   unclip-sensors  unclip-infer  unclip-interpret
-            |             3.5k             725          342
-    unclip-migration 2.7k               \  |  /
-    unclip-entity    2.2k          unclip-plugin  2.4k       plugin contracts, registry
+            |             3.6k             710          347
+    unclip-migration 2.8k               \  |  /
+    unclip-entity    2.3k          unclip-plugin  2.8k       plugin contracts, registry
             |                              |
-    unclip-core    1.8k            unclip-measure  6.4k      pure calculation
+    unclip-core    1.9k            unclip-measure  6.6k      pure calculation
                                            |
                                    unclip-observe   101      recorded evidence
                                            |
                                    unclip-domain    202      versioned meaning
                                            |
-                                   unclip-epistemic 589      operations and provenance
+                                   unclip-epistemic 612      operations and provenance
                                            |
                                    unclip-record    171      persistable run records
 ```
 
-`unclip-epistemic` is the root of the leveling subsystem: 589 lines that every
+Line counts are whole crates, tests included, and are indicative rather than
+maintained to the line: treat them as relative weights.
+
+`unclip-epistemic` is the root of the leveling subsystem: ~600 lines that every
 crate above it depends on and that depends on nothing but `serde` and `semver`.
 `unclip-core` plays the same role for the possibility space.
 
@@ -192,9 +195,17 @@ expose one of them.
 A descriptor's `params_schema` is enforced, not decorative. `classify_sensor`
 validates parameters against it before invoking a sensor, so a third-party sensor
 is held to its own declared contract on the same terms as a first-party one, and
-a violation is recorded as a sparse reading naming the offending key. A
-registry-wide test (`crates/unclip-engine/tests/sensor_stage.rs`) asserts every
-builtin schema is well formed enough to constrain something.
+a violation is recorded as a sparse reading naming the offending key.
+
+The schema itself is checked when the plugin registers, not when it is first
+used. `Registry::register_*` runs `check_schema` and returns
+`PluginError::MalformedSchema` rather than accepting the plugin, because a schema
+that cannot decide anything is a defect in the plugin and not in the run that
+reached it — and on the usage path it degrades to a `NotApplicable` reading,
+which is indistinguishable from a sensor that legitimately did not apply. A
+registry-wide test (`crates/unclip-engine/tests/sensor_stage.rs`) still asserts
+every builtin schema constrains something; registration now holds third-party
+plugins to the same bar.
 
 ## Engine surface
 
@@ -208,6 +219,26 @@ These take the `RunPlan` they operate on and construct nothing, so a caller that
 wants a pure calculation does not have to build a registry to reach it. They are
 free functions rather than `RunPlan` methods only because `RunPlan` belongs to
 `unclip-plugin`, and Rust does not allow inherent impls across crates.
+
+The crate's modules are grouped by what they do, and the group is where a new
+one goes:
+
+| module | holds | a new one is… |
+| --- | --- | --- |
+| `nulls/` | what the domain already accounts for | a `NullModel` |
+| `comparisons/` | the typed difference between two measurements | a `Comparator` |
+| `discovery/` | what the domain does not yet account for | a `CandidateGenerator` |
+| `applications/` | applying a candidate to build its counterfactual | a candidate kind |
+
+Everything else stays in the crate root: the stage orchestration in `lib.rs`,
+the revision ladder, and the operations that belong to no family. Submodules are
+named for their subject, not their group — `comparisons::ranking`, not
+`comparisons::ranking_comparison` — so a path reads once rather than twice.
+
+`support.rs` holds the two error constructors the whole crate shares. Which one
+to call is a real decision: `invalid_params` for parameters that do not match a
+declared schema, `invalid` for everything else. The variants are distinct so a
+caller can tell a misconfigured profile from a calculation that could not run.
 
 ## Persistence
 
