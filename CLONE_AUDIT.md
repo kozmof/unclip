@@ -95,9 +95,9 @@ Carried forward unchanged from the previous pass, because it is a correctness qu
 
 ## Validation
 
-Validation passed: workspace Clippy over all targets with warnings and redundant clones denied, all 592 workspace tests, 7 doctests, documentation with warnings denied, release build, and formatting.
+Validation passed: workspace Clippy over all targets with warnings and redundant clones denied, all 592 workspace tests, 7 doctests, documentation with warnings denied, release build, formatting, and workspace packaging.
 
-`cargo package --locked --workspace` is not part of this list. It fails identically on the baseline commit, because verification resolves the sibling `unclip-*` path dependencies against published versions rather than the ones it just packaged.
+Packaging needed a fix of its own before it could say anything. `cargo package --locked --workspace` republishes every internal crate into a throwaway registry under one unchanging version, and Cargo caches a registry source and its artifacts as immutable, so verification was compiling this commit's crates against whatever the internal API was the last time the step ran. Any commit that changes an internal API fails there, which is how this one surfaced it — and the same staleness can let a commit pass that would not build on a clean machine. `.github/scripts/package-workspace.sh` drops the two caches first; CI and the README both call it now.
 
 New regression tests:
 

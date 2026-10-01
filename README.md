@@ -804,7 +804,7 @@ a scope that matched too many.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps`
 - `cargo test --locked --workspace --all-targets`
 - `cargo build --release --locked --workspace`
-- `cargo package --locked --workspace`
+- `bash .github/scripts/package-workspace.sh` — wraps `cargo package --locked --workspace`, which is not reproducible on its own because every internal crate is republished under one unchanging version and Cargo caches registry sources as immutable
 
 CI:
 - `cargo deny check advisories bans sources licenses`

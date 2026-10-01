@@ -53,8 +53,14 @@ jobs:
       - name: Release build
         run: cargo build --release --locked --workspace
 
+      # Not the bare `cargo package`: workspace packaging republishes every
+      # internal crate under one unchanging version, and Cargo caches registry
+      # sources and artifacts as if that version were immutable. The script
+      # drops those caches so the step verifies this commit rather than the
+      # last one. See its header.
       - name: Package
-        run: cargo package --locked --workspace
+        shell: bash
+        run: bash .github/scripts/package-workspace.sh
 
   audit:
     name: cargo-deny (advisories + bans + sources + licenses)
