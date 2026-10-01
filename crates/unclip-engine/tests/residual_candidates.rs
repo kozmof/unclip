@@ -792,7 +792,7 @@ fn motifs_require_connected_distinct_units_and_two_residual_edges() {
                     // Keep only one edge per observation in residual evidence below.
                     observation
                         .relations
-                        .retain(|relation| relation.id.0 == "first");
+                        .retain(|relation| relation.id.as_str() == "first");
                 }
             }
             *tracked = Tracked::from_recorded(tracked.id().clone(), observation);

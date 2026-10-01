@@ -87,7 +87,7 @@ fn registry_selects_only_explicit_plugins_and_enforces_identity_and_version() {
     assert_eq!(
         registry
             .candidate_generators()
-            .map(|p| p.descriptor().id.0.as_str())
+            .map(|p| p.descriptor().id.as_str())
             .collect::<Vec<_>>(),
         vec!["generate.a", "generate.z"]
     );
@@ -95,7 +95,7 @@ fn registry_selects_only_explicit_plugins_and_enforces_identity_and_version() {
     assert_eq!(
         registry
             .interpreters()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>(),
         vec!["interpret.fixture"]
     );

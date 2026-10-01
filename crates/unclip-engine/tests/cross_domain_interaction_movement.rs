@@ -179,15 +179,15 @@ fn engine_interaction_movement_is_order_stable_sparse_versioned_and_tracked() {
     assert_eq!(movement.axes[1].directional_concordance, 1.0);
     assert_eq!(movement.axes[1].transition_count, 1);
     assert_eq!(movement.axes[1].excluded_transitions.len(), 2);
-    assert_eq!(movement.binding.product_version.0, "6");
-    assert_eq!(movement.binding.frame_version.0, "8");
+    assert_eq!(movement.binding.product_version.as_str(), "6");
+    assert_eq!(movement.binding.frame_version.as_str(), "8");
 
     assert_eq!(
         result.value().sensor,
         PluginId::new("sensor.cross-domain-interaction-movement")
     );
     assert_eq!(
-        result.provenance().algorithm,
+        result.provenance().algorithm.as_ref(),
         "signed_consecutive_cross_domain_movement"
     );
     assert_eq!(result.provenance().params["minimum_transitions"], 1);

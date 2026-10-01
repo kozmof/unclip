@@ -196,7 +196,7 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
         if let Some(structure) = output.structure {
             let stored = repos
                 .measurements
-                .get_empirical_structure(&structure.id().0)
+                .get_empirical_structure(structure.id().as_str())
                 .await?
                 .context("empirical structure not found")?;
             let provenance = repos

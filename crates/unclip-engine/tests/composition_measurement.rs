@@ -807,8 +807,8 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
         })
         .unwrap();
     let target = serde_json::to_string(&(
-        &composition.value().product.binding.left.domain.0,
-        &composition.value().product.binding.left.version.0,
+        composition.value().product.binding.left.domain.as_str(),
+        composition.value().product.binding.left.version.as_str(),
     ))
     .unwrap();
     let generate = || {
@@ -838,7 +838,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
     );
     assert_eq!(
         candidate.value().value["evidence"]["structure"],
-        structures[0].id().0
+        structures[0].id().as_str()
     );
     assert_eq!(
         candidate.value().value["evidence"]["binding"],
@@ -926,7 +926,7 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
         .engine
         .registry()
         .candidate_generators()
-        .any(|generator| generator.descriptor().id.0 == "generate.cross-domain-structure"));
+        .any(|generator| generator.descriptor().id.as_str() == "generate.cross-domain-structure"));
 }
 
 #[test]
@@ -956,8 +956,8 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
         })
         .unwrap();
     let target = serde_json::to_string(&(
-        &composition.value().product.binding.left.domain.0,
-        &composition.value().product.binding.left.version.0,
+        composition.value().product.binding.left.domain.as_str(),
+        composition.value().product.binding.left.version.as_str(),
     ))
     .unwrap();
     let candidates = generate_candidates(

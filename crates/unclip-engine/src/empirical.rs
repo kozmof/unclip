@@ -86,7 +86,7 @@ pub fn derive_empirical(
     let mut seen = BTreeSet::new();
     for measurement in measurements {
         super::require_calculated_evidence(measurement, "empirical input measurement")?;
-        if measurement.id().0.is_empty() {
+        if measurement.id().is_empty() {
             return Err(invalid("empirical input measurement ID must not be empty"));
         }
         if !seen.insert(measurement.id()) {
@@ -131,7 +131,7 @@ pub fn derive_empirical(
             let structure = structure.map(|value| {
                 // JSON encodes the source ID without delimiter collisions.
                 let source_key =
-                    serde_json::to_string(&input.id().0).expect("string serialization");
+                    serde_json::to_string(input.id().as_str()).expect("string serialization");
                 CalculationToken::from_harness(
                     EmitMetadata::new(
                         DerivedId::new(format!("{run_id}/{algorithm}/{source_key}")),

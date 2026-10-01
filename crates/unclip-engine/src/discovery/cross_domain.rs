@@ -46,21 +46,21 @@ impl Default for CrossDomainCandidateGenerator {
 struct Parameters {}
 
 fn valid_binding(binding: &ProductMeasurementBinding) -> bool {
-    !binding.product.0.trim().is_empty()
-        && !binding.product_version.0.trim().is_empty()
-        && !binding.frame.0.trim().is_empty()
-        && !binding.frame_version.0.trim().is_empty()
-        && !binding.left.domain.0.trim().is_empty()
-        && !binding.left.version.0.trim().is_empty()
-        && !binding.right.domain.0.trim().is_empty()
-        && !binding.right.version.0.trim().is_empty()
+    !binding.product.trim().is_empty()
+        && !binding.product_version.trim().is_empty()
+        && !binding.frame.trim().is_empty()
+        && !binding.frame_version.trim().is_empty()
+        && !binding.left.domain.trim().is_empty()
+        && !binding.left.version.trim().is_empty()
+        && !binding.right.domain.trim().is_empty()
+        && !binding.right.version.trim().is_empty()
 }
 
 fn is_measured_deviation(entry: &IndependenceComparisonEntry) -> Result<bool> {
-    if entry.product_measurement.0.trim().is_empty()
-        || entry.expectation_measurement.0.trim().is_empty()
-        || entry.comparator.0.trim().is_empty()
-        || entry.delta_id.0.trim().is_empty()
+    if entry.product_measurement.trim().is_empty()
+        || entry.expectation_measurement.trim().is_empty()
+        || entry.comparator.trim().is_empty()
+        || entry.delta_id.trim().is_empty()
         || entry.delta.comparator != entry.comparator
     {
         return Err(invalid(
@@ -83,11 +83,11 @@ fn is_measured_deviation(entry: &IndependenceComparisonEntry) -> Result<bool> {
 fn domain_key(
     input: &unclip_domain::ProductDomainInput,
 ) -> std::result::Result<String, serde_json::Error> {
-    serde_json::to_string(&(&input.domain.0, &input.version.0))
+    serde_json::to_string(&(input.domain.as_str(), input.version.as_str()))
 }
 
 fn validate_evidence(value: &CrossDomainDeviationEvidence) -> Result<()> {
-    if value.comparison_profile.0.trim().is_empty()
+    if value.comparison_profile.trim().is_empty()
         || !valid_binding(&value.binding)
         || !is_measured_deviation(&value.comparison)?
     {
@@ -215,9 +215,9 @@ pub(crate) fn validate_candidate(
         ))
         .map_err(invalid)?;
     if value.pattern.matching != "typed_product_deviation_from_independence"
-        || value.evidence.structure.0.trim().is_empty()
-        || value.pattern.product_measurement.0.trim().is_empty()
-        || value.pattern.comparator.0.trim().is_empty()
+        || value.evidence.structure.trim().is_empty()
+        || value.pattern.product_measurement.trim().is_empty()
+        || value.pattern.comparator.trim().is_empty()
     {
         return Err(invalid(
             "cross-domain application requires anonymous typed deviation evidence",
@@ -263,12 +263,12 @@ pub fn derive_cross_domain_deviations(
         ));
     }
     let provenance = profile.provenance();
-    if profile.id().0.trim().is_empty()
+    if profile.id().trim().is_empty()
         || provenance.producer != PluginId::new("compare.product-independence")
-        || provenance.algorithm != "explicit_typed_product_independence_comparison"
+        || provenance.algorithm.as_ref() != "explicit_typed_product_independence_comparison"
         || provenance.params_hash != hash_params(&provenance.params)
-        || profile.value().composition_profile.0.trim().is_empty()
-        || profile.value().expectation_profile.0.trim().is_empty()
+        || profile.value().composition_profile.trim().is_empty()
+        || profile.value().expectation_profile.trim().is_empty()
         || !valid_binding(&profile.value().binding)
     {
         return Err(invalid(

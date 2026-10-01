@@ -1,107 +1,106 @@
 # Clone audit
 
-Baseline: commit `ff9d157`. Scope: tracked Rust files throughout `crates/`, including integration tests and inline test modules.
+Baseline: commit `71d6fda`. Scope: tracked Rust files throughout `crates/`, including integration tests and inline test modules.
 
-The previous pass removed redundant call sites. This one changes where values live. Four types that every stage handles — derived values, tracked inputs, provenance, and the inference products a run infers — now hold their payload behind an `Arc` instead of owning it inline. Copying them is a refcount bump, so the copies that scaled with the number of observations, measurements, and emissions are gone rather than merely fewer.
+The previous pass moved four workspace-wide types — derived values, tracked inputs, provenance, and inference products — behind an `Arc`, and left two boundaries named and deliberately untaken. This pass takes both of them.
+
+Identifiers no longer own a `String`. `string_id!` declares each one as a newtype over `Arc<str>` with a private field, so copying any identifier in the workspace is a refcount bump. That was the largest remaining source of duplication by volume: an identifier is copied once per sample, axis, unit and candidate on every path, and each copy used to allocate. The eight remaining comparator payloads that exist only to be serialized now have borrowed write-side twins, the shape the scalar comparator already used, so building one copies nothing out of the measurements it reports.
 
 ## Counting method
 
-Counts are occurrences, not matching lines: a line can contain several calls. Counting all tracked Rust files gives 1502 before and 1445 after. Test counts include files under `tests/` and source text after the first `#[cfg(test)]`; production counts use the preceding source text.
+Counts are occurrences, not matching lines: a line can contain several calls. Counting all tracked Rust files gives 1445 before and 1335 after. Test counts include files under `tests/` and source text after the first `#[cfg(test)]`; production counts use the preceding source text.
 
-**The call-site count is the wrong measure for this pass, and it moved the wrong way in places.** A surviving `.clone()` on an `Arc`-backed value copies a pointer and an integer; writing one provenance row now clones eight short column strings where it used to accept one deep copy of the whole record, including its parameter tree. `unclip-store`'s production count rose by 21 for exactly that reason — borrowed row writes trade one large copy for several tiny ones — and it copies strictly less than before. The table is here for continuity with the previous pass, not as the result.
+As in the previous pass, the call-site count is not the result, and the two largest movements in the table illustrate opposite things. `unclip-store`'s production count fell by 75 almost entirely because `Set(id.0.clone())` became `Set(id.to_string())` — the same allocation under a name Clippy does not count, with no change in what the boundary copies. The nine comparators went from 59 production clones to 17, and there the count and the cost moved together: what each removed clone used to copy was a whole reading, graph or structured tree.
 
 | Crate | Production before | Production after | Test calls after |
 | --- | ---: | ---: | ---: |
-| unclip-cli | 140 | 111 | 28 |
+| unclip-cli | 111 | 108 | 28 |
 | unclip-core | 7 | 7 | 5 |
 | unclip-domain | 0 | 0 | 3 |
-| unclip-engine | 313 | 282 | 458 |
-| unclip-epistemic | 17 | 18 | 7 |
+| unclip-engine | 282 | 228 | 478 |
+| unclip-epistemic | 18 | 18 | 9 |
 | unclip-infer | 13 | 13 | 11 |
 | unclip-interpret | 1 | 1 | 3 |
 | unclip-io | 5 | 5 | 8 |
 | unclip-match | 1 | 1 | 0 |
 | unclip-measure | 78 | 78 | 41 |
 | unclip-plugin | 18 | 18 | 2 |
-| unclip-record | 0 | 1 | 0 |
+| unclip-record | 1 | 1 | 0 |
 | unclip-sample | 0 | 0 | 12 |
 | unclip-sensors | 62 | 62 | 27 |
-| unclip-store | 124 | 145 | 98 |
-| **Total** | **779** | **742** | **703** |
+| unclip-store | 145 | 70 | 98 |
+| **Total** | **742** | **610** | **725** |
 
 ## What changed
 
-### Shared payloads
+### Identifiers hold a shared string
 
-`Derived<T, O>` and `Tracked<T>` hold `Arc<T>`. The consequences reach every stage:
+`string_id!` declares `pub struct $name(Arc<str>)`. Every identifier in the workspace goes through that macro — `DerivedId`, `PluginId`, `Timestamp`, `ParameterHash`, `DomainId`, `UnitId`, `RelationId`, `FrameId`, `ObservationId`, the product coordinates, and the version newtypes — so one change covers all nineteen.
 
-- `Tracked::from(&derived)` — the most common hop in the workspace, at 107 call sites — no longer copies the payload. Neither does cloning a `Derived` or a `Tracked`.
-- Both types are now cloneable, comparable and debuggable independently of their payload, because the hand-written impls are not bounded on `T`. Both accept `T: ?Sized`, so an unsized payload travels the whole path.
-- `Derived::into_value` copies only when the value is still shared, which for a value emitted and immediately consumed it is not.
-- `EmitToken::emit_shared` emits a payload that is already shared, so a stage handing one value to both its result and a downstream input allocates once.
-- `DependencyCollector::read_shared` and `read_derived_shared` record an input and hand back a handle, for the callers that must keep the value past the borrow.
+- The field is private. Reads go through `as_str`, `AsRef<str>`, `Deref<Target = str>` or `Display`; `as_shared` hands out the `Arc<str>` itself. Making it private is what forced every one of the several hundred former `.0` reads to be looked at rather than silently recompiled.
+- `new` takes `impl Into<Self>`, and `From` is implemented for `&str`, `String`, `&String`, `Cow<str>`, `Arc<str>` and `&Self`, so construction reads the same as before.
+- `Borrow<str>` lets a map keyed by `String` be probed with an identifier, and `Deref` lets `id.trim()` and `id.is_empty()` read as they did when the field was public.
+- `Hash`, `Ord` and `PartialEq` still delegate to the string, and `#[serde(transparent)]` still writes a bare string, so no stored row, hash or sort order moves.
 
-`Provenance` is shared by the same mechanism. One token emits several values from one analysis and they all record the same parameters, so `Provenance.params` is an `Arc` too: the parameter tree is copied once per token instead of once per emission, and `Derived::shared_provenance` lets a consumer keep or persist a provenance record without duplicating it.
+`Provenance.algorithm` became an `Arc<str>` for the same reason. It is written once per emission and defaults to the producing plugin's id, which it now shares with the `producer` field instead of copying.
 
-### Shared payloads in the records that carry them
+The one place this costs something is the SQLite boundary, which the previous pass predicted: SeaORM's `ActiveModel` takes owned `String`s, so a row write now calls `to_string()` where it used to move or clone a `String`. The allocation count there is unchanged — the write always had to own its columns — and everything upstream of it stopped allocating.
 
-Each of these held a private copy of something its producer still owned:
+### Comparator payloads borrow what they serialize
 
-| Record | Shared with |
+Each comparator builds a payload, turns it into JSON, and drops it. Nine payloads are shaped that way; the scalar one already had a borrowed write-side twin, and the other eight now do too, each pinned to its owning shape by a round-trip test over every arm:
+
+| Payload | What it stopped copying |
 | --- | --- |
-| `InferenceOutput` products | the tracked observations, alignments and rankings the engine derives from them |
-| `RecordedInference.value` | replay, split and transfer evidence restored from it, via `tracked` / `into_tracked` |
-| `MeasurementRecord.measurement` | the tracked evidence a caller reads from it, via `tracked` / `into_tracked` |
-| `StoredProvenance.provenance` | the emitted value it was built from, via `StoredProvenance::of` |
-| `CounterfactualSnapshot.domain` | the tracked counterfactual measured against it |
-| `ProfileMeasurement.measurement` | the derived measurement a composition profile indexes |
-| `ProfileDelta.delta`, `IndependenceComparisonEntry.delta` | the calculated deltas returned beside the profile |
-| `CounterfactualEvidence`'s delta profile, null readings, constraints and Pareto assessment | the calculated values returned beside it on `CounterfactualExperiment` |
+| `StructuredIdentityComparison` | both measured values, which are arbitrary structured trees |
+| `RankingComparison` | both ranked states, which own a tier vector per unit |
+| `GraphComparison` | both graphs and all four node/edge difference lists |
+| `EventComparison` | every change point in the matched, removed and added lists |
+| `DistributionComparison` | one `String` per reported category |
+| `MatrixComparison` | the shared unit axis |
+| `SpectralComparison`, `PartitionComparison` and every payload above | the two whole readings reported when a comparison is unavailable |
 
-The inference one is the largest: the engine keeps an emitted output for provenance *and* tracks every product inside it as separate engine evidence, so each observation used to be copied once per run, scaling with the number of observations.
+The `Unavailable` arms are the case the previous pass judged too small to be worth it. That judgement was right for the readings those arms carry, but wrong about the `Value` arms of the structured, ranking, graph and event comparators, which report measured payloads verbatim and copied them in full.
 
-### Borrowed inputs and borrowed serialization views
+`CompareCtx::before` and `after` now return a reference tied to the context's own lifetime rather than to the borrow of the context, which is what lets a payload outlive the call that builds it.
 
-- `ObservationRepository::insert_observation`, `insert_alignment` and `insert_ranking` take their value by reference. Writing a row copies only the short column values it has to own, and the inference stage keeps every product it stores.
-- Writing a measurement row borrows the measurement's reading and context instead of moving out of it. The destructure is still exhaustive, so a new field on `Measurement` fails to compile until it is stored or explicitly ignored.
-- `StoredContextRef` and `ScalarDifferenceRef` are write-side twins of the owning shapes that readers deserialize into. Each is pinned to its owning shape by a round-trip test, because the two are one wire format and a drift between them would silently corrupt every row written afterwards.
-- The candidate-application revision path moves the proposed domain out of the application it just produced rather than copying it; the CLI experiment path shares one domain snapshot and frame between its tracked inputs and the versions it later reads off them.
+### Supporting changes
+
+- `PluginSelection::any` takes `impl Into<PluginId>` rather than `impl Into<String>`, so a caller that already holds an id hands it over instead of rebuilding it.
+- The partition, graph and event comparators hoist their parsed values above the payload so it can borrow them; the parse itself is unchanged.
 
 ## Why clones remain
 
 | Remaining use | Ownership reason |
 | --- | --- |
-| Database connections, plugin `Arc` handles, dependency collectors, derived and tracked values | Cloning shares an existing allocation. Nothing is duplicated. |
-| Identifiers (`DerivedId`, `PluginId`, `UnitId`, …) | Each is a `String` newtype, so every copy allocates. They are copied per sample, axis, unit and candidate, and this is now the largest remaining category. See below. |
-| Short column strings at the SQLite boundary | SeaORM's `ActiveModel` takes owned values. Copying a handful of short strings per row is what lets the record itself be borrowed. |
+| Identifiers, database connections, plugin `Arc` handles, dependency collectors, derived and tracked values | Cloning shares an existing allocation. Nothing is duplicated. |
+| `to_string()` at the SQLite boundary | SeaORM's `ActiveModel` takes owned values. This is where an identifier's text is finally copied, once per column written. |
+| Readings and assessments inside emitted values | `ConstraintAssessment`, `ParetoAssessment` and `TransferAssessment` are emitted and retained as evidence, not serialized and dropped, so they own what they report. A borrowed twin would be wrong here, not merely unnecessary. |
+| `semver::Version` | An ordinary `major.minor.patch` carries no prerelease or build metadata, so cloning it allocates nothing. |
+| Matrix cells | `MatrixCell` is two numbers. Copying one is a stack move. |
 | Counterfactual domain snapshots | The proposed domain is independently mutable while the baseline must remain unchanged. |
 | Stored provenance, replay snapshots, and evidence records | These are independently owned historical records. |
 | A key stored both in a map and its owned record | The current data structures deliberately own both fields. |
 | Symmetric matrix cells | Both output positions own their cell; this is not a copy of the matrix. |
 | Test inputs reused or mutated in multiple cases | Separate fixtures isolate mutations and preserve the original for assertions. |
 
-Two boundaries remain as candidates for a further pass, both deliberately not taken here:
-
-- **Identifiers allocate on every copy.** `string_id!` declares each identifier as `pub struct $name(pub String)`. Backing it with `Arc<str>` would turn every per-sample identifier copy into a refcount bump, which is the single biggest remaining win by volume. It is also the most invasive change available: the `.0` field is public and read as a `String` at hundreds of sites, most of them the SQLite boundary, which needs owned `String`s and would have to allocate there instead. That trade is worth measuring before it is worth making.
-- **Comparator payloads other than the scalar one.** `GraphComparison`, the distribution comparators and the transfer-constraint payload build an owned value purely to serialize it, exactly as the scalar comparator did. Each would take the same borrowed write-side twin. They were left alone because in every one of them the arm that copies a reading is reached only when at least one side is *not* a measured value, so the readings it copies are small — the pattern is right but the payoff is not yet there.
-
-The practical priority remains large payloads and copies repeated per sample, axis, unit, or candidate, rather than eliminating cheap handle clones to reduce the count. No unsafe code or lifetime extension is used.
+Both boundaries the previous pass deferred are now closed. What is left is either a refcount bump, a value that is genuinely owned twice, or the single owning copy a row write has to make. The practical priority for any further pass stays the same: large payloads and copies repeated per sample, axis, unit, or candidate, rather than the call-site count. No unsafe code or lifetime extension is used.
 
 ## Unrelated finding
 
-Two paths label the same class of value differently, which this pass preserved rather than corrected because it is a correctness question, not a copying one:
+Carried forward unchanged from the previous pass, because it is a correctness question rather than a copying one:
 
 - `leveling::discovery::calculate` restores selected empirical structures as `Inferred` while `leveling::discovery::discover` tracks the same structures as `Calculated`. Only calculation writes them. The mislabel is inert today because candidate generation has no calculated-evidence gate, but `Engine::interpret` does, and it would reject a structure restored from a discovery snapshot.
 - `Engine::run_counterfactual_experiment` restores a split's held-out observations unlabeled (`None`) while `Engine::measure_held_out_baseline` restores the same entries as `Inferred`.
 
 ## Validation
 
-Validation passed: workspace Clippy with warnings and redundant clones denied, all 583 workspace tests, 7 doctests, documentation with warnings denied, release build, formatting, and the sensor dependency policy.
+Validation passed: workspace Clippy over all targets with warnings and redundant clones denied, all 592 workspace tests, 7 doctests, documentation with warnings denied, release build, and formatting.
+
+`cargo package --locked --workspace` is not part of this list. It fails identically on the baseline commit, because verification resolves the sibling `unclip-*` path dependencies against published versions rather than the ones it just packaged.
 
 New regression tests:
 
-- Tracking, cloning and re-emitting a derived value alias one payload allocation, asserted by pointer identity — a regression here is otherwise silent, since every value still compares equal.
-- Provenance is shared across clones of a derived value.
-- An unsized, non-`Clone` payload can be emitted, tracked, cloned and read.
-- `StoredContextRef` writes exactly what `StoredContext` reads, over both sparse and non-sparse readings.
-- `ScalarDifferenceRef` writes exactly what `ScalarDifference` reads, over all three arms.
+- Copying an identifier shares one allocation, asserted by pointer identity on both the identifier itself and on the id an emission carries into its provenance, and on the algorithm an emission shares with its producer. A regression here is otherwise silent, since every copy still compares, hashes and prints equal.
+- The `string_id!` doctest asserts the same pointer identity for a freshly declared identifier, so the guarantee is part of the documented contract.
+- One round-trip test per comparator payload — structured, ranking, graph, event, distribution, matrix, partition and spectral — pinning the borrowed write-side shape to the owning shape it must deserialize into, over every arm. These join the two the previous pass added for `StoredContextRef` and `ScalarDifferenceRef`.

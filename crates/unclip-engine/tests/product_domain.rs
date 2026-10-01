@@ -101,7 +101,7 @@ fn product_domain_materializes_only_observed_or_required_pairs() {
             .value()
             .interactions
             .iter()
-            .map(|interaction| (interaction.left.0.clone(), interaction.right.0.clone()))
+            .map(|interaction| (interaction.left.to_string(), interaction.right.to_string()))
             .collect::<Vec<_>>(),
         vec![
             ("presentation".into(), "composition".into()),

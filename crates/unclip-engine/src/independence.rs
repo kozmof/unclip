@@ -61,7 +61,7 @@ fn canonical_sources(
     sources.sort();
     if sources
         .iter()
-        .any(|identity| identity.0.trim().is_empty() || !available.contains(identity))
+        .any(|identity| identity.trim().is_empty() || !available.contains(identity))
         || sources.windows(2).any(|pair| pair[0] == pair[1])
     {
         return Err(invalid(format!(
@@ -90,9 +90,9 @@ impl crate::Engine {
             ));
         }
         let provenance = composition.provenance();
-        if composition.id().0.trim().is_empty()
+        if composition.id().trim().is_empty()
             || provenance.producer != PluginId::new("calculate.composition-profile")
-            || provenance.algorithm != "versioned_composition_measurement_profiles"
+            || provenance.algorithm.as_ref() != "versioned_composition_measurement_profiles"
             || provenance.params_hash != hash_params(&provenance.params)
         {
             return Err(invalid(
@@ -145,7 +145,7 @@ impl crate::Engine {
         let mut selected = BTreeSet::new();
         let mut expectations = Vec::with_capacity(definitions.len());
         for definition in definitions {
-            if definition.product_measurement.0.trim().is_empty()
+            if definition.product_measurement.trim().is_empty()
                 || !selected.insert(definition.product_measurement.clone())
             {
                 return Err(invalid(

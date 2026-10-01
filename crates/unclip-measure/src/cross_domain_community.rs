@@ -202,14 +202,14 @@ fn validate_profile(
     profile: &CrossDomainMutualInformation,
 ) -> Result<(), CrossDomainCommunityError> {
     let binding = &profile.binding;
-    if binding.product.0.trim().is_empty()
-        || binding.product_version.0.trim().is_empty()
-        || binding.frame.0.trim().is_empty()
-        || binding.frame_version.0.trim().is_empty()
-        || binding.left.domain.0.trim().is_empty()
-        || binding.left.version.0.trim().is_empty()
-        || binding.right.domain.0.trim().is_empty()
-        || binding.right.version.0.trim().is_empty()
+    if binding.product.trim().is_empty()
+        || binding.product_version.trim().is_empty()
+        || binding.frame.trim().is_empty()
+        || binding.frame_version.trim().is_empty()
+        || binding.left.domain.trim().is_empty()
+        || binding.left.version.trim().is_empty()
+        || binding.right.domain.trim().is_empty()
+        || binding.right.version.trim().is_empty()
         || binding.left.domain == binding.right.domain
         || profile.minimum_samples < 2
         || profile.requested_bins == 0
@@ -220,8 +220,8 @@ fn validate_profile(
     }
     let mut coordinates = BTreeSet::new();
     for axis in &profile.axes {
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || !axis.mutual_information_bits.is_finite()
             || axis.mutual_information_bits < 0.0
             || axis.sample_count < profile.minimum_samples
@@ -246,8 +246,8 @@ fn validate_profile(
         }
     }
     for axis in &profile.unassessed_axes {
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis.need != profile.minimum_samples
             || axis.have >= axis.need
             || axis.have.checked_add(axis.excluded_observations.len())

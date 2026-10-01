@@ -223,7 +223,7 @@ fn parse<T: serde::de::DeserializeOwned>(value: &str) -> StoreResult<T> {
         .map_err(Into::into)
 }
 fn require_input(provenance: &Provenance, id: &str) -> StoreResult<()> {
-    if !provenance.inputs.iter().any(|input| input.0 == id) {
+    if !provenance.inputs.iter().any(|input| input.as_str() == id) {
         return Err(invalid(format!(
             "required evidence input is not tracked: {id}"
         )));
@@ -263,7 +263,7 @@ impl CandidateRepository for SeaOrmExperimentRepository {
         let txn = self.db.begin().await?;
         provenance(&txn, run_id, candidate.id(), candidate.shared_provenance()).await?;
         candidates::Entity::insert(candidates::ActiveModel {
-            id: Set(candidate.id().0.clone()),
+            id: Set(candidate.id().to_string()),
             domain_version_id: Set(value.domain_version_id.clone()),
             kind: Set(serde_json::to_value(value.kind)
                 .context("invalid candidate kind")?
@@ -271,8 +271,8 @@ impl CandidateRepository for SeaOrmExperimentRepository {
                 .expect("enum string")
                 .into()),
             value_json: Set(json(&value.value)?),
-            provenance_id: Set(candidate.id().0.clone()),
-            created_at: Set(candidate.provenance().timestamp.0.clone()),
+            provenance_id: Set(candidate.id().to_string()),
+            created_at: Set(candidate.provenance().timestamp.to_string()),
         })
         .exec(&txn)
         .await?;
@@ -293,7 +293,7 @@ impl CandidateRepository for SeaOrmExperimentRepository {
         let mut query = candidates::Entity::find()
             .filter(candidates::Column::DomainVersionId.eq(domain_version_id));
         if let Some(after) = after {
-            query = query.filter(candidates::Column::Id.gt(&after.0));
+            query = query.filter(candidates::Column::Id.gt(after.as_str()));
         }
         query
             .order_by_asc(candidates::Column::Id)
@@ -316,7 +316,10 @@ impl CandidateRepository for SeaOrmExperimentRepository {
             .collect()
     }
     async fn get_candidate(&self, id: &DerivedId) -> StoreResult<Option<CandidateRecord>> {
-        let Some(row) = candidates::Entity::find_by_id(&id.0).one(&self.db).await? else {
+        let Some(row) = candidates::Entity::find_by_id(id.as_str())
+            .one(&self.db)
+            .await?
+        else {
             return Ok(None);
         };
         Ok(Some(CandidateRecord {
@@ -344,7 +347,7 @@ impl CandidateInterpretationRepository for SeaOrmExperimentRepository {
             return Err(invalid("candidate interpretations must be JSON objects"));
         }
         let txn = self.db.begin().await?;
-        if candidates::Entity::find_by_id(&candidate_id.0)
+        if candidates::Entity::find_by_id(candidate_id.as_str())
             .one(&txn)
             .await?
             .is_none()
@@ -359,11 +362,11 @@ impl CandidateInterpretationRepository for SeaOrmExperimentRepository {
         )
         .await?;
         candidate_interpretations::Entity::insert(candidate_interpretations::ActiveModel {
-            id: Set(interpretation.id().0.clone()),
-            candidate_id: Set(candidate_id.0.clone()),
+            id: Set(interpretation.id().to_string()),
+            candidate_id: Set(candidate_id.to_string()),
             value_json: Set(json(interpretation.value())?),
-            provenance_id: Set(interpretation.id().0.clone()),
-            created_at: Set(interpretation.provenance().timestamp.0.clone()),
+            provenance_id: Set(interpretation.id().to_string()),
+            created_at: Set(interpretation.provenance().timestamp.to_string()),
         })
         .exec(&txn)
         .await?;
@@ -375,7 +378,7 @@ impl CandidateInterpretationRepository for SeaOrmExperimentRepository {
         &self,
         id: &DerivedId,
     ) -> StoreResult<Option<CandidateInterpretationRecord>> {
-        candidate_interpretations::Entity::find_by_id(&id.0)
+        candidate_interpretations::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
             .map(|row| {
@@ -411,13 +414,13 @@ async fn insert_completed_experiment_in_transaction(
             ));
         }
     }
-    let candidate = candidates::Entity::find_by_id(&value.candidate_id.0)
+    let candidate = candidates::Entity::find_by_id(value.candidate_id.as_str())
         .one(txn)
         .await?
         .ok_or_else(|| invalid("experiment candidate not found"))?;
     require_input(experiment.provenance(), &candidate.provenance_id)?;
     for observation in value.training.iter().chain(&value.held_out) {
-        let recorded = observations::Entity::find_by_id(&observation.0)
+        let recorded = observations::Entity::find_by_id(observation.as_str())
             .one(txn)
             .await?
             .ok_or_else(|| invalid("experiment observation not found"))?;
@@ -425,7 +428,7 @@ async fn insert_completed_experiment_in_transaction(
     }
     let mut delta_rows = Vec::new();
     for delta in deltas {
-        require_input(experiment.provenance(), &delta.calculated.id().0)?;
+        require_input(experiment.provenance(), delta.calculated.id().as_str())?;
         delta_rows.push(prepare_delta(txn, run_id, experiment.id(), delta).await?);
     }
     for value in post_delta_provenance {
@@ -439,15 +442,15 @@ async fn insert_completed_experiment_in_transaction(
     )
     .await?;
     experiments::Entity::insert(experiments::ActiveModel {
-        id: Set(experiment.id().0.clone()),
+        id: Set(experiment.id().to_string()),
         engine_run_id: Set(run_id.into()),
-        candidate_id: Set(value.candidate_id.0.clone()),
+        candidate_id: Set(value.candidate_id.to_string()),
         domain_version_id: Set(value.domain_version_id.clone()),
         frame_version_id: Set(value.frame_version_id.clone()),
         plan_json: Set(json(&value.plan)?),
         status: Set("planned".into()),
         result_json: Set(None),
-        provenance_id: Set(experiment.id().0.clone()),
+        provenance_id: Set(experiment.id().to_string()),
         started_at: Set(value.started_at.clone()),
         completed_at: Set(None),
     })
@@ -456,8 +459,8 @@ async fn insert_completed_experiment_in_transaction(
     for (split, selected) in [("training", &value.training), ("held_out", &value.held_out)] {
         for (position, observation) in selected.iter().enumerate() {
             experiment_observations::Entity::insert(experiment_observations::ActiveModel {
-                experiment_id: Set(experiment.id().0.clone()),
-                observation_id: Set(observation.0.clone()),
+                experiment_id: Set(experiment.id().to_string()),
+                observation_id: Set(observation.to_string()),
                 split: Set(split.into()),
                 position: Set(i64::try_from(position)
                     .map_err(|_| invalid("too many experiment observations"))?),
@@ -474,7 +477,7 @@ async fn insert_completed_experiment_in_transaction(
             experiments::Column::Status,
             sea_orm::sea_query::Expr::value("running"),
         )
-        .filter(experiments::Column::Id.eq(&experiment.id().0))
+        .filter(experiments::Column::Id.eq(experiment.id().as_str()))
         .exec(txn)
         .await?;
     experiments::Entity::update_many()
@@ -488,9 +491,9 @@ async fn insert_completed_experiment_in_transaction(
         )
         .col_expr(
             experiments::Column::CompletedAt,
-            sea_orm::sea_query::Expr::value(experiment.provenance().timestamp.0.clone()),
+            sea_orm::sea_query::Expr::value(experiment.provenance().timestamp.to_string()),
         )
-        .filter(experiments::Column::Id.eq(&experiment.id().0))
+        .filter(experiments::Column::Id.eq(experiment.id().as_str()))
         .exec(txn)
         .await?;
     Ok(())
@@ -542,7 +545,10 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
         &self,
         id: &DerivedId,
     ) -> StoreResult<Option<CompletedExperimentRecord>> {
-        let Some(row) = experiments::Entity::find_by_id(&id.0).one(&self.db).await? else {
+        let Some(row) = experiments::Entity::find_by_id(id.as_str())
+            .one(&self.db)
+            .await?
+        else {
             return Ok(None);
         };
         if row.status != "completed" {
@@ -551,7 +557,7 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
         let mut training = Vec::new();
         let mut held_out = Vec::new();
         for observation in experiment_observations::Entity::find()
-            .filter(experiment_observations::Column::ExperimentId.eq(&id.0))
+            .filter(experiment_observations::Column::ExperimentId.eq(id.as_str()))
             .order_by_asc(experiment_observations::Column::Position)
             .all(&self.db)
             .await?
@@ -568,7 +574,7 @@ impl ExperimentRepository for SeaOrmExperimentRepository {
         }
         let mut deltas = Vec::new();
         for delta in experiment_deltas::Entity::find()
-            .filter(experiment_deltas::Column::ExperimentId.eq(&id.0))
+            .filter(experiment_deltas::Column::ExperimentId.eq(id.as_str()))
             .order_by_asc(experiment_deltas::Column::Id)
             .all(&self.db)
             .await?
@@ -635,23 +641,24 @@ async fn insert_revision_in_transaction(
         if !seen_interpretations.insert(interpretation_id) {
             return Err(invalid("domain revision interpretations must be unique"));
         }
-        let interpretation = candidate_interpretations::Entity::find_by_id(&interpretation_id.0)
-            .one(txn)
-            .await?
-            .ok_or_else(|| invalid("domain revision interpretation not found"))?;
-        if interpretation.candidate_id != value.candidate_id.0 {
+        let interpretation =
+            candidate_interpretations::Entity::find_by_id(interpretation_id.as_str())
+                .one(txn)
+                .await?
+                .ok_or_else(|| invalid("domain revision interpretation not found"))?;
+        if interpretation.candidate_id != value.candidate_id.as_str() {
             return Err(invalid(
                 "domain revision interpretation belongs to another candidate",
             ));
         }
         require_input(revision.provenance(), &interpretation.provenance_id)?;
     }
-    let experiment = experiments::Entity::find_by_id(&value.experiment_id.0)
+    let experiment = experiments::Entity::find_by_id(value.experiment_id.as_str())
         .one(txn)
         .await?
         .ok_or_else(|| invalid("revision experiment not found"))?;
     if experiment.status != "completed"
-        || experiment.candidate_id != value.candidate_id.0
+        || experiment.candidate_id != value.candidate_id.as_str()
         || experiment.domain_version_id != value.from_version_id
     {
         return Err(invalid(
@@ -661,24 +668,24 @@ async fn insert_revision_in_transaction(
     require_input(revision.provenance(), &experiment.provenance_id)?;
     provenance(txn, run_id, revision.id(), revision.shared_provenance()).await?;
     domain_revisions::Entity::insert(domain_revisions::ActiveModel {
-        id: Set(revision.id().0.clone()),
-        candidate_id: Set(value.candidate_id.0.clone()),
-        experiment_id: Set(value.experiment_id.0.clone()),
+        id: Set(revision.id().to_string()),
+        candidate_id: Set(value.candidate_id.to_string()),
+        experiment_id: Set(value.experiment_id.to_string()),
         from_version_id: Set(value.from_version_id.clone()),
         to_version_id: Set(value.to_version_id.clone()),
         reason: Set(value.reason.clone()),
         evidence_json: Set(json(&value.evidence)?),
-        provenance_id: Set(revision.id().0.clone()),
-        created_at: Set(revision.provenance().timestamp.0.clone()),
+        provenance_id: Set(revision.id().to_string()),
+        created_at: Set(revision.provenance().timestamp.to_string()),
     })
     .exec(txn)
     .await?;
     for (position, interpretation_id) in value.interpretation_ids.iter().enumerate() {
         domain_revision_interpretations::Entity::insert(
             domain_revision_interpretations::ActiveModel {
-                revision_id: Set(revision.id().0.clone()),
-                candidate_id: Set(value.candidate_id.0.clone()),
-                interpretation_id: Set(interpretation_id.0.clone()),
+                revision_id: Set(revision.id().to_string()),
+                candidate_id: Set(value.candidate_id.to_string()),
+                interpretation_id: Set(interpretation_id.to_string()),
                 position: Set(i64::try_from(position)
                     .map_err(|_| invalid("too many domain revision interpretations"))?),
             },
@@ -718,16 +725,16 @@ async fn prepare_delta(
     )
     .await?;
     Ok(experiment_deltas::ActiveModel {
-        id: Set(calculated.id().0.clone()),
-        experiment_id: Set(experiment.0.clone()),
+        id: Set(calculated.id().to_string()),
+        experiment_id: Set(experiment.to_string()),
         before_profile_id: Set(delta.before_profile_id),
         after_profile_id: Set(delta.after_profile_id),
-        comparator_id: Set(calculated.value().comparator.0.clone()),
+        comparator_id: Set(calculated.value().comparator.to_string()),
         comparator_version: Set(calculated.provenance().version.to_string()),
         kind: Set(kind_name(&calculated.value().value)?),
         value_json: Set(value_json),
-        provenance_id: Set(calculated.id().0.clone()),
-        created_at: Set(calculated.provenance().timestamp.0.clone()),
+        provenance_id: Set(calculated.id().to_string()),
+        created_at: Set(calculated.provenance().timestamp.to_string()),
     })
 }
 
@@ -736,7 +743,7 @@ async fn revision_interpretation_ids(
     revision_id: &DerivedId,
 ) -> StoreResult<Vec<DerivedId>> {
     Ok(domain_revision_interpretations::Entity::find()
-        .filter(domain_revision_interpretations::Column::RevisionId.eq(&revision_id.0))
+        .filter(domain_revision_interpretations::Column::RevisionId.eq(revision_id.as_str()))
         .order_by_asc(domain_revision_interpretations::Column::Position)
         .all(db)
         .await?
@@ -853,9 +860,7 @@ async fn hydrate_ledger_provenance(
         result.push(
             crate::ProvenanceRepository::get_provenance(&repository, &id)
                 .await?
-                .ok_or_else(|| {
-                    invalid(format!("revision ledger provenance not found: {}", id.0))
-                })?,
+                .ok_or_else(|| invalid(format!("revision ledger provenance not found: {}", id)))?,
         );
     }
     Ok(result)
@@ -887,8 +892,8 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
             .await?
             .ok_or_else(|| invalid("revision baseline domain version not found"))?;
         let successor_key = crate::domain_repository::version_key(&snapshot.id, &snapshot.version);
-        if snapshot.id.0 != predecessor.domain_id
-            || snapshot.version.0.trim().is_empty()
+        if snapshot.id.as_str() != predecessor.domain_id
+            || snapshot.version.trim().is_empty()
             || value.to_version_id != successor_key
             || value.from_version_id == value.to_version_id
         {
@@ -921,7 +926,7 @@ impl DomainRevisionRepository for SeaOrmExperimentRepository {
         &self,
         id: &DerivedId,
     ) -> StoreResult<Option<DomainRevisionRecord>> {
-        let Some(row) = domain_revisions::Entity::find_by_id(&id.0)
+        let Some(row) = domain_revisions::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
         else {

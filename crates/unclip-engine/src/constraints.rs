@@ -73,7 +73,7 @@ pub fn assess_experiment_constraints(
     let mut selected = BTreeMap::new();
     for input in measurements {
         super::require_calculated_evidence(input, "constraint input measurement")?;
-        if input.id().0.trim().is_empty()
+        if input.id().trim().is_empty()
             || input.id() == &output
             || input.id() == application.id()
             || selected
@@ -83,7 +83,7 @@ pub fn assess_experiment_constraints(
             return Err(invalid("constraint measurements require unique nonempty identities distinct from application and output"));
         }
     }
-    if application.id().0.trim().is_empty() || application.id() == &output {
+    if application.id().trim().is_empty() || application.id() == &output {
         return Err(invalid(
             "application identity must be nonempty and distinct from constraint output",
         ));
@@ -142,9 +142,9 @@ pub fn assess_experiment_constraints(
                     || *minimum_samples < 2
                     || !minimum_information.is_finite()
                     || *minimum_information < 0.0
-                    || left.0.trim().is_empty()
-                    || right.0.trim().is_empty()
-                    || conditioning.0.trim().is_empty()
+                    || left.trim().is_empty()
+                    || right.trim().is_empty()
+                    || conditioning.trim().is_empty()
                     || left == right
                     || conditioning == left
                     || conditioning == right
@@ -154,7 +154,7 @@ pub fn assess_experiment_constraints(
                 let input = selected.get(measurement).ok_or_else(|| {
                     invalid("conditional requirement references an unselected measurement")
                 })?;
-                if input.sensor.0 != "sensor.conditional-mutual-information" {
+                if input.sensor.as_str() != "sensor.conditional-mutual-information" {
                     return Err(invalid(
                         "conditional dependency requires conditional mutual information evidence",
                     ));

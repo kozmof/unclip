@@ -21,10 +21,10 @@ impl<'a> CompareCtx<'a> {
             dependencies,
         }
     }
-    pub fn before(&self) -> &Measurement {
+    pub fn before(&self) -> &'a Measurement {
         self.dependencies.read(self.before)
     }
-    pub fn after(&self) -> &Measurement {
+    pub fn after(&self) -> &'a Measurement {
         self.dependencies.read(self.after)
     }
     pub fn params(&self) -> &serde_json::Value {

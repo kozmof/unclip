@@ -94,7 +94,7 @@ impl Sensor for PermutationSensor {
                             context: MeasurementContext {
                                 values: BTreeMap::from([(
                                     "observation".into(),
-                                    serde_json::json!(ranking.observation.0),
+                                    serde_json::json!(ranking.observation.as_str()),
                                 )]),
                             },
                         }
@@ -108,7 +108,7 @@ impl Sensor for PermutationSensor {
                         context: MeasurementContext {
                             values: BTreeMap::from([(
                                 "observation".into(),
-                                serde_json::json!(ranking.observation.0),
+                                serde_json::json!(ranking.observation.as_str()),
                             )]),
                         },
                     },

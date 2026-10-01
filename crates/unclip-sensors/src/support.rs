@@ -61,7 +61,7 @@ pub(crate) fn analyze(ctx: &MeasureCtx<'_>) -> SupportAnalysis {
             if !units.is_some_and(|units| units.contains_key(&unit.id)) {
                 analysis
                     .unsupported_units
-                    .push(format!("{}/{}", observation.id.0, unit.id.0));
+                    .push(format!("{}/{}", observation.id, unit.id));
             }
         }
 
@@ -82,7 +82,7 @@ pub(crate) fn analyze(ctx: &MeasureCtx<'_>) -> SupportAnalysis {
             if !explained {
                 analysis
                     .unexplained_relations
-                    .push(format!("{}/{}", observation.id.0, relation.id.0));
+                    .push(format!("{}/{}", observation.id, relation.id));
             }
         }
     }

@@ -98,7 +98,7 @@ pub(crate) fn validate(proposal: &CandidateProposal) -> Result<()> {
                     .uncertainty
                     .is_some_and(|v| !v.is_finite() || !(0.0..=1.0).contains(&v))
                 || edge.measurements.is_empty()
-                || edge.measurements.iter().any(|id| id.0.is_empty())
+                || edge.measurements.iter().any(|id| id.is_empty())
                 || edge.measurements.iter().collect::<BTreeSet<_>>().len()
                     != edge.measurements.len()
             {

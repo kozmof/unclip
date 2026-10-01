@@ -166,7 +166,7 @@ async fn lifecycle_and_replay_bundle_round_trip() {
         replay
             .sensor_runs
             .iter()
-            .map(|run| run.sensor.0.as_str())
+            .map(|run| run.sensor.as_str())
             .collect::<Vec<_>>(),
         vec!["sensor.a", "sensor.z"]
     );

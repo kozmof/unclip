@@ -23,6 +23,31 @@ pub enum StructuredIdentityComparison {
     },
 }
 
+/// The write side of [`StructuredIdentityComparison`], borrowing what it
+/// serializes.
+///
+/// This comparator is the one where the owning shape cost the most: its
+/// `Value` arm reports both measured values verbatim, and those are arbitrary
+/// structured trees, so building the payload deep-copied two of them per
+/// comparison only to serialize them once. The round-trip test below pins the
+/// two shapes together.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum StructuredIdentityComparisonRef<'a> {
+    Value {
+        identical: bool,
+        expected: &'a serde_json::Value,
+        observed: &'a serde_json::Value,
+    },
+    Unavailable {
+        expected: &'a Reading,
+        observed: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
+
 pub struct StructuredIdentityComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -64,10 +89,9 @@ impl Comparator for StructuredIdentityComparator {
         }
         let unsupported = |reading: &Reading| matches!(reading, Reading::Value { value } if !matches!(value, MeasurementValue::Structured(_)));
         let comparison = if unsupported(&expected.reading) || unsupported(&observed.reading) {
-            StructuredIdentityComparison::NotApplicable {
+            StructuredIdentityComparisonRef::NotApplicable {
                 reason:
-                    "requires explicitly structured values; no fields are inferred or scalarized"
-                        .into(),
+                    "requires explicitly structured values; no fields are inferred or scalarized",
             }
         } else if let (
             Reading::Value {
@@ -78,20 +102,72 @@ impl Comparator for StructuredIdentityComparator {
             },
         ) = (&expected.reading, &observed.reading)
         {
-            StructuredIdentityComparison::Value {
+            StructuredIdentityComparisonRef::Value {
                 identical: expected == observed,
-                expected: expected.clone(),
-                observed: observed.clone(),
+                expected,
+                observed,
             }
         } else {
-            StructuredIdentityComparison::Unavailable {
-                expected: expected.reading.clone(),
-                observed: observed.reading.clone(),
+            StructuredIdentityComparisonRef::Unavailable {
+                expected: &expected.reading,
+                observed: &observed.reading,
             }
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(serde_json::to_value(comparison).map_err(invalid)?),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let tree = serde_json::json!({"a": [1, 2, {"b": "c"}]});
+        let other = serde_json::json!({"a": []});
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                StructuredIdentityComparisonRef::Value {
+                    identical: false,
+                    expected: &tree,
+                    observed: &other,
+                },
+                StructuredIdentityComparison::Value {
+                    identical: false,
+                    expected: tree.clone(),
+                    observed: other.clone(),
+                },
+            ),
+            (
+                StructuredIdentityComparisonRef::Unavailable {
+                    expected: &missing,
+                    observed: &missing,
+                },
+                StructuredIdentityComparison::Unavailable {
+                    expected: missing.clone(),
+                    observed: missing.clone(),
+                },
+            ),
+            (
+                StructuredIdentityComparisonRef::NotApplicable { reason: "why" },
+                StructuredIdentityComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: StructuredIdentityComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

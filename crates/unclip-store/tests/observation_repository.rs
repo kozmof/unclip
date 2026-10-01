@@ -90,7 +90,7 @@ fn observation() -> Observation {
 async fn observation_alignment_and_partial_ranking_round_trip() {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let provenance = DerivedId::new("derived");
-    add_provenance(&db, &provenance.0).await;
+    add_provenance(&db, provenance.as_str()).await;
     SeaOrmDomainRepository::new(db.clone())
         .insert_domain_version(domain())
         .await
@@ -181,7 +181,7 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
 async fn invalid_observation_is_rolled_back() {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let provenance = DerivedId::new("derived");
-    add_provenance(&db, &provenance.0).await;
+    add_provenance(&db, provenance.as_str()).await;
     let repo = SeaOrmObservationRepository::new(db);
     let mut invalid = observation();
     invalid.units[1].uncertainty = Some(2.0);

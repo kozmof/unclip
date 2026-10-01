@@ -200,7 +200,7 @@ mod tests {
             source: &SourceRef,
             params: &serde_json::Value,
         ) -> Result<serde_json::Value> {
-            assert_eq!(source.0, "notes/ranking.yaml");
+            assert_eq!(source.as_str(), "notes/ranking.yaml");
             assert_eq!(
                 params,
                 &serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"})

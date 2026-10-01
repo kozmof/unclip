@@ -277,7 +277,7 @@ mod tests {
             version: FrameVersion::new("2"),
             axes: Vec::new(),
         };
-        assert_eq!(domain.version.0, "7");
-        assert_eq!(frame.version.0, "2");
+        assert_eq!(domain.version.as_str(), "7");
+        assert_eq!(frame.version.as_str(), "2");
     }
 }

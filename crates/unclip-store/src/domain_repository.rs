@@ -55,11 +55,13 @@ impl SeaOrmDomainRepository {
 }
 
 pub(crate) fn version_key(domain_id: &DomainId, version: &DomainVersion) -> String {
-    serde_json::to_string(&(&domain_id.0, &version.0)).expect("serializing two strings cannot fail")
+    serde_json::to_string(&(domain_id.as_str(), version.as_str()))
+        .expect("serializing two strings cannot fail")
 }
 
 fn frame_version_key(frame_id: &FrameId, version: &FrameVersion) -> String {
-    serde_json::to_string(&(&frame_id.0, &version.0)).expect("serializing two strings cannot fail")
+    serde_json::to_string(&(frame_id.as_str(), version.as_str()))
+        .expect("serializing two strings cannot fail")
 }
 
 fn unit_kind_name(kind: UnitKind) -> &'static str {
@@ -187,13 +189,13 @@ pub(crate) async fn insert_snapshot(
         return Err(StoreError::AlreadyExists { path: key });
     }
 
-    if domains::Entity::find_by_id(&snapshot.id.0)
+    if domains::Entity::find_by_id(snapshot.id.as_str())
         .one(txn)
         .await?
         .is_none()
     {
         domains::Entity::insert(domains::ActiveModel {
-            id: Set(snapshot.id.0.clone()),
+            id: Set(snapshot.id.to_string()),
             label: Set(None),
             created_at: Set(now()),
         })
@@ -203,8 +205,8 @@ pub(crate) async fn insert_snapshot(
 
     domain_versions::Entity::insert(domain_versions::ActiveModel {
         id: Set(key.clone()),
-        domain_id: Set(snapshot.id.0),
-        version: Set(snapshot.version.0),
+        domain_id: Set(snapshot.id.to_string()),
+        version: Set(snapshot.version.to_string()),
         predecessor_id: Set(predecessor_id),
         created_at: Set(now()),
     })
@@ -212,10 +214,10 @@ pub(crate) async fn insert_snapshot(
     .await?;
 
     for (_, unit) in snapshot.units {
-        let unit_id = unit.id.0;
+        let unit_id = unit.id.as_str();
         units::Entity::insert(units::ActiveModel {
             domain_version_id: Set(key.clone()),
-            id: Set(unit_id.clone()),
+            id: Set(unit_id.to_owned()),
             kind: Set(unit_kind_name(unit.kind).into()),
             label: Set(unit.label),
         })
@@ -225,7 +227,7 @@ pub(crate) async fn insert_snapshot(
             let value = property_columns(value)?;
             unit_properties::Entity::insert(unit_properties::ActiveModel {
                 domain_version_id: Set(key.clone()),
-                unit_id: Set(unit_id.clone()),
+                unit_id: Set(unit_id.to_owned()),
                 name: Set(name),
                 value_kind: Set(value.value_kind),
                 boolean_value: Set(value.boolean_value),
@@ -240,12 +242,12 @@ pub(crate) async fn insert_snapshot(
     }
 
     for (_, relation) in snapshot.relations {
-        let relation_id = relation.id.0;
+        let relation_id = relation.id.as_str();
         relations::Entity::insert(relations::ActiveModel {
             domain_version_id: Set(key.clone()),
-            id: Set(relation_id.clone()),
-            source_unit_id: Set(relation.source.0),
-            target_unit_id: Set(relation.target.0),
+            id: Set(relation_id.to_owned()),
+            source_unit_id: Set(relation.source.to_string()),
+            target_unit_id: Set(relation.target.to_string()),
             kind: Set(relation.kind),
         })
         .exec(txn)
@@ -254,7 +256,7 @@ pub(crate) async fn insert_snapshot(
             let value = property_columns(value)?;
             relation_properties::Entity::insert(relation_properties::ActiveModel {
                 domain_version_id: Set(key.clone()),
-                relation_id: Set(relation_id.clone()),
+                relation_id: Set(relation_id.to_owned()),
                 name: Set(name),
                 value_kind: Set(value.value_kind),
                 boolean_value: Set(value.boolean_value),
@@ -286,25 +288,27 @@ impl DomainWriter for SeaOrmDomainRepository {
     ) -> StoreResult<()> {
         let txn = self.db.begin().await?;
         let stored_domain_version = domain_versions::Entity::find()
-            .filter(domain_versions::Column::DomainId.eq(&domain_id.0))
-            .filter(domain_versions::Column::Version.eq(&domain_version.0))
+            .filter(domain_versions::Column::DomainId.eq(domain_id.as_str()))
+            .filter(domain_versions::Column::Version.eq(domain_version.as_str()))
             .one(&txn)
             .await?
             .ok_or_else(|| StoreError::NotFound {
-                path: format!("domain {} version {}", domain_id.0, domain_version.0),
+                path: format!("domain {} version {}", domain_id, domain_version),
             })?;
 
-        if let Some(stored_frame) = measurement_frames::Entity::find_by_id(&frame.id.0)
+        if let Some(stored_frame) = measurement_frames::Entity::find_by_id(frame.id.as_str())
             .one(&txn)
             .await?
         {
-            if stored_frame.domain_id != domain_id.0 {
-                return Err(StoreError::Conflict { path: frame.id.0 });
+            if stored_frame.domain_id != domain_id.as_str() {
+                return Err(StoreError::Conflict {
+                    path: frame.id.to_string(),
+                });
             }
         } else {
             measurement_frames::Entity::insert(measurement_frames::ActiveModel {
-                id: Set(frame.id.0.clone()),
-                domain_id: Set(domain_id.0.clone()),
+                id: Set(frame.id.to_string()),
+                domain_id: Set(domain_id.to_string()),
                 label: Set(None),
                 created_at: Set(now()),
             })
@@ -322,8 +326,8 @@ impl DomainWriter for SeaOrmDomainRepository {
         }
         frame_versions::Entity::insert(frame_versions::ActiveModel {
             id: Set(key.clone()),
-            frame_id: Set(frame.id.0),
-            version: Set(frame.version.0),
+            frame_id: Set(frame.id.to_string()),
+            version: Set(frame.version.to_string()),
             domain_version_id: Set(stored_domain_version.id.clone()),
             predecessor_id: Set(None),
             created_at: Set(now()),
@@ -339,7 +343,7 @@ impl DomainWriter for SeaOrmDomainRepository {
                 frame_version_id: Set(key.clone()),
                 domain_version_id: Set(stored_domain_version.id.clone()),
                 position: Set(position),
-                unit_id: Set(axis.unit.0),
+                unit_id: Set(axis.unit.to_string()),
                 label: Set(axis.label),
             })
             .exec(&txn)
@@ -358,8 +362,8 @@ impl DomainReader for SeaOrmDomainRepository {
         version: &DomainVersion,
     ) -> StoreResult<Option<DomainSnapshot>> {
         let Some(stored_version) = domain_versions::Entity::find()
-            .filter(domain_versions::Column::DomainId.eq(&domain_id.0))
-            .filter(domain_versions::Column::Version.eq(&version.0))
+            .filter(domain_versions::Column::DomainId.eq(domain_id.as_str()))
+            .filter(domain_versions::Column::Version.eq(version.as_str()))
             .one(&self.db)
             .await?
         else {
@@ -406,7 +410,9 @@ impl DomainReader for SeaOrmDomainRepository {
             hydrated_units.insert(
                 id.clone(),
                 Unit {
-                    properties: unit_properties_by_id.remove(&id.0).unwrap_or_default(),
+                    properties: unit_properties_by_id
+                        .remove(id.as_str())
+                        .unwrap_or_default(),
                     id,
                     kind: parse_unit_kind(&row.kind)?,
                     label: row.label,
@@ -437,7 +443,9 @@ impl DomainReader for SeaOrmDomainRepository {
             hydrated_relations.insert(
                 id.clone(),
                 Relation {
-                    properties: relation_properties_by_id.remove(&id.0).unwrap_or_default(),
+                    properties: relation_properties_by_id
+                        .remove(id.as_str())
+                        .unwrap_or_default(),
                     id,
                     source: UnitId::new(row.source_unit_id),
                     target: UnitId::new(row.target_unit_id),
@@ -459,8 +467,8 @@ impl DomainReader for SeaOrmDomainRepository {
         version: &FrameVersion,
     ) -> StoreResult<Option<MeasurementFrame>> {
         let Some(stored) = frame_versions::Entity::find()
-            .filter(frame_versions::Column::FrameId.eq(&frame_id.0))
-            .filter(frame_versions::Column::Version.eq(&version.0))
+            .filter(frame_versions::Column::FrameId.eq(frame_id.as_str()))
+            .filter(frame_versions::Column::Version.eq(version.as_str()))
             .one(&self.db)
             .await?
         else {

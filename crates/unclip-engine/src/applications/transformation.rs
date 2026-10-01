@@ -55,7 +55,7 @@ pub(crate) fn validate(
             .before
             .iter()
             .chain(&pattern.after)
-            .any(|unit| unit.0.trim().is_empty() || !domain.units.contains_key(unit))
+            .any(|unit| unit.trim().is_empty() || !domain.units.contains_key(unit))
         || pattern.before == pattern.after
     {
         return Err(invalid(
@@ -65,16 +65,13 @@ pub(crate) fn validate(
     if evidence.transitions.len() < 2
         || !ordered_unique(&evidence.transitions)
         || evidence.transitions.iter().any(|pair| {
-            pair.before.0.trim().is_empty()
-                || pair.after.0.trim().is_empty()
+            pair.before.trim().is_empty()
+                || pair.after.trim().is_empty()
                 || pair.before == pair.after
         })
         || evidence.measurements.is_empty()
         || !ordered_unique(&evidence.measurements)
-        || evidence
-            .measurements
-            .iter()
-            .any(|id| id.0.trim().is_empty())
+        || evidence.measurements.iter().any(|id| id.trim().is_empty())
     {
         return Err(invalid(
             "transformation evidence requires at least two ordered unique directed state pairs and ordered unique measurements",

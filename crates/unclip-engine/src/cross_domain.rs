@@ -78,8 +78,8 @@ pub(super) fn validate_frame(
     product: &ProductDomainSnapshot,
     frame: &ProductMeasurementFrame,
 ) -> Result<()> {
-    if frame.id.0.trim().is_empty()
-        || frame.version.0.trim().is_empty()
+    if frame.id.trim().is_empty()
+        || frame.version.trim().is_empty()
         || frame.product != product.id
         || frame.product_version != product.version
         || frame.left != product.left
@@ -96,8 +96,8 @@ pub(super) fn validate_frame(
         .collect::<BTreeSet<_>>();
     let mut axes = BTreeSet::new();
     for axis in &frame.axes {
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis
                 .label
                 .as_ref()
@@ -523,7 +523,7 @@ impl crate::Engine {
             target_frame.id(),
             target_movement.id(),
         ];
-        if input_ids.iter().any(|id| id.0.trim().is_empty())
+        if input_ids.iter().any(|id| id.trim().is_empty())
             || input_ids.contains(&&output_id)
             || input_ids.iter().copied().collect::<BTreeSet<_>>().len() != input_ids.len()
         {

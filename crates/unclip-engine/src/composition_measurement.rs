@@ -64,14 +64,14 @@ pub struct CompositionMeasurementInputs<'a> {
 }
 
 fn validate_frame(domain: &DomainSnapshot, frame: &MeasurementFrame) -> Result<()> {
-    if frame.id.0.trim().is_empty() || frame.version.0.trim().is_empty() {
+    if frame.id.trim().is_empty() || frame.version.trim().is_empty() {
         return Err(invalid(
             "composition profiles require nonempty ordinary frame identities and versions",
         ));
     }
     let mut axes = BTreeSet::new();
     for axis in &frame.axes {
-        if axis.unit.0.trim().is_empty()
+        if axis.unit.trim().is_empty()
             || !domain.units.contains_key(&axis.unit)
             || axis
                 .label
@@ -90,8 +90,8 @@ fn validate_frame(domain: &DomainSnapshot, frame: &MeasurementFrame) -> Result<(
 fn validate_measurement_identity(measurement: &Calculated<Measurement>) -> Result<()> {
     let value = measurement.value();
     let provenance = measurement.provenance();
-    if measurement.id().0.trim().is_empty()
-        || value.sensor.0.trim().is_empty()
+    if measurement.id().trim().is_empty()
+        || value.sensor.trim().is_empty()
         || provenance.producer != value.sensor
         || provenance.version != value.sensor_version
         || provenance.algorithm.trim().is_empty()
@@ -285,7 +285,7 @@ pub fn measure_composition(
     ];
     if structural_ids
         .iter()
-        .any(|identity| identity.0.trim().is_empty() || *identity == &output_id)
+        .any(|identity| identity.trim().is_empty() || *identity == &output_id)
         || structural_ids.iter().collect::<BTreeSet<_>>().len() != structural_ids.len()
     {
         return Err(invalid(

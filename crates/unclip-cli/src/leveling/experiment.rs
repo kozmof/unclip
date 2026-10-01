@@ -391,8 +391,8 @@ pub(crate) async fn run(
     )?;
     let before_profile_id = format!("{}/before-profile", request.run_id);
     let after_profile_id = format!("{}/after-profile", request.run_id);
-    let domain_key = serde_json::to_string(&(&domain.id.0, &domain.version.0))?;
-    let frame_key = serde_json::to_string(&(&frame.id.0, &frame.version.0))?;
+    let domain_key = serde_json::to_string(&(domain.id.as_str(), domain.version.as_str()))?;
+    let frame_key = serde_json::to_string(&(frame.id.as_str(), frame.version.as_str()))?;
     let persistable = unclip_engine::persistable_experiment(
         &experiment,
         &split,

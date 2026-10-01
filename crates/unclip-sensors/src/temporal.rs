@@ -148,7 +148,7 @@ fn rank<'a>(ranks: &'a [RankTrajectory], unit: &UnitId) -> Result<&'a RankTrajec
     ranks.iter().find(|r| r.unit == *unit).ok_or_else(|| {
         invalid(format!(
             "selected unit {} is not in the measurement frame",
-            unit.0
+            unit.as_str()
         ))
     })
 }
@@ -212,7 +212,7 @@ impl Sensor for TemporalSensor {
             let (observation, state) = by_id.remove_entry(&entry.observation).ok_or_else(|| {
                 invalid(format!(
                     "sequence observation {} is not selected",
-                    entry.observation.0
+                    entry.observation.as_str()
                 ))
             })?;
             states.push((observation, state));

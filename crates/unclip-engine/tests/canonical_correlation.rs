@@ -198,7 +198,7 @@ fn engine_cca_binds_product_versions_and_tracks_every_input() {
     assert_eq!(result.value().sample_count, Some(7));
     assert_eq!(result.provenance().producer, result.value().sensor);
     assert_eq!(
-        result.provenance().algorithm,
+        result.provenance().algorithm.as_ref(),
         "regularized_canonical_correlation"
     );
     assert_eq!(result.provenance().params["product_version"], "2");

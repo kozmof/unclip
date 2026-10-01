@@ -65,7 +65,7 @@ pub fn compare_pareto(
     let mut selected = BTreeMap::new();
     for input in measurements {
         super::require_calculated_evidence(input, "Pareto input measurement")?;
-        if input.id().0.trim().is_empty()
+        if input.id().trim().is_empty()
             || input.id() == &output
             || selected
                 .insert(input.id(), dependencies.read(input))

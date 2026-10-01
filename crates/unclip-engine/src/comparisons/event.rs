@@ -34,6 +34,40 @@ pub enum EventComparison {
         reason: String,
     },
 }
+/// The write side of [`EventMatch`], borrowing the two aligned events.
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EventMatchRef<'a> {
+    before: &'a ChangePoint,
+    after: &'a ChangePoint,
+    shift_steps: i64,
+}
+/// The write side of [`EventComparison`], borrowing what it serializes.
+///
+/// Every event the alignment reports is already held by the parsed sequences,
+/// which outlive the payload, so matching no longer copies a change point into
+/// each of the three result lists. The `Unavailable` arm borrows its readings
+/// for the same reason the other comparators do. The round-trip test below
+/// pins this shape to the owning one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum EventComparisonRef<'a> {
+    Value {
+        sequence: &'a ObservationSequence,
+        max_shift_steps: usize,
+        matching: &'a str,
+        matched: Vec<EventMatchRef<'a>>,
+        removed: Vec<&'a ChangePoint>,
+        added: Vec<&'a ChangePoint>,
+    },
+    Unavailable {
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct ChangePointAlignmentComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -74,7 +108,7 @@ fn events(
     if sequence
         .observations()
         .iter()
-        .any(|o| o.observation.0.is_empty())
+        .any(|o| o.observation.is_empty())
     {
         return Err(invalid("empty sequence observation identity"));
     }
@@ -151,74 +185,156 @@ impl Comparator for ChangePointAlignmentComparator {
             ));
         }
         let unsupported = |r: &Reading| matches!(r,Reading::Value {value} if !matches!(value,MeasurementValue::Events(_)));
-        let result = if before.sensor.0 != "sensor.change-points"
+        let not_applicable = before.sensor.as_str() != "sensor.change-points"
             || unsupported(&before.reading)
-            || unsupported(&after.reading)
-        {
-            EventComparison::NotApplicable {
-                reason: "requires change-point sensor events; other event schemas are not inferred"
-                    .into(),
+            || unsupported(&after.reading);
+        let parse = |m: &Measurement| -> Result<Option<(ObservationSequence, Vec<ChangePoint>)>> {
+            if let Reading::Value {
+                value: MeasurementValue::Events(v),
+            } = &m.reading
+            {
+                Ok(Some(events(m, v)?))
+            } else {
+                Ok(None)
+            }
+        };
+        // The parsed sequences outlive the payload so it can borrow their events.
+        let parsed = if not_applicable {
+            (None, None)
+        } else {
+            (parse(before)?, parse(after)?)
+        };
+        let result = if not_applicable {
+            EventComparisonRef::NotApplicable {
+                reason: "requires change-point sensor events; other event schemas are not inferred",
+            }
+        } else if let (Some((sequence, a)), Some((_, b))) = (&parsed.0, &parsed.1) {
+            let (mut i, mut j) = (0, 0);
+            let mut matched = Vec::new();
+            let mut removed = Vec::new();
+            let mut added = Vec::new();
+            while i < a.len() && j < b.len() {
+                if a[i].index.abs_diff(b[j].index) <= params.max_shift_steps {
+                    let shift = i64::try_from(b[j].index).map_err(invalid)?
+                        - i64::try_from(a[i].index).map_err(invalid)?;
+                    matched.push(EventMatchRef {
+                        before: &a[i],
+                        after: &b[j],
+                        shift_steps: shift,
+                    });
+                    i += 1;
+                    j += 1;
+                } else if a[i].index < b[j].index {
+                    removed.push(&a[i]);
+                    i += 1;
+                } else {
+                    added.push(&b[j]);
+                    j += 1;
+                }
+            }
+            removed.extend(a[i..].iter());
+            added.extend(b[j..].iter());
+            EventComparisonRef::Value {
+                sequence,
+                max_shift_steps: params.max_shift_steps,
+                matching:
+                    "chronological earliest feasible one-to-one match; not minimum displacement",
+                matched,
+                removed,
+                added,
             }
         } else {
-            let parse =
-                |m: &Measurement| -> Result<Option<(ObservationSequence, Vec<ChangePoint>)>> {
-                    if let Reading::Value {
-                        value: MeasurementValue::Events(v),
-                    } = &m.reading
-                    {
-                        Ok(Some(events(m, v)?))
-                    } else {
-                        Ok(None)
-                    }
-                };
-            let a = parse(before)?;
-            let b = parse(after)?;
-            if let (Some((sequence, a)), Some((_, b))) = (a, b) {
-                let (mut i, mut j) = (0, 0);
-                let mut matched = Vec::new();
-                let mut removed = Vec::new();
-                let mut added = Vec::new();
-                while i < a.len() && j < b.len() {
-                    if a[i].index.abs_diff(b[j].index) <= params.max_shift_steps {
-                        let shift = i64::try_from(b[j].index).map_err(invalid)?
-                            - i64::try_from(a[i].index).map_err(invalid)?;
-                        matched.push(EventMatch {
-                            before: a[i].clone(),
-                            after: b[j].clone(),
-                            shift_steps: shift,
-                        });
-                        i += 1;
-                        j += 1;
-                    } else if a[i].index < b[j].index {
-                        removed.push(a[i].clone());
-                        i += 1;
-                    } else {
-                        added.push(b[j].clone());
-                        j += 1;
-                    }
-                }
-                removed.extend_from_slice(&a[i..]);
-                added.extend_from_slice(&b[j..]);
-                EventComparison::Value {
-                    sequence,
-                    max_shift_steps: params.max_shift_steps,
-                    matching:
-                        "chronological earliest feasible one-to-one match; not minimum displacement"
-                            .into(),
-                    matched,
-                    removed,
-                    added,
-                }
-            } else {
-                EventComparison::Unavailable {
-                    before: before.reading.clone(),
-                    after: after.reading.clone(),
-                }
+            EventComparisonRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(serde_json::to_value(result).map_err(invalid)?),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use unclip_measure::OrderedObservation;
+
+    /// `EventComparisonRef` is what the comparator writes and
+    /// `EventComparison` is what consumers read. They are one wire format, so
+    /// this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let sequence = ObservationSequence::new(vec![OrderedObservation {
+            observation: unclip_observe::ObservationId::new("first"),
+            position: 0,
+        }])
+        .expect("a single-entry sequence is valid");
+        let event = ChangePoint {
+            observation: unclip_observe::ObservationId::new("first"),
+            index: 0,
+            before_mean: 0.0,
+            after_mean: 1.0,
+            sample_count: 2,
+        };
+        let scalar = Reading::Value {
+            value: MeasurementValue::Scalar(1.0),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                EventComparisonRef::Value {
+                    sequence: &sequence,
+                    max_shift_steps: 1,
+                    matching: "how",
+                    matched: vec![EventMatchRef {
+                        before: &event,
+                        after: &event,
+                        shift_steps: 0,
+                    }],
+                    removed: vec![&event],
+                    added: Vec::new(),
+                },
+                EventComparison::Value {
+                    sequence: sequence.clone(),
+                    max_shift_steps: 1,
+                    matching: "how".to_owned(),
+                    matched: vec![EventMatch {
+                        before: event.clone(),
+                        after: event.clone(),
+                        shift_steps: 0,
+                    }],
+                    removed: vec![event.clone()],
+                    added: Vec::new(),
+                },
+            ),
+            (
+                EventComparisonRef::Unavailable {
+                    before: &scalar,
+                    after: &missing,
+                },
+                EventComparison::Unavailable {
+                    before: scalar.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                EventComparisonRef::NotApplicable { reason: "why" },
+                EventComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: EventComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

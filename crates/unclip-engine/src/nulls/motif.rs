@@ -53,7 +53,8 @@ impl NullModel for ExistingMotifNull {
             return Ok(token.emit(Reading::InsufficientEvidence { have: 0, need: 1 }));
         };
         crate::nulls::domain::validate(domain)?;
-        let key = serde_json::to_string(&(&domain.id.0, &domain.version.0)).map_err(invalid)?;
+        let key = serde_json::to_string(&(domain.id.as_str(), domain.version.as_str()))
+            .map_err(invalid)?;
         if candidate.domain_version_id != key {
             return Err(invalid(
                 "motif null baseline differs from candidate domain version",

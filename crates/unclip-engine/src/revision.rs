@@ -134,7 +134,7 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
     if let Some(blank) = evidence
         .observations
         .iter()
-        .position(|observation| observation.0.trim().is_empty())
+        .position(|observation| observation.trim().is_empty())
     {
         return Err(invalid(format!(
             "Delta V supporting observation at index {blank} has an empty ID"
@@ -148,8 +148,8 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
         return Err(invalid(format!(
             "Delta V supporting observations must be strictly ordered and distinct; \
              `{}` at index {unordered} is not before `{}`",
-            evidence.observations[unordered].0,
-            evidence.observations[unordered + 1].0
+            evidence.observations[unordered].as_str(),
+            evidence.observations[unordered + 1].as_str()
         )));
     }
     if evidence.examples.len() < evidence.observation_count {
@@ -167,13 +167,14 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
         let example_invalid = |reason: &str| {
             invalid(format!(
                 "Delta V residual example at index {index} ({}/{}) {reason}",
-                example.observation.0, example.unit.0
+                example.observation.as_str(),
+                example.unit.as_str()
             ))
         };
         if !selected.contains(&example.observation) {
             return Err(example_invalid("names an observation that is not selected"));
         }
-        if example.unit.0.trim().is_empty() {
+        if example.unit.trim().is_empty() {
             return Err(example_invalid("has an empty unit ID"));
         }
         if example.measurements.is_empty() {
@@ -182,7 +183,7 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
         if let Some(blank) = example
             .measurements
             .iter()
-            .position(|measurement| measurement.0.trim().is_empty())
+            .position(|measurement| measurement.trim().is_empty())
         {
             return Err(example_invalid(&format!(
                 "has an empty measurement ID at index {blank}"
@@ -205,7 +206,7 @@ fn validate_atomic_revision(proposal: &CandidateProposal) -> Result<&serde_json:
     if covered != selected {
         let missing = selected
             .difference(&covered)
-            .map(|observation| observation.0.as_str())
+            .map(|observation| observation.as_str())
             .collect::<Vec<_>>();
         return Err(invalid(format!(
             "Delta V residual examples must cover every supporting observation; \
@@ -247,9 +248,9 @@ fn validate_experiment<'a>(step: &str, test: &RevisionTest<'a>) -> Result<&'a Ca
             "{step} tests require a run identity and an explicit reason"
         )));
     }
-    if candidate.id().0.trim().is_empty()
-        || counterfactual.id().0.trim().is_empty()
-        || experiment.id().0.trim().is_empty()
+    if candidate.id().trim().is_empty()
+        || counterfactual.id().trim().is_empty()
+        || experiment.id().trim().is_empty()
     {
         return Err(invalid(format!(
             "{step} evidence identities must be nonempty"
@@ -291,7 +292,7 @@ fn validate_experiment<'a>(step: &str, test: &RevisionTest<'a>) -> Result<&'a Ca
     .chain(evidence.after.iter())
     .chain(evidence.null_results.iter().map(|result| &result.id))
     {
-        if required.0.trim().is_empty() || !experiment_inputs.contains(required) {
+        if required.trim().is_empty() || !experiment_inputs.contains(required) {
             return Err(invalid(format!(
                 "{step} experiment must track its baseline, frame, split, measurements, comparison, and null evidence"
             )));
@@ -306,7 +307,7 @@ fn validate_experiment<'a>(step: &str, test: &RevisionTest<'a>) -> Result<&'a Ca
         )));
     }
     for delta in &evidence.delta_profile.deltas {
-        if delta.id.0.trim().is_empty()
+        if delta.id.trim().is_empty()
             || !experiment_inputs.contains(&delta.id)
             || !evidence.before.contains(&delta.pair.before)
             || !evidence.after.contains(&delta.pair.after)
@@ -595,8 +596,9 @@ pub fn record_delta_e_test(
         .params
         .get("relation_bindings")
         .ok_or_else(|| invalid("Delta E requires explicit relation bindings"))?;
-    if bindings.get("source").and_then(serde_json::Value::as_str) != Some(&relation.source.0)
-        || bindings.get("target").and_then(serde_json::Value::as_str) != Some(&relation.target.0)
+    if bindings.get("source").and_then(serde_json::Value::as_str) != Some(relation.source.as_str())
+        || bindings.get("target").and_then(serde_json::Value::as_str)
+            != Some(relation.target.as_str())
     {
         return Err(invalid(
             "Delta E relation endpoints must match the explicit bindings",
@@ -885,7 +887,7 @@ pub fn record_delta_v_test(
         || unit.label.is_some()
         || unit.properties.get("candidate_id")
             != Some(&unclip_domain::PropertyValue::Text(
-                candidate.id().0.clone(),
+                candidate.id().to_string(),
             ))
         || unit
             .properties

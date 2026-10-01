@@ -37,7 +37,7 @@ impl super::Engine {
         let frame = dependencies.read(inputs.frame);
         let split = dependencies.read(inputs.split);
         let identities = [inputs.baseline.id(), inputs.frame.id(), inputs.split.id()];
-        if identities.iter().any(|id| id.0.trim().is_empty())
+        if identities.iter().any(|id| id.trim().is_empty())
             || identities.into_iter().collect::<BTreeSet<_>>().len() != 3
         {
             return Err(invalid(
@@ -55,8 +55,8 @@ impl super::Engine {
         }
         let mut members = BTreeSet::new();
         for entry in split.training.iter().chain(&split.held_out) {
-            if entry.value.id.0.trim().is_empty()
-                || entry.provenance.0.trim().is_empty()
+            if entry.value.id.trim().is_empty()
+                || entry.provenance.trim().is_empty()
                 || !members.insert(&entry.value.id)
             {
                 return Err(invalid(
@@ -72,7 +72,7 @@ impl super::Engine {
         let mut aligned = BTreeSet::new();
         for input in inputs.alignments {
             let value = dependencies.read(input);
-            if input.id().0.trim().is_empty()
+            if input.id().trim().is_empty()
                 || !held_out.contains(&value.observation)
                 || !aligned.insert(&value.observation)
             {
@@ -84,7 +84,7 @@ impl super::Engine {
         let mut ranked = BTreeSet::new();
         for input in inputs.rankings {
             let value = dependencies.read(input);
-            if input.id().0.trim().is_empty()
+            if input.id().trim().is_empty()
                 || !held_out.contains(&value.observation)
                 || !ranked.insert(&value.observation)
             {
@@ -166,7 +166,8 @@ impl super::Engine {
         let baseline = dependencies.read(inputs.baseline.baseline);
         let snapshot = inputs.counterfactual.value();
         let baseline_key =
-            serde_json::to_string(&(&baseline.id.0, &baseline.version.0)).map_err(invalid)?;
+            serde_json::to_string(&(baseline.id.as_str(), baseline.version.as_str()))
+                .map_err(invalid)?;
         if snapshot.baseline_domain_version_id != baseline_key
             || snapshot.domain.id != baseline.id
             || snapshot.domain.version == baseline.version

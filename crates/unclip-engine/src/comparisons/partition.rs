@@ -27,6 +27,34 @@ pub enum PartitionComparison {
         reason: String,
     },
 }
+/// The write side of [`PartitionComparison`], borrowing what it serializes.
+///
+/// The `Value` arm already owns the canonicalized partitions it reports, so it
+/// keeps them; the arms that report whole readings borrow, because they are
+/// reached when a reading is not a partition and can therefore carry a matrix
+/// or a graph. The round-trip test below pins this shape to the owning one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum PartitionComparisonRef<'a> {
+    Value {
+        rand_similarity: f64,
+        pairs: usize,
+        together_in_both: usize,
+        separate_in_both: usize,
+        split_pairs: usize,
+        merged_pairs: usize,
+        before: Vec<Vec<String>>,
+        after: Vec<Vec<String>>,
+    },
+    Unavailable {
+        reason: &'a str,
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct PartitionRandComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -103,8 +131,8 @@ impl Comparator for PartitionRandComparator {
         }
         let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::Partition(_)));
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            PartitionComparison::NotApplicable {
-                reason: "requires explicit partitions; no membership is inferred".into(),
+            PartitionComparisonRef::NotApplicable {
+                reason: "requires explicit partitions; no membership is inferred",
             }
         } else if let (Some(a), Some(b)) = (parsed[0].take(), parsed[1].take()) {
             let left = membership(&a);
@@ -115,10 +143,10 @@ impl Comparator for PartitionRandComparator {
                 ));
             }
             if left.len() < 2 {
-                PartitionComparison::Unavailable {
-                    reason: "partition pair comparison requires at least two members".into(),
-                    before: before.reading.clone(),
-                    after: after.reading.clone(),
+                PartitionComparisonRef::Unavailable {
+                    reason: "partition pair comparison requires at least two members",
+                    before: &before.reading,
+                    after: &after.reading,
                 }
             } else {
                 let pairs = left
@@ -141,8 +169,9 @@ impl Comparator for PartitionRandComparator {
                         }
                     }
                 }
-                PartitionComparison::Value {
-                    rand_similarity: (together + separate) as f64 / pairs as f64,
+                let rand_similarity = (together + separate) as f64 / pairs as f64;
+                PartitionComparisonRef::Value {
+                    rand_similarity,
                     pairs,
                     together_in_both: together,
                     separate_in_both: separate,
@@ -153,10 +182,10 @@ impl Comparator for PartitionRandComparator {
                 }
             }
         } else {
-            PartitionComparison::Unavailable {
-                reason: "both partition readings must be measured".into(),
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            PartitionComparisonRef::Unavailable {
+                reason: "both partition readings must be measured",
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
@@ -165,5 +194,74 @@ impl Comparator for PartitionRandComparator {
                 serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
             ),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PartitionComparisonRef` is what the comparator writes and
+    /// `PartitionComparison` is what consumers read. They are one wire format,
+    /// so this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let graph = Reading::Value {
+            value: MeasurementValue::Graph(serde_json::json!({"nodes": []})),
+        };
+        let missing = Reading::NotMeasured;
+        let groups = vec![vec!["a".to_owned()], vec!["b".to_owned()]];
+        let cases = [
+            (
+                PartitionComparisonRef::Value {
+                    rand_similarity: 0.5,
+                    pairs: 2,
+                    together_in_both: 1,
+                    separate_in_both: 0,
+                    split_pairs: 1,
+                    merged_pairs: 0,
+                    before: groups.clone(),
+                    after: groups.clone(),
+                },
+                PartitionComparison::Value {
+                    rand_similarity: 0.5,
+                    pairs: 2,
+                    together_in_both: 1,
+                    separate_in_both: 0,
+                    split_pairs: 1,
+                    merged_pairs: 0,
+                    before: groups.clone(),
+                    after: groups,
+                },
+            ),
+            (
+                PartitionComparisonRef::Unavailable {
+                    reason: "why",
+                    before: &graph,
+                    after: &missing,
+                },
+                PartitionComparison::Unavailable {
+                    reason: "why".to_owned(),
+                    before: graph.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                PartitionComparisonRef::NotApplicable { reason: "why" },
+                PartitionComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: PartitionComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

@@ -56,7 +56,7 @@ pub(crate) fn residual_relations<'a>(
                 .get(&relation.target)
                 .ok_or_else(|| invalid("observed relation target is missing"))?;
             let key = (source.as_str(), relation.kind.as_str(), target.as_str());
-            let qualified = format!("{}/{}", observation.id.0, relation.id.0);
+            let qualified = format!("{}/{}", observation.id, relation.id);
             if relations
                 .insert(qualified, (&observation.id, relation, key))
                 .is_some()

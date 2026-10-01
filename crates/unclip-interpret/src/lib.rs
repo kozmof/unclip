@@ -29,7 +29,7 @@ mod tests {
         register_all(&mut registry).unwrap();
         let ids = registry
             .interpreters()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["interpret.llm-label"]);
         let _: serde_json::Value = serde_json::from_str(

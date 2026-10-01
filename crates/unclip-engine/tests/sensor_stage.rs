@@ -64,7 +64,7 @@ impl Sensor for StageSensor {
         self.calls
             .lock()
             .unwrap()
-            .push(self.descriptor.id.0.clone());
+            .push(self.descriptor.id.to_string());
         Ok(vec![token.emit(Measurement {
             sensor: self.descriptor.id.clone(),
             sensor_version: self.descriptor.version.clone(),
@@ -160,7 +160,7 @@ fn run_ordered_pair(explanation_stage: SensorStage) -> Vec<String> {
                 rankings: &[],
             },
             MeasurementRun {
-                id: &run_metadata().id.0,
+                id: run_metadata().id.as_str(),
                 timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
                 params: &params,
             },
@@ -211,35 +211,35 @@ fn every_builtin_plugin_declares_a_usable_params_schema() {
     let mut schemas: Vec<(String, &'static str)> = Vec::new();
     for plugin in registry.sensors() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.product_sensors() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.cross_product_sensors() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.inferrers() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.comparators() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.interpreters() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.candidate_generators() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for plugin in registry.null_models() {
         let d = plugin.descriptor();
-        schemas.push((d.id.0.clone(), d.params_schema));
+        schemas.push((d.id.to_string(), d.params_schema));
     }
     for (id, schema) in schemas {
         unclip_plugin::check_schema(schema)

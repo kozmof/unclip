@@ -28,14 +28,14 @@ pub fn validate_candidate_ancestry(
     split: &ObservationSplit,
     held_out_inference_products: &[DerivedId],
 ) -> Result<()> {
-    if candidate.0.trim().is_empty() || split.held_out.is_empty() {
+    if candidate.trim().is_empty() || split.held_out.is_empty() {
         return Err(invalid(
             "candidate leakage validation requires candidate and held-out identities",
         ));
     }
     let mut ancestry = BTreeSet::new();
     for id in candidate_ancestors {
-        if id.0.trim().is_empty() || id == candidate || !ancestry.insert(id) {
+        if id.trim().is_empty() || id == candidate || !ancestry.insert(id) {
             return Err(invalid(
                 "candidate ancestry requires unique nonempty acyclic identities",
             ));
@@ -47,7 +47,7 @@ pub fn validate_candidate_ancestry(
         .map(|entry| &entry.provenance)
         .collect::<BTreeSet<_>>();
     for id in held_out_inference_products {
-        if id.0.trim().is_empty() || id == candidate {
+        if id.trim().is_empty() || id == candidate {
             return Err(invalid(
                 "held-out inference products require nonempty identities distinct from the candidate",
             ));
@@ -56,7 +56,7 @@ pub fn validate_candidate_ancestry(
     }
     let leaked = ancestry
         .intersection(&held_out)
-        .map(|id| id.0.as_str())
+        .map(|id| id.as_str())
         .collect::<Vec<_>>();
     if leaked.is_empty() {
         Ok(())
@@ -87,14 +87,14 @@ pub fn select_observations(
     let dependencies = DependencyCollector::default();
     let mut available = BTreeMap::new();
     for input in observations {
-        if input.id().0.trim().is_empty() || input.id() == &output_id {
+        if input.id().trim().is_empty() || input.id() == &output_id {
             return Err(invalid(
                 "observation provenance must be nonempty and distinct from the output",
             ));
         }
         // Pool membership and duplicate detection are also actual reads.
         let value = dependencies.read(input);
-        if value.id.0.trim().is_empty() || available.insert(&value.id, input).is_some() {
+        if value.id.trim().is_empty() || available.insert(&value.id, input).is_some() {
             return Err(invalid(
                 "available observations require unique nonempty observation identities",
             ));
@@ -146,7 +146,7 @@ pub fn observation_split_run_record(
     run: super::MeasurementRun<'_>,
     metadata: serde_json::Value,
 ) -> Result<EngineRunRecord> {
-    if split.id().0 != format!("{}/observation-split", run.id) {
+    if split.id().as_str() != format!("{}/observation-split", run.id) {
         return Err(invalid("observation split belongs to a different run"));
     }
     Ok(run_record(

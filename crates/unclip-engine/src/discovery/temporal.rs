@@ -70,7 +70,7 @@ impl CandidateGenerator for TemporalCouplingGenerator {
         }
         let mut proposals = Vec::new();
         for (id, measurement) in measurements {
-            if measurement.sensor.0 != "sensor.lagged-dependency" {
+            if measurement.sensor.as_str() != "sensor.lagged-dependency" {
                 continue;
             }
             let Reading::Value { value } = &measurement.reading else {
@@ -87,13 +87,13 @@ impl CandidateGenerator for TemporalCouplingGenerator {
             let evidence: LagEvidence =
                 serde_json::from_value(serde_json::json!(measurement.context.values))
                     .map_err(invalid)?;
-            if evidence.source.0.is_empty()
-                || evidence.target.0.is_empty()
+            if evidence.source.is_empty()
+                || evidence.target.is_empty()
                 || evidence
                     .sequence
                     .observations()
                     .iter()
-                    .any(|entry| entry.observation.0.is_empty())
+                    .any(|entry| entry.observation.is_empty())
             {
                 return Err(invalid("temporal evidence identities must not be empty"));
             }

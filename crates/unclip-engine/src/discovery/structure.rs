@@ -107,7 +107,7 @@ pub(crate) fn validate_community(value: &CommunityDetection) -> Result<()> {
         }
         required_edges += group.len() - 1;
         for unit in group {
-            if unit.0.is_empty() || !units.insert(unit) {
+            if unit.is_empty() || !units.insert(unit) {
                 return Err(invalid("community partition has empty or repeated units"));
             }
         }
@@ -179,7 +179,7 @@ pub(crate) fn validate_spectral(value: &SpectralDecomposition) -> Result<()> {
     if n == 0
         || value.eigenpairs.len() != n
         || value.units.windows(2).any(|pair| pair[0] >= pair[1])
-        || value.units.iter().any(|unit| unit.0.is_empty())
+        || value.units.iter().any(|unit| unit.is_empty())
         || value.minimum_cell_samples < 2
         || !value.tolerance.is_finite()
         || value.tolerance <= 0.0

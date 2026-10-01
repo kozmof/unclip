@@ -1313,7 +1313,7 @@ pub struct PluginSelection {
 }
 
 impl PluginSelection {
-    pub fn any(id: impl Into<String>) -> Self {
+    pub fn any(id: impl Into<PluginId>) -> Self {
         Self {
             id: PluginId::new(id),
             version: VersionReq::STAR,

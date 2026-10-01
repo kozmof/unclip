@@ -32,6 +32,33 @@ pub enum DistributionComparison {
         reason: String,
     },
 }
+/// The write side of [`DistributionComparison`], borrowing what it serializes.
+///
+/// The payload exists only to become JSON. Borrowing saves a copy twice over:
+/// the category names are already borrowed out of both readings, so reporting
+/// them no longer allocates a `String` per category, and the `Unavailable`
+/// arms report whole readings that can be matrices or graphs.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum DistributionComparisonRef<'a> {
+    Value {
+        divergence_bits: f64,
+        normalization: DistributionNormalization,
+        categories: Vec<&'a str>,
+        before_probabilities: Vec<f64>,
+        after_probabilities: Vec<f64>,
+        before_total: f64,
+        after_total: f64,
+    },
+    Unavailable {
+        reason: &'a str,
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct JensenShannonComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -119,17 +146,16 @@ impl Comparator for JensenShannonComparator {
         }
         let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::Distribution(_)));
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            DistributionComparison::NotApplicable {
+            DistributionComparisonRef::NotApplicable {
                 reason:
-                    "requires named distributions; no ordering or transport geometry is inferred"
-                        .into(),
+                    "requires named distributions; no ordering or transport geometry is inferred",
             }
         } else if let (Some((a, a_total)), Some((b, b_total))) = (&parsed[0], &parsed[1]) {
             if *a_total == 0.0 || *b_total == 0.0 {
-                DistributionComparison::Unavailable {
-                    reason: "both distributions require positive total mass".into(),
-                    before: before.reading.clone(),
-                    after: after.reading.clone(),
+                DistributionComparisonRef::Unavailable {
+                    reason: "both distributions require positive total mass",
+                    before: &before.reading,
+                    after: &after.reading,
                 }
             } else {
                 if params.normalization == DistributionNormalization::Probability
@@ -161,10 +187,10 @@ impl Comparator for JensenShannonComparator {
                         "distribution divergence exceeds finite numeric range",
                     ));
                 }
-                DistributionComparison::Value {
+                DistributionComparisonRef::Value {
                     divergence_bits: divergence.clamp(0.0, 1.0),
                     normalization: params.normalization,
-                    categories: categories.into_iter().map(str::to_owned).collect(),
+                    categories: categories.into_iter().collect(),
                     before_probabilities: left,
                     after_probabilities: right,
                     before_total: *a_total,
@@ -172,10 +198,10 @@ impl Comparator for JensenShannonComparator {
                 }
             }
         } else {
-            DistributionComparison::Unavailable {
-                reason: "both distribution readings must be measured".into(),
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            DistributionComparisonRef::Unavailable {
+                reason: "both distribution readings must be measured",
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
@@ -184,5 +210,71 @@ impl Comparator for JensenShannonComparator {
                 serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
             ),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `DistributionComparisonRef` is what the comparator writes and
+    /// `DistributionComparison` is what consumers read. They are one wire
+    /// format, so this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let graph = Reading::Value {
+            value: MeasurementValue::Graph(serde_json::json!({"nodes": []})),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                DistributionComparisonRef::Value {
+                    divergence_bits: 0.25,
+                    normalization: DistributionNormalization::Probability,
+                    categories: vec!["a", "b"],
+                    before_probabilities: vec![0.5, 0.5],
+                    after_probabilities: vec![0.25, 0.75],
+                    before_total: 1.0,
+                    after_total: 1.0,
+                },
+                DistributionComparison::Value {
+                    divergence_bits: 0.25,
+                    normalization: DistributionNormalization::Probability,
+                    categories: vec!["a".to_owned(), "b".to_owned()],
+                    before_probabilities: vec![0.5, 0.5],
+                    after_probabilities: vec![0.25, 0.75],
+                    before_total: 1.0,
+                    after_total: 1.0,
+                },
+            ),
+            (
+                DistributionComparisonRef::Unavailable {
+                    reason: "why",
+                    before: &graph,
+                    after: &missing,
+                },
+                DistributionComparison::Unavailable {
+                    reason: "why".to_owned(),
+                    before: graph.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                DistributionComparisonRef::NotApplicable { reason: "why" },
+                DistributionComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: DistributionComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

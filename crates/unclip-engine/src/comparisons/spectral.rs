@@ -26,6 +26,30 @@ pub enum SpectralComparison {
         reason: String,
     },
 }
+/// The write side of [`SpectralComparison`], borrowing what it serializes.
+///
+/// The `Value` arm owns the two decompositions it just computed, so it keeps
+/// them; the arms that report whole readings borrow, because each is reached
+/// with the matrices still in hand and copying both to serialize them once was
+/// the expensive path. The round-trip test below pins the two shapes together.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum SpectralComparisonRef<'a> {
+    Value {
+        before: SpectralDecomposition,
+        after: SpectralDecomposition,
+        eigenvalue_differences: Vec<f64>,
+        matching: &'a str,
+    },
+    Unavailable {
+        reason: &'a str,
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct SpectrumComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -79,7 +103,7 @@ impl Comparator for SpectrumComparator {
         }
         let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::PairwiseMatrix(_)));
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            SpectralComparison::NotApplicable {reason:"requires labeled pairwise matrices; no spectral meaning is inferred for other values".into()}
+            SpectralComparisonRef::NotApplicable {reason:"requires labeled pairwise matrices; no spectral meaning is inferred for other values"}
         } else if let (
             Reading::Value {
                 value: MeasurementValue::PairwiseMatrix(a),
@@ -122,20 +146,88 @@ impl Comparator for SpectrumComparator {
                         }
                     })
                     .collect::<Result<Vec<_>>>()?;
-                SpectralComparison::Value {before:left,after:right,eigenvalue_differences:differences,matching:"descending signed eigenvalue order; not matched factors or loading distances".into()}
+                SpectralComparisonRef::Value {before:left,after:right,eigenvalue_differences:differences,matching:"descending signed eigenvalue order; not matched factors or loading distances"}
             } else {
-                SpectralComparison::Unavailable {reason:"both matrices must be nonempty and every cell must be measured at the sample floor".into(),before:before.reading.clone(),after:after.reading.clone()}
+                SpectralComparisonRef::Unavailable {reason:"both matrices must be nonempty and every cell must be measured at the sample floor",before:&before.reading,after:&after.reading}
             }
         } else {
-            SpectralComparison::Unavailable {
-                reason: "both matrix readings must be measured".into(),
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            SpectralComparisonRef::Unavailable {
+                reason: "both matrix readings must be measured",
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(serde_json::to_value(result).map_err(invalid)?),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `SpectralComparisonRef` is what the comparator writes and
+    /// `SpectralComparison` is what consumers read. They are one wire format,
+    /// so this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let decomposition = SpectralDecomposition {
+            metric: unclip_measure::PairwiseMetric::Spearman,
+            eigenpairs: Vec::new(),
+            minimum_cell_samples: 2,
+            units: Vec::new(),
+            sweeps: 0,
+            tolerance: 0.5,
+        };
+        let scalar = Reading::Value {
+            value: MeasurementValue::Scalar(1.0),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                SpectralComparisonRef::Value {
+                    before: decomposition.clone(),
+                    after: decomposition.clone(),
+                    eigenvalue_differences: Vec::new(),
+                    matching: "how",
+                },
+                SpectralComparison::Value {
+                    before: decomposition.clone(),
+                    after: decomposition,
+                    eigenvalue_differences: Vec::new(),
+                    matching: "how".to_owned(),
+                },
+            ),
+            (
+                SpectralComparisonRef::Unavailable {
+                    reason: "why",
+                    before: &scalar,
+                    after: &missing,
+                },
+                SpectralComparison::Unavailable {
+                    reason: "why".to_owned(),
+                    before: scalar.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                SpectralComparisonRef::NotApplicable { reason: "why" },
+                SpectralComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: SpectralComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

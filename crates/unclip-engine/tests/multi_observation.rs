@@ -99,8 +99,8 @@ fn fixture_document(json: serde_json::Value) -> Fixture {
             units: units
                 .iter()
                 .map(|unit| ObservedUnit {
-                    id: ObservedUnitId::new(&unit.0),
-                    label: unit.0.clone(),
+                    id: ObservedUnitId::new(unit.as_str()),
+                    label: unit.to_string(),
                     salience: None,
                     uncertainty: None,
                     context: BTreeMap::new(),
@@ -110,7 +110,7 @@ fn fixture_document(json: serde_json::Value) -> Fixture {
         let mut candidates = units
             .iter()
             .map(|unit| AlignmentCandidate {
-                observed: ObservedUnitId::new(&unit.0),
+                observed: ObservedUnitId::new(unit.as_str()),
                 domain: unit.clone(),
                 confidence: 0.8,
                 evidence: vec![],
@@ -183,7 +183,7 @@ impl Inputs {
                 .iter()
                 .map(|value| {
                     Tracked::from_recorded(
-                        DerivedId::new(format!("observation/{}", value.id.0)),
+                        DerivedId::new(format!("observation/{}", value.id)),
                         value.clone(),
                     )
                 })
@@ -193,7 +193,7 @@ impl Inputs {
                 .iter()
                 .map(|value| {
                     Tracked::from_recorded(
-                        DerivedId::new(format!("alignment/{}", value.observation.0)),
+                        DerivedId::new(format!("alignment/{}", value.observation)),
                         value.clone(),
                     )
                 })
@@ -203,7 +203,7 @@ impl Inputs {
                 .iter()
                 .map(|value| {
                     Tracked::from_recorded(
-                        DerivedId::new(format!("ranking/{}", value.observation.0)),
+                        DerivedId::new(format!("ranking/{}", value.observation)),
                         value.clone(),
                     )
                 })
@@ -252,7 +252,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
             let ctx = inputs.ctx(&fixture, &params);
             let values = sensor.measure(
                 &ctx,
-                ctx.calculation_token(metadata("test", &sensor.descriptor().id.0)),
+                ctx.calculation_token(metadata("test", sensor.descriptor().id.as_str())),
             )?;
             assert_eq!(values[0].provenance().inputs, expected);
             assert_eq!(
@@ -270,7 +270,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
         empty.alignments.clear();
         empty.rankings.clear();
         let empty_inputs = Inputs::new(&empty);
-        let need = if sensor.descriptor().id.0 == "sensor.trajectories" {
+        let need = if sensor.descriptor().id.as_str() == "sensor.trajectories" {
             1
         } else {
             2
@@ -311,7 +311,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
                     panic!("known pair expected")
                 };
                 assert_eq!(sample_count, 4);
-                match result.value().sensor.0.as_str() {
+                match result.value().sensor.as_str() {
                     "sensor.spearman" | "sensor.kendall-association" => assert!(value < 0.0),
                     "sensor.mutual-information" => assert!(value > 0.0),
                     "sensor.relative-rank-variance" => assert_eq!(value, 0.6875),
@@ -386,7 +386,7 @@ fn batch_sensors_reject_duplicate_or_unselected_inputs_and_unknown_parameters() 
                 sensor
                     .measure(
                         &ctx,
-                        ctx.calculation_token(metadata("invalid", &sensor.descriptor().id.0))
+                        ctx.calculation_token(metadata("invalid", sensor.descriptor().id.as_str()))
                     )
                     .is_err(),
                 "{case}"
@@ -447,7 +447,7 @@ async fn assert_persisted_batch(
         .chain(inputs.rankings.iter().map(|value| value.id()))
     {
         let inferred = InferenceToken::from_harness(
-            metadata(&id.0, "infer.fixture"),
+            metadata(id.as_str(), "infer.fixture"),
             DependencyCollector::default(),
         )
         .emit(());
@@ -464,7 +464,7 @@ async fn assert_persisted_batch(
         observations
             .insert_observation(
                 &value.clone(),
-                &DerivedId::new(format!("observation/{}", value.id.0)),
+                &DerivedId::new(format!("observation/{}", value.id)),
             )
             .await
             .unwrap();
@@ -472,11 +472,11 @@ async fn assert_persisted_batch(
     for value in &fixture.alignments {
         observations
             .insert_alignment(
-                &format!("alignment/{}", value.observation.0),
+                &format!("alignment/{}", value.observation),
                 &value.clone(),
                 &fixture.domain.id,
                 &fixture.domain.version,
-                &DerivedId::new(format!("alignment/{}", value.observation.0)),
+                &DerivedId::new(format!("alignment/{}", value.observation)),
             )
             .await
             .unwrap();
@@ -484,9 +484,9 @@ async fn assert_persisted_batch(
     for value in &fixture.rankings {
         observations
             .insert_ranking(
-                &format!("ranking/{}", value.observation.0),
+                &format!("ranking/{}", value.observation),
                 &value.clone(),
-                &DerivedId::new(format!("ranking/{}", value.observation.0)),
+                &DerivedId::new(format!("ranking/{}", value.observation)),
             )
             .await
             .unwrap();
@@ -514,7 +514,7 @@ async fn assert_persisted_batch(
             .unwrap();
         measurements
             .insert_sensor_run(SensorRunRecord {
-                id: result.id().0.clone(),
+                id: result.id().to_string(),
                 engine_run_id: "batch".into(),
                 sensor: result.value().sensor.clone(),
                 sensor_version: result.value().sensor_version.clone(),
@@ -538,8 +538,8 @@ async fn assert_persisted_batch(
             panic!("fixture should measure")
         };
         records.push(MeasurementRecord {
-            id: format!("{}/measurement", result.id().0),
-            sensor_run_id: result.id().0.clone(),
+            id: format!("{}/measurement", result.id()),
+            sensor_run_id: result.id().to_string(),
             provenance: result.id().clone(),
             kind: value.kind(),
             measurement: result.shared(),
@@ -599,7 +599,8 @@ async fn assert_persisted_batch(
             })
             .unwrap();
         let domain_key =
-            serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap();
+            serde_json::to_string(&(fixture.domain.id.as_str(), fixture.domain.version.as_str()))
+                .unwrap();
         let mut generated = 0;
         for (metric, threshold) in [
             ("spearman", -1.0),
@@ -701,7 +702,7 @@ async fn assert_persisted_batch(
                         .unwrap();
                     let inputs = [Tracked::from(&structure)];
                     let params = BTreeMap::from([(PluginId::new(generator), params)]);
-                    let id = format!("structure-candidates/{}", structure.id().0);
+                    let id = format!("structure-candidates/{}", structure.id());
                     let calculate = || {
                         generate_candidates(
                             &plan,
@@ -741,7 +742,7 @@ async fn assert_persisted_batch(
                         );
                     }
                     let stored = measurements
-                        .get_empirical_structure(&structure.id().0)
+                        .get_empirical_structure(structure.id().as_str())
                         .await
                         .unwrap()
                         .unwrap();
@@ -768,7 +769,7 @@ async fn assert_persisted_batch(
     }
     if results
         .iter()
-        .any(|result| result.value().sensor.0 == "sensor.lagged-dependency")
+        .any(|result| result.value().sensor.as_str() == "sensor.lagged-dependency")
     {
         let discovery_plan = engine
             .plan(&EngineProfile {
@@ -779,7 +780,8 @@ async fn assert_persisted_batch(
             })
             .unwrap();
         let domain_key =
-            serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap();
+            serde_json::to_string(&(fixture.domain.id.as_str(), fixture.domain.version.as_str()))
+                .unwrap();
         let candidate_params = BTreeMap::from([(
             PluginId::new("generate.temporal-coupling"),
             serde_json::json!({"threshold":0.5,"minimum_samples":2}),
@@ -919,7 +921,7 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
         conformance::assert_sensor(sensor.as_ref(), |plugin| {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
-            let mut meta = metadata("selected", &plugin.descriptor().id.0);
+            let mut meta = metadata("selected", plugin.descriptor().id.as_str());
             meta.params = std::sync::Arc::new(configured.clone());
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
@@ -932,7 +934,7 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
             else {
                 panic!("expected a measured scalar")
             };
-            let expected = match plugin.descriptor().id.0.as_str() {
+            let expected = match plugin.descriptor().id.as_str() {
                 "sensor.co-foreground" => 0.25,
                 "sensor.conditional-mutual-information" => 0.0,
                 "sensor.partial-correlation" => -1.0,
@@ -949,18 +951,18 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
         let results = sensor
             .measure(
                 &ctx,
-                ctx.calculation_token(metadata("sparse", &sensor.descriptor().id.0)),
+                ctx.calculation_token(metadata("sparse", sensor.descriptor().id.as_str())),
             )
             .unwrap();
         assert_eq!(results[0].value().sample_count, Some(3));
-        if sensor.descriptor().id.0 == "sensor.partial-correlation" {
+        if sensor.descriptor().id.as_str() == "sensor.partial-correlation" {
             assert_eq!(
                 results[0].value().reading,
                 Reading::InsufficientEvidence { have: 3, need: 4 }
             );
         }
         let empty_params = serde_json::json!({"left":"a","right":"b"});
-        if sensor.descriptor().id.0 != "sensor.co-foreground" {
+        if sensor.descriptor().id.as_str() != "sensor.co-foreground" {
             let ctx = inputs.ctx(&fixture, &empty_params);
             conformance::assert_planning(
                 sensor.as_ref(),
@@ -970,7 +972,10 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
             let result = sensor
                 .measure(
                     &ctx,
-                    ctx.calculation_token(metadata("missing-condition", &sensor.descriptor().id.0)),
+                    ctx.calculation_token(metadata(
+                        "missing-condition",
+                        sensor.descriptor().id.as_str(),
+                    )),
                 )
                 .unwrap();
             assert_eq!(result[0].value().sample_count, Some(0));
@@ -993,7 +998,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
                 "left" => config["left"] = serde_json::json!("absent"),
                 "same" => config["right"] = config["left"].clone(),
                 "extra" => config["unexpected"] = serde_json::json!(true),
-                _ if sensor.descriptor().id.0 == "sensor.co-foreground" => {
+                _ if sensor.descriptor().id.as_str() == "sensor.co-foreground" => {
                     config["foreground_rank"] = serde_json::json!(0)
                 }
                 _ => config["conditioning_variables"] = serde_json::json!(["c", "f1"]),
@@ -1002,7 +1007,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
             assert!(sensor
                 .measure(
                     &ctx,
-                    ctx.calculation_token(metadata("invalid", &sensor.descriptor().id.0))
+                    ctx.calculation_token(metadata("invalid", sensor.descriptor().id.as_str()))
                 )
                 .is_err());
         }
@@ -1026,7 +1031,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
         .unwrap();
     let partial = results
         .iter()
-        .find(|value| value.value().sensor.0 == "sensor.partial-correlation")
+        .find(|value| value.value().sensor.as_str() == "sensor.partial-correlation")
         .unwrap();
     assert_eq!(partial.value().sample_count, Some(4));
     assert_eq!(
@@ -1064,7 +1069,7 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
         .unwrap();
     let cmi = results
         .iter()
-        .find(|value| value.value().sensor.0 == "sensor.conditional-mutual-information")
+        .find(|value| value.value().sensor.as_str() == "sensor.conditional-mutual-information")
         .unwrap();
     assert_eq!(
         cmi.value().reading,
@@ -1091,7 +1096,7 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
     assert_eq!(
         results
             .iter()
-            .find(|value| value.value().sensor.0 == "sensor.co-foreground")
+            .find(|value| value.value().sensor.as_str() == "sensor.co-foreground")
             .unwrap()
             .value()
             .reading,
@@ -1159,14 +1164,14 @@ fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
         conformance::assert_sensor(sensor.as_ref(), |plugin| {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
-            let mut meta = metadata("temporal", &plugin.descriptor().id.0);
+            let mut meta = metadata("temporal", plugin.descriptor().id.as_str());
             meta.params = std::sync::Arc::new(configured.clone());
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
             assert_eq!(results[0].provenance().inputs.len(), 12);
             assert_eq!(*results[0].provenance().params, *configured);
             let value = results[0].value();
-            match plugin.descriptor().id.0.as_str() {
+            match plugin.descriptor().id.as_str() {
                 "sensor.lagged-dependency" => {
                     assert_eq!(
                         value.reading,
@@ -1234,7 +1239,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
     let mut fixture = temporal_fixture();
     fixture
         .rankings
-        .retain(|ranking| ranking.observation.0 != "t-1");
+        .retain(|ranking| ranking.observation.as_str() != "t-1");
     let results = engine
         .measure(
             &plan,
@@ -1247,7 +1252,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
         )
         .unwrap();
     for result in &results {
-        let expected = match result.value().sensor.0.as_str() {
+        let expected = match result.value().sensor.as_str() {
             "sensor.lagged-dependency" => Reading::InsufficientEvidence { have: 1, need: 2 },
             "sensor.dtw" => Reading::InsufficientEvidence { have: 3, need: 4 },
             _ => Reading::InsufficientEvidence { have: 2, need: 4 },
@@ -1274,7 +1279,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
     assert_eq!(
         results
             .iter()
-            .find(|r| r.value().sensor.0 == "sensor.dtw")
+            .find(|r| r.value().sensor.as_str() == "sensor.dtw")
             .unwrap()
             .value()
             .reading,
@@ -1285,7 +1290,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
     assert_eq!(
         results
             .iter()
-            .find(|r| r.value().sensor.0 == "sensor.change-points")
+            .find(|r| r.value().sensor.as_str() == "sensor.change-points")
             .unwrap()
             .value()
             .reading,
@@ -1312,7 +1317,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
         .unwrap();
     let lag = results
         .iter()
-        .find(|r| r.value().sensor.0 == "sensor.lagged-dependency")
+        .find(|r| r.value().sensor.as_str() == "sensor.lagged-dependency")
         .unwrap();
     assert_eq!(lag.value().sample_count, Some(3));
     assert_eq!(
@@ -1346,7 +1351,10 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
             sensor
                 .measure(
                     &ctx,
-                    ctx.calculation_token(metadata("missing-time", &sensor.descriptor().id.0))
+                    ctx.calculation_token(metadata(
+                        "missing-time",
+                        sensor.descriptor().id.as_str()
+                    ))
                 )
                 .unwrap()[0]
                 .value()
@@ -1373,13 +1381,13 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
                 "incomplete" => {
                     config["sequence"].as_array_mut().unwrap().pop();
                 }
-                "parameter" => match sensor.descriptor().id.0.as_str() {
+                "parameter" => match sensor.descriptor().id.as_str() {
                     "sensor.lagged-dependency" => config["lag"] = serde_json::json!(0),
                     "sensor.dtw" => config["left"] = serde_json::json!(17),
                     _ => config["minimum_shift"] = serde_json::json!(-1.0),
                 },
                 "unknown-unit" => {
-                    let key = match sensor.descriptor().id.0.as_str() {
+                    let key = match sensor.descriptor().id.as_str() {
                         "sensor.lagged-dependency" => "source",
                         "sensor.dtw" => "left",
                         _ => "unit",
@@ -1393,7 +1401,10 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
                 sensor
                     .measure(
                         &ctx,
-                        ctx.calculation_token(metadata("invalid-time", &sensor.descriptor().id.0))
+                        ctx.calculation_token(metadata(
+                            "invalid-time",
+                            sensor.descriptor().id.as_str()
+                        ))
                     )
                     .is_err(),
                 "{case}"
@@ -1554,7 +1565,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     .unwrap();
     let split = Tracked::from(&selected);
     let proposal = Tracked::from_recorded(DerivedId::new("candidate"), CandidateProposal {
-        domain_version_id: serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap(),
+        domain_version_id: serde_json::to_string(&(fixture.domain.id.as_str(), fixture.domain.version.as_str())).unwrap(),
         kind: CandidateKind::AtomicMeaning,
         value: serde_json::json!({"pattern":{"matching":"exact_observed_label","observed_label":"new"}}).as_object().unwrap().clone(),
     });
@@ -1704,12 +1715,12 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let before = result
         .before
         .iter()
-        .find(|v| v.value().sensor.0 == "sensor.spearman")
+        .find(|v| v.value().sensor.as_str() == "sensor.spearman")
         .unwrap();
     let after = result
         .after
         .iter()
-        .find(|v| v.value().sensor.0 == "sensor.spearman")
+        .find(|v| v.value().sensor.as_str() == "sensor.spearman")
         .unwrap();
     let pair = unclip_engine::ComparisonPair {
         before: before.id().clone(),

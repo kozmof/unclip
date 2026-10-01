@@ -8,7 +8,7 @@ pub(crate) async fn domain_import(
     file: &std::path::Path,
 ) -> anyhow::Result<()> {
     let snapshot = unclip_io::load_domain(file)?;
-    let selector = format!("{}@{}", snapshot.id.0, snapshot.version.0);
+    let selector = format!("{}@{}", snapshot.id, snapshot.version);
     let units = snapshot.units.len();
     let relations = snapshot.relations.len();
     repository.insert_domain_version(snapshot).await?;
@@ -47,7 +47,7 @@ pub(crate) async fn frame_import(
     file: &std::path::Path,
 ) -> anyhow::Result<()> {
     let document = unclip_io::load_measurement_frame(file)?;
-    let selector = format!("{}@{}", document.frame.id.0, document.frame.version.0);
+    let selector = format!("{}@{}", document.frame.id, document.frame.version);
     let axes = document.frame.axes.len();
     repository
         .insert_measurement_frame(

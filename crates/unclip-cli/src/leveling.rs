@@ -37,7 +37,7 @@ impl unclip_plugin::InferenceIo for FileInferenceIo {
         let path = params
             .get("file")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or(&source.0);
+            .unwrap_or(source.as_str());
         let text = unclip_io::read_text_file(std::path::Path::new(path), "inference input")
             .map_err(|error| unclip_plugin::PluginError::Message(error.to_string()))?;
         serde_norway::from_str(&text)
@@ -202,7 +202,7 @@ async fn persist_inference(
         };
         for observation in obs {
             observations.insert(
-                observation.id.0.clone(),
+                observation.id.to_string(),
                 (observation.clone(), provenance_id.clone()),
             );
         }
@@ -249,15 +249,15 @@ mod tests {
     #[test]
     fn domain_selector_requires_both_immutable_parts() {
         let (domain, version) = parse_domain_selector("coffee@7").unwrap();
-        assert_eq!(domain.0, "coffee");
-        assert_eq!(version.0, "7");
+        assert_eq!(domain.as_str(), "coffee");
+        assert_eq!(version.as_str(), "7");
         assert!(parse_domain_selector("coffee").is_err());
         assert!(parse_domain_selector("@7").is_err());
         assert!(parse_domain_selector("coffee@").is_err());
 
         let (frame, frame_version) = parse_frame_selector("coffee.general@2").unwrap();
-        assert_eq!(frame.0, "coffee.general");
-        assert_eq!(frame_version.0, "2");
+        assert_eq!(frame.as_str(), "coffee.general");
+        assert_eq!(frame_version.as_str(), "2");
         assert!(parse_frame_selector("coffee.general").is_err());
     }
 }
@@ -318,7 +318,7 @@ pub(crate) async fn candidates(
             .is_some(),
         "domain version not found: {domain}"
     );
-    let key = serde_json::to_string(&(&domain_id.0, &version.0))?;
+    let key = serde_json::to_string(&(domain_id.as_str(), version.as_str()))?;
     let after = after.map(unclip_epistemic::DerivedId::new);
     let records = repos
         .experiments

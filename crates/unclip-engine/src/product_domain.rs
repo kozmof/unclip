@@ -19,12 +19,12 @@ fn ordered_unique<T: Ord>(values: &[T]) -> bool {
 }
 
 pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Result<()> {
-    if product.id.0.trim().is_empty()
-        || product.version.0.trim().is_empty()
-        || product.left.domain.0.trim().is_empty()
-        || product.right.domain.0.trim().is_empty()
-        || product.left.version.0.trim().is_empty()
-        || product.right.version.0.trim().is_empty()
+    if product.id.trim().is_empty()
+        || product.version.trim().is_empty()
+        || product.left.domain.trim().is_empty()
+        || product.right.domain.trim().is_empty()
+        || product.left.version.trim().is_empty()
+        || product.right.version.trim().is_empty()
         || product.left.domain == product.right.domain
     {
         return Err(invalid(
@@ -41,8 +41,8 @@ pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Resu
             .chain(&interaction.requirements)
             .collect::<BTreeSet<_>>();
         let coordinate = (&interaction.left, &interaction.right);
-        if interaction.left.0.trim().is_empty()
-            || interaction.right.0.trim().is_empty()
+        if interaction.left.trim().is_empty()
+            || interaction.right.trim().is_empty()
             || interaction.observations.is_empty() && interaction.requirements.is_empty()
             || !ordered_unique(&interaction.observations)
             || !ordered_unique(&interaction.requirements)
@@ -51,7 +51,7 @@ pub(super) fn validate_product_snapshot(product: &ProductDomainSnapshot) -> Resu
                 .observations
                 .iter()
                 .chain(&interaction.requirements)
-                .any(|evidence| evidence.0.trim().is_empty())
+                .any(|evidence| evidence.trim().is_empty())
             || previous.as_ref().is_some_and(|prior| prior >= &coordinate)
         {
             return Err(invalid(
@@ -76,7 +76,7 @@ pub fn materialize_product_domain(
     run_id: &str,
     timestamp: Timestamp,
 ) -> Result<Calculated<ProductDomainSnapshot>> {
-    if run_id.trim().is_empty() || id.0.trim().is_empty() || version.0.trim().is_empty() {
+    if run_id.trim().is_empty() || id.trim().is_empty() || version.trim().is_empty() {
         return Err(invalid(
             "product-domain materialization requires nonempty product, version, and run identities",
         ));
@@ -93,14 +93,14 @@ pub fn materialize_product_domain(
     let right_domain = dependencies.read(right);
     crate::nulls::domain::validate(left_domain)?;
     crate::nulls::domain::validate(right_domain)?;
-    if left.id().0.trim().is_empty()
-        || right.id().0.trim().is_empty()
+    if left.id().trim().is_empty()
+        || right.id().trim().is_empty()
         || left.id() == right.id()
         || left_domain.id == right_domain.id
-        || left_domain.id.0.trim().is_empty()
-        || right_domain.id.0.trim().is_empty()
-        || left_domain.version.0.trim().is_empty()
-        || right_domain.version.0.trim().is_empty()
+        || left_domain.id.trim().is_empty()
+        || right_domain.id.trim().is_empty()
+        || left_domain.version.trim().is_empty()
+        || right_domain.version.trim().is_empty()
     {
         return Err(invalid(
             "product domains require two distinct immutable domain inputs",
@@ -111,7 +111,7 @@ pub fn materialize_product_domain(
     let mut pairs = BTreeSet::new();
     let mut evidence_ids = BTreeSet::new();
     for interaction in interactions {
-        if interaction.id().0.trim().is_empty()
+        if interaction.id().trim().is_empty()
             || interaction.id() == left.id()
             || interaction.id() == right.id()
             || interaction.id() == &output_id
@@ -128,8 +128,8 @@ pub fn materialize_product_domain(
             .iter()
             .chain(&interaction.requirements)
             .collect::<BTreeSet<_>>();
-        if interaction.left.0.trim().is_empty()
-            || interaction.right.0.trim().is_empty()
+        if interaction.left.trim().is_empty()
+            || interaction.right.trim().is_empty()
             || !left_domain.units.contains_key(&interaction.left)
             || !right_domain.units.contains_key(&interaction.right)
             || interaction.observations.is_empty() && interaction.requirements.is_empty()
@@ -139,7 +139,7 @@ pub fn materialize_product_domain(
                 .observations
                 .iter()
                 .chain(&interaction.requirements)
-                .any(|evidence| evidence.0.trim().is_empty())
+                .any(|evidence| evidence.trim().is_empty())
             || unique_support.len() != support_count
             || !pairs.insert((&interaction.left, &interaction.right))
         {
@@ -210,13 +210,13 @@ pub fn create_product_frame(
     run_id: &str,
     timestamp: Timestamp,
 ) -> Result<Calculated<ProductMeasurementFrame>> {
-    if run_id.trim().is_empty() || id.0.trim().is_empty() || version.0.trim().is_empty() {
+    if run_id.trim().is_empty() || id.trim().is_empty() || version.trim().is_empty() {
         return Err(invalid(
             "product frame requires nonempty frame, version, and run identities",
         ));
     }
     let output_id = DerivedId::new(format!("{run_id}/product-frame"));
-    if product.id().0.trim().is_empty() || product.id() == &output_id {
+    if product.id().trim().is_empty() || product.id() == &output_id {
         return Err(invalid(
             "product frame requires a distinct nonempty product input identity",
         ));
@@ -234,8 +234,8 @@ pub fn create_product_frame(
     let mut selected = BTreeSet::new();
     for axis in axes {
         let coordinate = (&axis.left, &axis.right);
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis
                 .label
                 .as_ref()

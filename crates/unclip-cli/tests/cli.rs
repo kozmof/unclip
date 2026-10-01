@@ -465,7 +465,10 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         .expect("observe run should be persisted");
     assert_eq!(replay.run.status, unclip_store::EngineRunStatus::Completed);
     assert_eq!(replay.observations.len(), 1);
-    assert_eq!(replay.observations[0].value.id.0, "manual-observation");
+    assert_eq!(
+        replay.observations[0].value.id.as_str(),
+        "manual-observation"
+    );
     assert_eq!(replay.provenance_ids.len(), 1);
 
     let explained = unclip(&path, &["level", "explain", "manual-observation"]);
@@ -698,7 +701,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         .unwrap()
         .expect("measurement profile should be persisted");
     assert_eq!(stored.measurements.len(), 1);
-    assert_eq!(stored.measurements[0].sensor.0, "sensor.coverage");
+    assert_eq!(stored.measurements[0].sensor.as_str(), "sensor.coverage");
 
     let training_evidence = unclip_epistemic::DerivedId::new("training-evidence");
     let root_params = serde_json::json!({"fixture":"training-only"});
@@ -785,14 +788,14 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
     unclip_store::CandidateRepository::insert_candidate(
         &experiments,
         None,
-        make_candidate(&candidate_id.0, training_evidence),
+        make_candidate(candidate_id.as_str(), training_evidence),
     )
     .await
     .unwrap();
     unclip_store::CandidateRepository::insert_candidate(
         &experiments,
         None,
-        make_candidate(&leaked_candidate_id.0, leaked_intermediate),
+        make_candidate(leaked_candidate_id.as_str(), leaked_intermediate),
     )
     .await
     .unwrap();
@@ -1168,7 +1171,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         &[
             "level",
             "apply",
-            &candidate_id.0,
+            candidate_id.as_str(),
             "--experiment",
             "experiment-cli/experiment/completed",
             "--target-domain",
@@ -1234,7 +1237,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         &[
             "level",
             "apply",
-            &candidate_id.0,
+            candidate_id.as_str(),
             "--experiment",
             "experiment-cli/experiment/completed",
             "--target-domain",
@@ -2214,7 +2217,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
         replay
             .observations
             .iter()
-            .map(|record| record.value.id.0.as_str())
+            .map(|record| record.value.id.as_str())
             .collect::<Vec<_>>(),
         vec!["obs-2", "obs-1"]
     );
@@ -2443,7 +2446,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
         &[
             "level",
             "interpret",
-            &candidate_id.0,
+            candidate_id.as_str(),
             "--structure",
             &unrelated_structure,
             "--profile",
@@ -2459,7 +2462,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
         &[
             "level",
             "interpret",
-            &candidate_id.0,
+            candidate_id.as_str(),
             "--structure",
             &community_structure,
             "--profile",

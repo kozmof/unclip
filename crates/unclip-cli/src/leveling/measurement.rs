@@ -151,14 +151,14 @@ pub(crate) async fn measure(
             .map(|sensor| sensor.descriptor())
             .find(|descriptor| descriptor.id == measurement.sensor)
             .ok_or_else(|| {
-                anyhow::anyhow!("resolved sensor disappeared: {}", measurement.sensor.0)
+                anyhow::anyhow!("resolved sensor disappeared: {}", measurement.sensor)
             })?;
         let kind = match &measurement.reading {
             unclip_measure::Reading::Value { value } => value.kind(),
             _ => *descriptor.produces.first().ok_or_else(|| {
                 anyhow::anyhow!(
                     "sensor declares no measurement kind: {}",
-                    measurement.sensor.0
+                    measurement.sensor.as_str()
                 )
             })?,
         };
@@ -179,7 +179,7 @@ pub(crate) async fn measure(
         unclip_store::MeasurementRepository::insert_sensor_run(
             &repositories.measurements,
             unclip_store::SensorRunRecord {
-                id: value.id().0.clone(),
+                id: value.id().to_string(),
                 engine_run_id: run_id.clone(),
                 sensor: measurement.sensor.clone(),
                 sensor_version: measurement.sensor_version.clone(),
@@ -192,8 +192,8 @@ pub(crate) async fn measure(
         )
         .await?;
         records.push(unclip_store::MeasurementRecord {
-            id: format!("{}/measurement", value.id().0),
-            sensor_run_id: value.id().0.clone(),
+            id: format!("{}/measurement", value.id()),
+            sensor_run_id: value.id().to_string(),
             provenance: value.id().clone(),
             kind,
             measurement: value.shared(),

@@ -291,15 +291,15 @@ fn engine_cross_product_transfer_preserves_signed_zero_versions_and_dependencies
     assert_eq!(transfer.transfers[0].absolute_change, 0.0);
     assert_eq!(transfer.transfers[1].directional_concordance_change, -2.0);
     assert_eq!(transfer.transfers[1].absolute_change, 2.0);
-    assert_eq!(transfer.source_binding.product_version.0, "2");
-    assert_eq!(transfer.target_binding.frame_version.0, "3");
+    assert_eq!(transfer.source_binding.product_version.as_str(), "2");
+    assert_eq!(transfer.target_binding.frame_version.as_str(), "3");
 
     assert_eq!(
         result.value().sensor,
         PluginId::new("sensor.cross-product-transfer")
     );
     assert_eq!(
-        result.provenance().algorithm,
+        result.provenance().algorithm.as_ref(),
         "mapped_cross_product_movement_transfer"
     );
     assert_eq!(result.provenance().params["minimum_transitions"], 2);

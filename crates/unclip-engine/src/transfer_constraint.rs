@@ -35,7 +35,7 @@ pub(super) fn assess(
         .map_err(|_| invalid("invalid transfer observation identities"))?;
         let count = ids.len();
         let set = ids.into_iter().collect::<BTreeSet<_>>();
-        if set.is_empty() || count != set.len() || set.iter().any(|id| id.0.trim().is_empty()) {
+        if set.is_empty() || count != set.len() || set.iter().any(|id| id.trim().is_empty()) {
             return Err(invalid(
                 "transfer observation identities must be nonempty and unique",
             ));

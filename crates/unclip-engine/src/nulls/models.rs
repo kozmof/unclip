@@ -108,7 +108,7 @@ impl NullModel for RandomCooccurrenceNull {
         for input in inputs {
             let observation = ctx.read(input);
             if !ids.insert(input.id())
-                || observation.id.0.is_empty()
+                || observation.id.is_empty()
                 || !observations.insert(&observation.id)
             {
                 return Err(invalid("duplicate or empty null observation identity"));

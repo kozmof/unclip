@@ -559,7 +559,7 @@ impl Engine {
         let mut seen = std::collections::BTreeSet::new();
         for structure in structures {
             require_calculated_evidence(structure, "interpretation source structure")?;
-            if structure.id().0.is_empty() {
+            if structure.id().is_empty() {
                 return Err(unclip_plugin::PluginError::Message(
                     "interpretation source structure ID must not be empty".into(),
                 ));
@@ -659,7 +659,7 @@ pub fn run_record(
             "null_models": null_models,
         }),
         status: unclip_record::EngineRunStatus::Planned,
-        started_at: started_at.0,
+        started_at: started_at.to_string(),
         completed_at: None,
         metadata,
     }
@@ -694,27 +694,27 @@ mod tests {
         let registry = builtin_registry().unwrap();
         let inferrers = registry
             .inferrers()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         let sensors = registry
             .sensors()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         let product_sensors = registry
             .product_sensors()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         let cross_product_sensors = registry
             .cross_product_sensors()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         let comparators = registry
             .comparators()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
         let interpreters = registry
             .interpreters()
-            .map(|plugin| plugin.descriptor().id.0.as_str())
+            .map(|plugin| plugin.descriptor().id.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -834,7 +834,7 @@ mod tests {
         assert_eq!(
             measurements
                 .iter()
-                .map(|measurement| measurement.value().sensor.0.as_str())
+                .map(|measurement| measurement.value().sensor.as_str())
                 .collect::<Vec<_>>(),
             vec![
                 "sensor.coverage",
@@ -1214,17 +1214,17 @@ mod tests {
             "explanation_sensors": results
                 .explanations
                 .iter()
-                .map(|value| value.value().sensor.0.clone())
+                .map(|value| value.value().sensor.to_string())
                 .collect::<Vec<_>>(),
             "residual_sensors": results
                 .residuals
                 .iter()
-                .map(|value| value.value().sensor.0.clone())
+                .map(|value| value.value().sensor.to_string())
                 .collect::<Vec<_>>(),
             "measurement_sensors": results
                 .measurements
                 .iter()
-                .map(|value| value.value().sensor.0.clone())
+                .map(|value| value.value().sensor.to_string())
                 .collect::<Vec<_>>(),
             "ranking_tiers": state.tiers,
             "ranking_unknown": state.unknown,
@@ -1279,7 +1279,7 @@ mod tests {
                 .inference
                 .outputs
                 .iter()
-                .map(|output| output.id().0.clone())
+                .map(|output| output.id().to_string())
                 .collect(),
             profile_ids: Vec::new(),
             observations: Vec::new(),

@@ -121,7 +121,7 @@ impl Sensor for RboSensor {
                         values: BTreeMap::from([
                             (
                                 "observation".into(),
-                                serde_json::json!(ranking.observation.0),
+                                serde_json::json!(ranking.observation.as_str()),
                             ),
                             ("p".into(), serde_json::json!(p)),
                         ]),

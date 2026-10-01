@@ -97,19 +97,19 @@ async fn insert_observation_rows(
     observation: &Observation,
     provenance: &DerivedId,
 ) -> StoreResult<()> {
-    if observations::Entity::find_by_id(&observation.id.0)
+    if observations::Entity::find_by_id(observation.id.as_str())
         .one(txn)
         .await?
         .is_some()
     {
         return Err(StoreError::AlreadyExists {
-            path: observation.id.0.clone(),
+            path: observation.id.to_string(),
         });
     }
     observations::Entity::insert(observations::ActiveModel {
-        id: Set(observation.id.0.clone()),
-        provenance_id: Set(provenance.0.clone()),
-        source: Set(observation.source.0.clone()),
+        id: Set(observation.id.to_string()),
+        provenance_id: Set(provenance.to_string()),
+        source: Set(observation.source.to_string()),
         observed_at: Set(observation.observed_at.clone()),
         context_json: Set(serde_json::to_string(&observation.context).map_err(anyhow::Error::from)?),
     })
@@ -122,13 +122,13 @@ async fn insert_observation_rows(
             return Err(invalid("unit salience must be finite"));
         }
         observed_units::Entity::insert(observed_units::ActiveModel {
-            observation_id: Set(observation.id.0.clone()),
-            id: Set(unit.id.0.clone()),
+            observation_id: Set(observation.id.to_string()),
+            id: Set(unit.id.to_string()),
             label: Set(unit.label.clone()),
             salience: Set(unit.salience),
             uncertainty: Set(unit.uncertainty),
             context_json: Set(serde_json::to_string(&unit.context).map_err(anyhow::Error::from)?),
-            provenance_id: Set(provenance.0.clone()),
+            provenance_id: Set(provenance.to_string()),
         })
         .exec(txn)
         .await?;
@@ -136,13 +136,13 @@ async fn insert_observation_rows(
     for relation in &observation.relations {
         validate_probability("relation uncertainty", relation.uncertainty)?;
         observed_relations::Entity::insert(observed_relations::ActiveModel {
-            observation_id: Set(observation.id.0.clone()),
-            id: Set(relation.id.0.clone()),
-            source_unit_id: Set(relation.source.0.clone()),
-            target_unit_id: Set(relation.target.0.clone()),
+            observation_id: Set(observation.id.to_string()),
+            id: Set(relation.id.to_string()),
+            source_unit_id: Set(relation.source.to_string()),
+            target_unit_id: Set(relation.target.to_string()),
             kind: Set(relation.kind.clone()),
             uncertainty: Set(relation.uncertainty),
-            provenance_id: Set(provenance.0.clone()),
+            provenance_id: Set(provenance.to_string()),
         })
         .exec(txn)
         .await?;
@@ -164,19 +164,19 @@ impl ObservationRepository for SeaOrmObservationRepository {
     }
 
     async fn get_observation(&self, id: &ObservationId) -> StoreResult<Option<Observation>> {
-        let Some(row) = observations::Entity::find_by_id(&id.0)
+        let Some(row) = observations::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
         else {
             return Ok(None);
         };
         let unit_rows = observed_units::Entity::find()
-            .filter(observed_units::Column::ObservationId.eq(&id.0))
+            .filter(observed_units::Column::ObservationId.eq(id.as_str()))
             .order_by_asc(observed_units::Column::Id)
             .all(&self.db)
             .await?;
         let relation_rows = observed_relations::Entity::find()
-            .filter(observed_relations::Column::ObservationId.eq(&id.0))
+            .filter(observed_relations::Column::ObservationId.eq(id.as_str()))
             .order_by_asc(observed_relations::Column::Id)
             .all(&self.db)
             .await?;
@@ -220,7 +220,7 @@ impl ObservationRepository for SeaOrmObservationRepository {
         &self,
         id: &ObservationId,
     ) -> StoreResult<Option<crate::RecordedInference<Observation>>> {
-        let Some(row) = observations::Entity::find_by_id(&id.0)
+        let Some(row) = observations::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
         else {
@@ -229,7 +229,9 @@ impl ObservationRepository for SeaOrmObservationRepository {
         let value = self
             .get_observation(id)
             .await?
-            .ok_or_else(|| StoreError::NotFound { path: id.0.clone() })?;
+            .ok_or_else(|| StoreError::NotFound {
+                path: id.to_string(),
+            })?;
         Ok(Some(crate::RecordedInference::new(
             DerivedId::new(row.provenance_id),
             value,
@@ -249,12 +251,12 @@ impl ObservationRepository for SeaOrmObservationRepository {
         }
         let txn = self.db.begin().await?;
         let domain_version_id = domain_versions::Entity::find()
-            .filter(domain_versions::Column::DomainId.eq(&domain_id.0))
-            .filter(domain_versions::Column::Version.eq(&domain_version.0))
+            .filter(domain_versions::Column::DomainId.eq(domain_id.as_str()))
+            .filter(domain_versions::Column::Version.eq(domain_version.as_str()))
             .one(&txn)
             .await?
             .ok_or_else(|| StoreError::NotFound {
-                path: format!("domain {} version {}", domain_id.0, domain_version.0),
+                path: format!("domain {} version {}", domain_id, domain_version),
             })?
             .id;
         if alignments::Entity::find_by_id(id)
@@ -266,8 +268,8 @@ impl ObservationRepository for SeaOrmObservationRepository {
         }
         alignments::Entity::insert(alignments::ActiveModel {
             id: Set(id.into()),
-            observation_id: Set(alignment.observation.0.clone()),
-            provenance_id: Set(provenance.0.clone()),
+            observation_id: Set(alignment.observation.to_string()),
+            provenance_id: Set(provenance.to_string()),
         })
         .exec(&txn)
         .await?;
@@ -276,16 +278,16 @@ impl ObservationRepository for SeaOrmObservationRepository {
             let position = i32::try_from(position).context("too many alignment candidates")?;
             alignment_candidates::Entity::insert(alignment_candidates::ActiveModel {
                 alignment_id: Set(id.into()),
-                observation_id: Set(alignment.observation.0.clone()),
-                observed_unit_id: Set(candidate.observed.0.clone()),
+                observation_id: Set(alignment.observation.to_string()),
+                observed_unit_id: Set(candidate.observed.to_string()),
                 domain_version_id: Set(domain_version_id.clone()),
-                domain_unit_id: Set(candidate.domain.0.clone()),
+                domain_unit_id: Set(candidate.domain.to_string()),
                 position: Set(position),
                 confidence: Set(candidate.confidence),
                 evidence_json: Set(
                     serde_json::to_string(&candidate.evidence).map_err(anyhow::Error::from)?
                 ),
-                provenance_id: Set(provenance.0.clone()),
+                provenance_id: Set(provenance.to_string()),
             })
             .exec(&txn)
             .await?;
@@ -325,7 +327,7 @@ impl ObservationRepository for SeaOrmObservationRepository {
         id: &ObservationId,
     ) -> StoreResult<Vec<crate::RecordedInference<Alignment>>> {
         let rows = alignments::Entity::find()
-            .filter(alignments::Column::ObservationId.eq(&id.0))
+            .filter(alignments::Column::ObservationId.eq(id.as_str()))
             .order_by_asc(alignments::Column::Id)
             .all(&self.db)
             .await?;
@@ -360,8 +362,8 @@ impl ObservationRepository for SeaOrmObservationRepository {
         }
         rankings::Entity::insert(rankings::ActiveModel {
             id: Set(id.into()),
-            observation_id: Set(ranking.observation.0.clone()),
-            provenance_id: Set(provenance.0.clone()),
+            observation_id: Set(ranking.observation.to_string()),
+            provenance_id: Set(provenance.to_string()),
         })
         .exec(&txn)
         .await?;
@@ -371,12 +373,12 @@ impl ObservationRepository for SeaOrmObservationRepository {
                 let position = i32::try_from(position).context("ranking tier is too large")?;
                 ranking_entries::Entity::insert(ranking_entries::ActiveModel {
                     ranking_id: Set(id.into()),
-                    observation_id: Set(ranking.observation.0.clone()),
-                    observed_unit_id: Set(unit.0.clone()),
+                    observation_id: Set(ranking.observation.to_string()),
+                    observed_unit_id: Set(unit.to_string()),
                     state: Set("ranked".into()),
                     tier: Set(tier),
                     position: Set(position),
-                    provenance_id: Set(provenance.0.clone()),
+                    provenance_id: Set(provenance.to_string()),
                 })
                 .exec(&txn)
                 .await?;
@@ -386,12 +388,12 @@ impl ObservationRepository for SeaOrmObservationRepository {
             let position = i32::try_from(position).context("ranking unknown tail is too large")?;
             ranking_entries::Entity::insert(ranking_entries::ActiveModel {
                 ranking_id: Set(id.into()),
-                observation_id: Set(ranking.observation.0.clone()),
-                observed_unit_id: Set(unit.0.clone()),
+                observation_id: Set(ranking.observation.to_string()),
+                observed_unit_id: Set(unit.to_string()),
                 state: Set("unknown".into()),
                 tier: Set(-1),
                 position: Set(position),
-                provenance_id: Set(provenance.0.clone()),
+                provenance_id: Set(provenance.to_string()),
             })
             .exec(&txn)
             .await?;
@@ -437,7 +439,7 @@ impl ObservationRepository for SeaOrmObservationRepository {
         id: &ObservationId,
     ) -> StoreResult<Vec<crate::RecordedInference<PartialRanking>>> {
         let rows = rankings::Entity::find()
-            .filter(rankings::Column::ObservationId.eq(&id.0))
+            .filter(rankings::Column::ObservationId.eq(id.as_str()))
             .order_by_asc(rankings::Column::Id)
             .all(&self.db)
             .await?;

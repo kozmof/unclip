@@ -96,6 +96,14 @@ fn write_canonical_json(value: &serde_json::Value, output: &mut String) {
 /// Declaring them through one macro keeps that contract identical in every
 /// crate rather than re-deriving it per module.
 ///
+/// The payload is an [`Arc<str>`](std::sync::Arc), so copying an identifier is
+/// a refcount bump rather than an allocation. Identifiers are copied once per
+/// sample, axis, unit and candidate on every path in the workspace, which is
+/// what made an owned `String` here the largest remaining source of
+/// duplication. The field is private: read it with `as_str`,
+/// `AsRef<str>`, `Deref<Target = str>` or `Display`, and reach for an owned
+/// `String` only at a boundary that demands one.
+///
 /// ```
 /// unclip_epistemic::string_id!(
 ///     /// A branch coordinate.
@@ -103,8 +111,13 @@ fn write_canonical_json(value: &serde_json::Value, output: &mut String) {
 /// );
 ///
 /// let id = ExampleId::new("example");
+/// assert_eq!(id.as_str(), "example");
 /// assert_eq!(id.to_string(), "example");
 /// assert_eq!(serde_json::to_string(&id).unwrap(), "\"example\"");
+///
+/// // Copies share one allocation rather than allocating again.
+/// let copy = id.clone();
+/// assert!(std::ptr::eq(id.as_str(), copy.as_str()));
 /// ```
 #[macro_export]
 macro_rules! string_id {
@@ -115,11 +128,95 @@ macro_rules! string_id {
             ::serde::Serialize, ::serde::Deserialize,
         )]
         #[serde(transparent)]
-        pub struct $name(pub String);
+        pub struct $name(::std::sync::Arc<str>);
 
         impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
+            pub fn new(value: impl Into<Self>) -> Self {
+                value.into()
+            }
+
+            /// Borrow the identifier's text.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            /// Share the identifier's allocation as a bare string handle.
+            pub fn as_shared(&self) -> ::std::sync::Arc<str> {
+                ::std::sync::Arc::clone(&self.0)
+            }
+        }
+
+        impl ::std::convert::From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(::std::sync::Arc::from(value))
+            }
+        }
+
+        impl ::std::convert::From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(::std::sync::Arc::from(value))
+            }
+        }
+
+        impl ::std::convert::From<&String> for $name {
+            fn from(value: &String) -> Self {
+                Self(::std::sync::Arc::from(value.as_str()))
+            }
+        }
+
+        impl ::std::convert::From<::std::borrow::Cow<'_, str>> for $name {
+            fn from(value: ::std::borrow::Cow<'_, str>) -> Self {
+                Self(::std::sync::Arc::from(value))
+            }
+        }
+
+        impl ::std::convert::From<::std::sync::Arc<str>> for $name {
+            fn from(value: ::std::sync::Arc<str>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl ::std::convert::From<&$name> for $name {
+            fn from(value: &$name) -> Self {
+                value.clone()
+            }
+        }
+
+        impl ::std::convert::From<$name> for ::std::string::String {
+            fn from(value: $name) -> Self {
+                value.as_str().to_owned()
+            }
+        }
+
+        impl ::std::convert::AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl ::std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl ::std::ops::Deref for $name {
+            type Target = str;
+
+            fn deref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl ::std::cmp::PartialEq<str> for $name {
+            fn eq(&self, other: &str) -> bool {
+                &*self.0 == other
+            }
+        }
+
+        impl ::std::cmp::PartialEq<&str> for $name {
+            fn eq(&self, other: &&str) -> bool {
+                &*self.0 == *other
             }
         }
 
@@ -143,7 +240,7 @@ string_id!(ParameterHash);
 impl ModelRef {
     /// Build the stable model selector stored in provenance.
     pub fn versioned(identity: impl AsRef<str>, version: impl AsRef<str>) -> Self {
-        Self(format!("{}@{}", identity.as_ref(), version.as_ref()))
+        Self(format!("{}@{}", identity.as_ref(), version.as_ref()).into())
     }
 }
 
@@ -196,7 +293,7 @@ impl OperationKind for ops::Interpretation {
 pub struct Provenance {
     pub operation: Operation,
     pub producer: PluginId,
-    pub algorithm: String,
+    pub algorithm: Arc<str>,
     pub version: Version,
     /// Shared with the token that emitted this value, and with every other
     /// value that token emitted. One token routinely emits several results
@@ -546,7 +643,7 @@ impl DependencyCollector {
 pub struct EmitMetadata {
     pub id: DerivedId,
     pub producer: PluginId,
-    pub algorithm: String,
+    pub algorithm: Arc<str>,
     pub version: Version,
     pub params: Arc<serde_json::Value>,
     pub params_hash: ParameterHash,
@@ -579,7 +676,7 @@ impl EmitMetadata {
     ) -> Self {
         Self {
             id,
-            algorithm: producer.0.clone(),
+            algorithm: producer.as_shared(),
             producer,
             version,
             params: Arc::new(params.clone()),
@@ -627,7 +724,7 @@ impl EmitMetadata {
 
     /// Name the algorithm separately from the producing plugin.
     #[must_use]
-    pub fn with_algorithm(mut self, algorithm: impl Into<String>) -> Self {
+    pub fn with_algorithm(mut self, algorithm: impl Into<Arc<str>>) -> Self {
         self.algorithm = algorithm.into();
         self
     }
@@ -694,7 +791,7 @@ impl<O: OperationKind> EmitToken<O> {
         let provenance = Provenance {
             operation: O::OPERATION,
             producer: self.metadata.producer.clone(),
-            algorithm: self.metadata.algorithm.clone(),
+            algorithm: Arc::clone(&self.metadata.algorithm),
             version: self.metadata.version.clone(),
             params: Arc::clone(&self.metadata.params),
             params_hash: self.metadata.params_hash.clone(),
@@ -797,6 +894,38 @@ mod tests {
             vec![DerivedId::new("source")]
         );
         assert!(Arc::ptr_eq(&forwarded.shared(), &source.shared()));
+    }
+
+    /// Identifiers are copied once per sample, axis, unit and candidate, so
+    /// they hold an `Arc<str>` rather than a `String`. Nothing else observes
+    /// the difference — every copy still compares and prints equal — so only
+    /// pointer identity catches a regression that reintroduces the
+    /// per-copy allocation.
+    #[test]
+    fn copying_an_identifier_shares_one_allocation() {
+        let id = DerivedId::new("source");
+        let copied = id.clone();
+        assert_eq!(id, copied);
+        assert!(std::ptr::eq(id.as_str(), copied.as_str()));
+        assert!(Arc::ptr_eq(&id.as_shared(), &copied.as_shared()));
+
+        // The copies an emission makes travel the same way.
+        let emitted = CalculationToken::from_harness(
+            EmitMetadata::new(
+                id.clone(),
+                PluginId::new("test.plugin"),
+                Version::new(0, 1, 0),
+                &serde_json::json!({}),
+                Timestamp::new("2026-01-01T00:00:00Z"),
+            ),
+            DependencyCollector::default(),
+        )
+        .emit(1);
+        assert!(std::ptr::eq(emitted.id().as_str(), id.as_str()));
+        assert!(std::ptr::eq(
+            emitted.provenance().algorithm.as_ref(),
+            emitted.provenance().producer.as_str()
+        ));
     }
 
     /// Provenance is shared for the same reason the payload is: it carries the

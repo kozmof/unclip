@@ -48,7 +48,7 @@ pub(crate) fn validate(
         || pattern
             .members
             .iter()
-            .any(|member| member.0.trim().is_empty())
+            .any(|member| member.trim().is_empty())
         || !ordered_unique(&pattern.incoming)
         || !ordered_unique(&pattern.outgoing)
         || pattern
@@ -64,13 +64,10 @@ pub(crate) fn validate(
     }
     if evidence.structures.len() < 2
         || !ordered_unique(&evidence.structures)
-        || evidence.structures.iter().any(|id| id.0.trim().is_empty())
+        || evidence.structures.iter().any(|id| id.trim().is_empty())
         || evidence.measurements.is_empty()
         || !ordered_unique(&evidence.measurements)
-        || evidence
-            .measurements
-            .iter()
-            .any(|id| id.0.trim().is_empty())
+        || evidence.measurements.iter().any(|id| id.trim().is_empty())
     {
         return Err(invalid(
             "semantic-role evidence requires ordered unique calculated structures and measurements",

@@ -110,10 +110,10 @@ pub fn cross_product_transfer(
     let mut source_coordinates = BTreeSet::new();
     let mut target_coordinates = BTreeSet::new();
     for mapping in &mappings {
-        if mapping.source_left.0.trim().is_empty()
-            || mapping.source_right.0.trim().is_empty()
-            || mapping.target_left.0.trim().is_empty()
-            || mapping.target_right.0.trim().is_empty()
+        if mapping.source_left.trim().is_empty()
+            || mapping.source_right.trim().is_empty()
+            || mapping.target_left.trim().is_empty()
+            || mapping.target_right.trim().is_empty()
             || !source_coordinates.insert((&mapping.source_left, &mapping.source_right))
             || !target_coordinates.insert((&mapping.target_left, &mapping.target_right))
             || !source_axes.contains_key(&(&mapping.source_left, &mapping.source_right))
@@ -239,14 +239,14 @@ fn validate_movement(
 ) -> Result<(), CrossProductTransferError> {
     let binding = &movement.binding;
     let sequence = movement.sequence.observations();
-    if binding.product.0.trim().is_empty()
-        || binding.product_version.0.trim().is_empty()
-        || binding.frame.0.trim().is_empty()
-        || binding.frame_version.0.trim().is_empty()
-        || binding.left.domain.0.trim().is_empty()
-        || binding.left.version.0.trim().is_empty()
-        || binding.right.domain.0.trim().is_empty()
-        || binding.right.version.0.trim().is_empty()
+    if binding.product.trim().is_empty()
+        || binding.product_version.trim().is_empty()
+        || binding.frame.trim().is_empty()
+        || binding.frame_version.trim().is_empty()
+        || binding.left.domain.trim().is_empty()
+        || binding.left.version.trim().is_empty()
+        || binding.right.domain.trim().is_empty()
+        || binding.right.version.trim().is_empty()
         || binding.left.domain == binding.right.domain
         || movement.minimum_transitions == 0
         || movement.observation_count != sequence.len()
@@ -272,8 +272,8 @@ fn validate_movement(
         // division and produce `NaN`, which the `!=` below then rejected because
         // `NaN != NaN` — the right answer for the wrong reason, and one that
         // would silently invert if the comparison were ever reordered.
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis.transition_count < movement.minimum_transitions
             || classified != Some(axis.transition_count)
             || axis
@@ -303,8 +303,8 @@ fn validate_movement(
         }
     }
     for axis in &movement.unassessed_axes {
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis.need != movement.minimum_transitions
             || axis.have >= axis.need
             || axis.have.checked_add(axis.excluded_transitions.len())

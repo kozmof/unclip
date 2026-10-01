@@ -84,7 +84,7 @@ pub(crate) async fn run(
         .as_deref()
         .context("interpretation profile must select domain@version")?;
     let (domain_id, domain_version) = super::parse_domain_selector(domain_selector)?;
-    let domain_key = serde_json::to_string(&(&domain_id.0, &domain_version.0))?;
+    let domain_key = serde_json::to_string(&(domain_id.as_str(), domain_version.as_str()))?;
     ensure!(
         candidate.proposal.domain_version_id == domain_key,
         "interpretation profile domain does not match candidate domain version"

@@ -49,17 +49,17 @@ fn label<'a>(pattern: &'a serde_json::Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| invalid("missing or empty exact-match pattern field"))
 }
 pub(crate) fn validate(domain: &DomainSnapshot) -> Result<()> {
-    if domain.id.0.is_empty() || domain.version.0.is_empty() {
+    if domain.id.is_empty() || domain.version.is_empty() {
         return Err(invalid("empty baseline domain identity"));
     }
     for (id, unit) in &domain.units {
-        if id != &unit.id || id.0.is_empty() {
+        if id != &unit.id || id.is_empty() {
             return Err(invalid("inconsistent baseline unit identity"));
         }
     }
     for (id, relation) in &domain.relations {
         if id != &relation.id
-            || id.0.is_empty()
+            || id.is_empty()
             || relation.kind.trim().is_empty()
             || !domain.units.contains_key(&relation.source)
             || !domain.units.contains_key(&relation.target)
@@ -106,7 +106,7 @@ fn evaluate(
         return Ok(token.emit(Reading::InsufficientEvidence { have: 0, need: 1 }));
     };
     validate(domain)?;
-    let key = serde_json::to_string(&(&domain.id.0, &domain.version.0))
+    let key = serde_json::to_string(&(domain.id.as_str(), domain.version.as_str()))
         .map_err(|e| PluginError::Message(e.to_string()))?;
     if candidate.domain_version_id != key {
         return Err(invalid(

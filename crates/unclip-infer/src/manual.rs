@@ -84,7 +84,7 @@ mod tests {
             source: &SourceRef,
             params: &serde_json::Value,
         ) -> Result<serde_json::Value> {
-            assert_eq!(source.0, "observations/manual.yaml");
+            assert_eq!(source.as_str(), "observations/manual.yaml");
             assert_eq!(params, &serde_json::json!({"strict": true}));
             Ok(
                 serde_json::from_str(include_str!("../tests/fixtures/manual.json"))

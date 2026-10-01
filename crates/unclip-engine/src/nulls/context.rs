@@ -101,7 +101,7 @@ impl NullModel for ContextualCooccurrenceNull {
         for input in inputs {
             let observation = ctx.read(input);
             if !derived_ids.insert(input.id())
-                || observation.id.0.is_empty()
+                || observation.id.is_empty()
                 || !observations.insert(&observation.id)
             {
                 return Err(invalid("duplicate or empty null observation identity"));
@@ -110,7 +110,7 @@ impl NullModel for ContextualCooccurrenceNull {
             let mut missing = Vec::new();
             for selector in &params.strata {
                 let value = match selector {
-                    Stratum::Source => Some(Value::String(observation.source.0.clone())),
+                    Stratum::Source => Some(Value::String(observation.source.to_string())),
                     Stratum::Context { key } => observation.context.get(key).cloned(),
                 };
                 match value {
@@ -132,7 +132,7 @@ impl NullModel for ContextualCooccurrenceNull {
                 values,
                 ..Default::default()
             });
-            group.observations.insert(observation.id.0.clone());
+            group.observations.insert(observation.id.to_string());
             let a = observation.units.iter().any(|u| u.label == left);
             let b = observation.units.iter().any(|u| u.label == right);
             group.left += usize::from(a);

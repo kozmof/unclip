@@ -147,8 +147,8 @@ pub fn cross_domain_interaction_movement_iter<'a>(
     let mut left_units = BTreeSet::new();
     let mut right_units = BTreeSet::new();
     for axis in axes {
-        if axis.left.0.trim().is_empty()
-            || axis.right.0.trim().is_empty()
+        if axis.left.trim().is_empty()
+            || axis.right.trim().is_empty()
             || axis
                 .label
                 .as_ref()
@@ -295,14 +295,14 @@ fn direction(from: f64, to: f64) -> i8 {
 fn validate_binding(
     binding: &ProductMeasurementBinding,
 ) -> Result<(), CrossDomainInteractionMovementError> {
-    if binding.product.0.trim().is_empty()
-        || binding.product_version.0.trim().is_empty()
-        || binding.frame.0.trim().is_empty()
-        || binding.frame_version.0.trim().is_empty()
-        || binding.left.domain.0.trim().is_empty()
-        || binding.left.version.0.trim().is_empty()
-        || binding.right.domain.0.trim().is_empty()
-        || binding.right.version.0.trim().is_empty()
+    if binding.product.trim().is_empty()
+        || binding.product_version.trim().is_empty()
+        || binding.frame.trim().is_empty()
+        || binding.frame_version.trim().is_empty()
+        || binding.left.domain.trim().is_empty()
+        || binding.left.version.trim().is_empty()
+        || binding.right.domain.trim().is_empty()
+        || binding.right.version.trim().is_empty()
         || binding.left.domain == binding.right.domain
     {
         return Err(CrossDomainInteractionMovementError::InvalidConfiguration);
@@ -474,8 +474,8 @@ mod tests {
         };
         assert_eq!(movement.axes[0].transition_count, 1);
         assert_eq!(movement.axes[0].excluded_transitions.len(), 2);
-        assert_eq!(movement.axes[0].excluded_transitions[0].from.0, "a");
-        assert_eq!(movement.axes[0].excluded_transitions[1].to.0, "c");
+        assert_eq!(movement.axes[0].excluded_transitions[0].from.as_str(), "a");
+        assert_eq!(movement.axes[0].excluded_transitions[1].to.as_str(), "c");
 
         assert!(matches!(
             cross_domain_interaction_movement(

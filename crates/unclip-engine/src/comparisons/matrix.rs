@@ -37,6 +37,30 @@ pub enum MatrixComparison {
         reason: String,
     },
 }
+/// The write side of [`MatrixComparison`], borrowing what it serializes.
+///
+/// The `Value` arm reports the shared unit axis, which it reads straight off
+/// the matrix it is comparing, and the `Unavailable` arms report two whole
+/// readings that are reached with both matrices in hand. The payload is built
+/// only to become JSON, so neither needs its own copy. The round-trip test
+/// below pins this shape to the owning one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum MatrixComparisonRef<'a> {
+    Value {
+        metric: PairwiseMetric,
+        units: &'a [UnitId],
+        minimum_samples: usize,
+        cells: Vec<Vec<MatrixCellDifference>>,
+    },
+    Unavailable {
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct PairwiseMatrixComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -86,7 +110,7 @@ impl Comparator for PairwiseMatrixComparator {
         }
         let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::PairwiseMatrix(_)));
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            MatrixComparison::NotApplicable {reason:"requires labeled pairwise matrices; unlabeled axes and other values are not inferred".into()}
+            MatrixComparisonRef::NotApplicable {reason:"requires labeled pairwise matrices; unlabeled axes and other values are not inferred"}
         } else if let (
             Reading::Value {
                 value: MeasurementValue::PairwiseMatrix(a),
@@ -102,9 +126,9 @@ impl Comparator for PairwiseMatrixComparator {
                 ));
             }
             if a.units().is_empty() {
-                MatrixComparison::Unavailable {
-                    before: before.reading.clone(),
-                    after: after.reading.clone(),
+                MatrixComparisonRef::Unavailable {
+                    before: &before.reading,
+                    after: &after.reading,
                 }
             } else {
                 let mut cells = Vec::new();
@@ -143,17 +167,17 @@ impl Comparator for PairwiseMatrixComparator {
                     }
                     cells.push(row);
                 }
-                MatrixComparison::Value {
+                MatrixComparisonRef::Value {
                     metric: a.metric(),
-                    units: a.units().to_vec(),
+                    units: a.units(),
                     minimum_samples: params.minimum_samples,
                     cells,
                 }
             }
         } else {
-            MatrixComparison::Unavailable {
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            MatrixComparisonRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
@@ -162,5 +186,68 @@ impl Comparator for PairwiseMatrixComparator {
                 serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
             ),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `MatrixComparisonRef` is what the comparator writes and
+    /// `MatrixComparison` is what consumers read. They are one wire format, so
+    /// this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let units = vec![UnitId::new("a"), UnitId::new("b")];
+        let cells = vec![vec![MatrixCellDifference::Unavailable {
+            before: MatrixCell::Undefined { sample_count: 2 },
+            after: MatrixCell::Undefined { sample_count: 2 },
+        }]];
+        let scalar = Reading::Value {
+            value: MeasurementValue::Scalar(1.0),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                MatrixComparisonRef::Value {
+                    metric: PairwiseMetric::Spearman,
+                    units: &units,
+                    minimum_samples: 2,
+                    cells: cells.clone(),
+                },
+                MatrixComparison::Value {
+                    metric: PairwiseMetric::Spearman,
+                    units: units.clone(),
+                    minimum_samples: 2,
+                    cells,
+                },
+            ),
+            (
+                MatrixComparisonRef::Unavailable {
+                    before: &scalar,
+                    after: &missing,
+                },
+                MatrixComparison::Unavailable {
+                    before: scalar.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                MatrixComparisonRef::NotApplicable { reason: "why" },
+                MatrixComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: MatrixComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

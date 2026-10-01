@@ -257,7 +257,7 @@ async fn insert_measurement(
         .ok_or_else(|| StoreError::NotFound {
             path: format!("sensor run {}", record.sensor_run_id),
         })?;
-    if sensor_run.sensor_id != record.measurement.sensor.0
+    if sensor_run.sensor_id != record.measurement.sensor.as_str()
         || sensor_run.sensor_version != record.measurement.sensor_version.to_string()
     {
         return Err(invalid(
@@ -299,7 +299,7 @@ async fn insert_measurement(
         id: Set(record.id),
         profile_id: Set(profile_id.into()),
         sensor_run_id: Set(record.sensor_run_id),
-        provenance_id: Set(record.provenance.0),
+        provenance_id: Set(record.provenance.to_string()),
         kind: Set(kind_name(record.kind).into()),
         status: Set(status),
         value_json: Set(value_json),
@@ -326,10 +326,10 @@ pub(crate) async fn insert_sensor_run_in_transaction(
     sensor_runs::Entity::insert(sensor_runs::ActiveModel {
         id: Set(run.id),
         engine_run_id: Set(run.engine_run_id),
-        sensor_id: Set(run.sensor.0),
+        sensor_id: Set(run.sensor.to_string()),
         sensor_version: Set(run.sensor_version.to_string()),
         params_json: Set(serde_json::to_string(&run.params).map_err(anyhow::Error::from)?),
-        params_hash: Set(run.params_hash.0),
+        params_hash: Set(run.params_hash.to_string()),
         status: Set(run.status),
         started_at: Set(run.started_at),
         completed_at: Set(run.completed_at),
@@ -352,15 +352,12 @@ pub(crate) async fn insert_profile_in_transaction(
         return Err(StoreError::AlreadyExists { path: header.id });
     }
     let frame_version_id = frame_versions::Entity::find()
-        .filter(frame_versions::Column::FrameId.eq(&header.frame.0))
-        .filter(frame_versions::Column::Version.eq(&header.frame_version.0))
+        .filter(frame_versions::Column::FrameId.eq(header.frame.as_str()))
+        .filter(frame_versions::Column::Version.eq(header.frame_version.as_str()))
         .one(txn)
         .await?
         .ok_or_else(|| StoreError::NotFound {
-            path: format!(
-                "frame {} version {}",
-                header.frame.0, header.frame_version.0
-            ),
+            path: format!("frame {} version {}", header.frame, header.frame_version),
         })?
         .id;
     measurement_profiles::Entity::insert(measurement_profiles::ActiveModel {
@@ -368,7 +365,7 @@ pub(crate) async fn insert_profile_in_transaction(
         engine_run_id: Set(header.engine_run_id),
         observation_id: Set(header.observation_id),
         frame_version_id: Set(frame_version_id),
-        provenance_id: Set(header.provenance.0),
+        provenance_id: Set(header.provenance.to_string()),
         created_at: Set(header.created_at),
     })
     .exec(txn)
@@ -500,10 +497,10 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
         }
         let provenance = StoredProvenance::of(&structure, run_id);
         let record = EmpiricalStructureRecord {
-            id: structure.id().0.clone(),
+            id: structure.id().to_string(),
             profile_id,
             provenance: structure.id().clone(),
-            created_at: structure.provenance().timestamp.0.clone(),
+            created_at: structure.provenance().timestamp.to_string(),
             structure: structure.into_value(),
         };
         let txn = self.db.begin().await?;
@@ -561,7 +558,7 @@ async fn insert_structure_in_transaction(
         value_json: Set(
             serde_json::to_string(&record.structure.value).map_err(anyhow::Error::from)?
         ),
-        provenance_id: Set(record.provenance.0),
+        provenance_id: Set(record.provenance.to_string()),
         created_at: Set(record.created_at),
     })
     .exec(txn)

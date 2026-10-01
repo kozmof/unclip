@@ -207,10 +207,10 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
     assert_eq!(detection.interaction_count, 3);
     assert_eq!(detection.assessed_interactions, 3);
     assert_eq!(detection.qualifying_interactions, 2);
-    assert_eq!(detection.binding.product_version.0, "6");
-    assert_eq!(detection.binding.frame_version.0, "8");
-    assert_eq!(detection.binding.left.version.0, "3");
-    assert_eq!(detection.binding.right.version.0, "4");
+    assert_eq!(detection.binding.product_version.as_str(), "6");
+    assert_eq!(detection.binding.frame_version.as_str(), "8");
+    assert_eq!(detection.binding.left.version.as_str(), "3");
+    assert_eq!(detection.binding.right.version.as_str(), "4");
 
     assert_eq!(
         result.value().sensor,
@@ -219,12 +219,15 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
     assert_eq!(result.value().sample_count, None);
     assert_eq!(result.provenance().producer, result.value().sensor);
     assert_eq!(
-        result.provenance().algorithm,
+        result.provenance().algorithm.as_ref(),
         "thresholded_bipartite_mutual_information_communities"
     );
     assert_eq!(result.provenance().params["product_version"], "6");
     assert_eq!(result.provenance().params["product_frame_version"], "8");
-    assert_eq!(result.provenance().params["mutual_information"], mi.id().0);
+    assert_eq!(
+        result.provenance().params["mutual_information"],
+        mi.id().as_str()
+    );
     assert_eq!(
         result.provenance().inputs,
         [product.id().clone(), frame.id().clone(), mi.id().clone()]

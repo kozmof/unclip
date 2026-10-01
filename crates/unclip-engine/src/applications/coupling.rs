@@ -62,8 +62,8 @@ pub(crate) fn validate(
     }
     let evidence: Evidence = serde_json::from_value(field("evidence")?).map_err(invalid)?;
     let selection: Selection = serde_json::from_value(field("selection")?).map_err(invalid)?;
-    if evidence.measurement.0.is_empty()
-        || evidence.sensor.0.is_empty()
+    if evidence.measurement.is_empty()
+        || evidence.sensor.is_empty()
         || proposal.value.get("causal_claim") != Some(&serde_json::Value::Bool(false))
     {
         return Err(invalid(
@@ -154,7 +154,7 @@ fn validate_temporal(proposal: &CandidateProposal, domain: &DomainSnapshot) -> R
             .sequence
             .observations()
             .iter()
-            .any(|o| o.observation.0.is_empty())
+            .any(|o| o.observation.is_empty())
     {
         return Err(invalid("temporal application requires existing endpoints, a positive lag, and explicit observation identities"));
     }
@@ -167,8 +167,8 @@ fn validate_temporal(proposal: &CandidateProposal, domain: &DomainSnapshot) -> R
             "temporal pattern differs from recorded measurement context",
         ));
     }
-    if evidence.measurement.0.is_empty()
-        || evidence.sensor.0 != "sensor.lagged-dependency"
+    if evidence.measurement.is_empty()
+        || evidence.sensor.as_str() != "sensor.lagged-dependency"
         || proposal.value.get("causal_claim") != Some(&serde_json::Value::Bool(false))
     {
         return Err(invalid(

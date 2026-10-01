@@ -83,16 +83,16 @@ fn validate(document: &EngineProfileDocument) -> anyhow::Result<()> {
         .chain(&document.candidate_generators)
         .chain(&document.null_models)
     {
-        ensure!(!plugin.id.0.is_empty(), "plugin id must not be empty");
+        ensure!(!plugin.id.is_empty(), "plugin id must not be empty");
         ensure!(
             ids.insert(&plugin.id),
             "duplicate plugin id in engine profile: {}",
-            plugin.id.0
+            plugin.id.as_str()
         );
         ensure!(
             plugin.params.is_object(),
             "parameters for {} must be a JSON object",
-            plugin.id.0
+            plugin.id.as_str()
         );
     }
     Ok(())
@@ -197,7 +197,7 @@ comparators: []
         let document =
             parse_engine_profile(r#"{"engine_profile":{"sensors":[{"id":"sensor.coverage"}]}}"#)
                 .unwrap();
-        assert_eq!(document.sensors[0].id.0, "sensor.coverage");
+        assert_eq!(document.sensors[0].id.as_str(), "sensor.coverage");
     }
 
     #[test]
@@ -250,11 +250,14 @@ interpreters:
         .unwrap();
         let parsed = document.resolve().unwrap();
         assert_eq!(
-            parsed.profile.candidate_generators[0].id.0,
+            parsed.profile.candidate_generators[0].id.as_str(),
             "generate.fixture"
         );
-        assert_eq!(parsed.profile.null_models[0].id.0, "null.fixture");
-        assert_eq!(parsed.profile.interpreters[0].id.0, "interpret.fixture");
+        assert_eq!(parsed.profile.null_models[0].id.as_str(), "null.fixture");
+        assert_eq!(
+            parsed.profile.interpreters[0].id.as_str(),
+            "interpret.fixture"
+        );
         assert!(parsed.profile.candidate_generators[0]
             .version
             .matches(&semver::Version::new(1, 3, 0)));

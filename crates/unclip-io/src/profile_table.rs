@@ -13,7 +13,7 @@ pub fn render_measurement_profile_table(profile: &MeasurementProfile) -> anyhow:
     let mut columns = BTreeSet::new();
     let mut rows = BTreeMap::<String, BTreeMap<String, Vec<String>>>::new();
     for measurement in &profile.measurements {
-        let sensor = format!("{}@{}", measurement.sensor.0, measurement.sensor_version);
+        let sensor = format!("{}@{}", measurement.sensor, measurement.sensor_version);
         columns.insert(sensor.clone());
         let context = serde_json::to_string(&measurement.context.values)?;
         rows.entry(context)

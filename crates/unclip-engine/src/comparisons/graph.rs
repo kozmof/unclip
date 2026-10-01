@@ -39,6 +39,34 @@ pub enum GraphComparison {
         reason: String,
     },
 }
+/// The write side of [`GraphComparison`], borrowing what it serializes.
+///
+/// Both parsed graphs stay in the caller's hands, so the `Value` arm reports
+/// the two graphs and the four difference lists without copying a node or edge
+/// out of either one; the `Unavailable` arm borrows the readings for the same
+/// reason the other comparators do. The round-trip test below pins this shape
+/// to the owning one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum GraphComparisonRef<'a> {
+    Value {
+        node_distance: usize,
+        edge_distance: usize,
+        nodes_added: Vec<&'a String>,
+        nodes_removed: Vec<&'a String>,
+        edges_added: Vec<&'a DirectedGraphEdge>,
+        edges_removed: Vec<&'a DirectedGraphEdge>,
+        before: &'a NamedDirectedGraph,
+        after: &'a NamedDirectedGraph,
+    },
+    Unavailable {
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct GraphIdentityComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -107,33 +135,23 @@ impl Comparator for GraphIdentityComparator {
                 },
             );
         }
+        // The parsed graphs outlive the payload so it can borrow both of them.
+        let (parsed_before, parsed_after) = (parsed[0].take(), parsed[1].take());
         let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::Graph(_)));
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            GraphComparison::NotApplicable {
-                reason: "requires explicit named directed graphs".into(),
+            GraphComparisonRef::NotApplicable {
+                reason: "requires explicit named directed graphs",
             }
-        } else if let (Some(a), Some(b)) = (parsed[0].take(), parsed[1].take()) {
+        } else if let (Some(a), Some(b)) = (&parsed_before, &parsed_after) {
             let an = a.nodes.iter().collect::<BTreeSet<_>>();
             let bn = b.nodes.iter().collect::<BTreeSet<_>>();
             let ae = a.edges.iter().collect::<BTreeSet<_>>();
             let be = b.edges.iter().collect::<BTreeSet<_>>();
-            let nodes_added = bn
-                .difference(&an)
-                .map(|value| (*value).clone())
-                .collect::<Vec<_>>();
-            let nodes_removed = an
-                .difference(&bn)
-                .map(|value| (*value).clone())
-                .collect::<Vec<_>>();
-            let edges_added = be
-                .difference(&ae)
-                .map(|value| (*value).clone())
-                .collect::<Vec<_>>();
-            let edges_removed = ae
-                .difference(&be)
-                .map(|value| (*value).clone())
-                .collect::<Vec<_>>();
-            GraphComparison::Value {
+            let nodes_added = bn.difference(&an).copied().collect::<Vec<_>>();
+            let nodes_removed = an.difference(&bn).copied().collect::<Vec<_>>();
+            let edges_added = be.difference(&ae).copied().collect::<Vec<_>>();
+            let edges_removed = ae.difference(&be).copied().collect::<Vec<_>>();
+            GraphComparisonRef::Value {
                 node_distance: nodes_added
                     .len()
                     .checked_add(nodes_removed.len())
@@ -150,14 +168,94 @@ impl Comparator for GraphIdentityComparator {
                 after: b,
             }
         } else {
-            GraphComparison::Unavailable {
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            GraphComparisonRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(serde_json::to_value(result).map_err(invalid)?),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `GraphComparisonRef` is what the comparator writes and
+    /// `GraphComparison` is what consumers read. They are one wire format, so
+    /// this pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let edge = DirectedGraphEdge {
+            source: "a".to_owned(),
+            target: "b".to_owned(),
+            kind: "k".to_owned(),
+        };
+        let a = NamedDirectedGraph {
+            nodes: vec!["a".to_owned(), "b".to_owned()],
+            edges: vec![edge.clone()],
+        };
+        let b = NamedDirectedGraph {
+            nodes: vec!["a".to_owned()],
+            edges: Vec::new(),
+        };
+        let node = "b".to_owned();
+        let missing = Reading::NotMeasured;
+        let scalar = Reading::Value {
+            value: MeasurementValue::Scalar(1.0),
+        };
+        let cases = [
+            (
+                GraphComparisonRef::Value {
+                    node_distance: 1,
+                    edge_distance: 1,
+                    nodes_added: Vec::new(),
+                    nodes_removed: vec![&node],
+                    edges_added: Vec::new(),
+                    edges_removed: vec![&edge],
+                    before: &a,
+                    after: &b,
+                },
+                GraphComparison::Value {
+                    node_distance: 1,
+                    edge_distance: 1,
+                    nodes_added: Vec::new(),
+                    nodes_removed: vec![node.clone()],
+                    edges_added: Vec::new(),
+                    edges_removed: vec![edge.clone()],
+                    before: a.clone(),
+                    after: b.clone(),
+                },
+            ),
+            (
+                GraphComparisonRef::Unavailable {
+                    before: &scalar,
+                    after: &missing,
+                },
+                GraphComparison::Unavailable {
+                    before: scalar.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                GraphComparisonRef::NotApplicable { reason: "why" },
+                GraphComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: GraphComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

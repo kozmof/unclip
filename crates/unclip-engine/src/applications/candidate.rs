@@ -172,8 +172,8 @@ impl crate::Engine {
         timestamp: Timestamp,
     ) -> Result<Calculated<CounterfactualSnapshot>> {
         if run_id.trim().is_empty()
-            || baseline.id().0.is_empty()
-            || candidate.id().0.is_empty()
+            || baseline.id().is_empty()
+            || candidate.id().is_empty()
             || baseline.id() == candidate.id()
         {
             return Err(invalid(
@@ -190,8 +190,8 @@ impl crate::Engine {
         let domain = dependencies.read(baseline);
         let proposal = dependencies.read(candidate);
         crate::nulls::domain::validate(domain)?;
-        let baseline_key =
-            serde_json::to_string(&(&domain.id.0, &domain.version.0)).map_err(invalid)?;
+        let baseline_key = serde_json::to_string(&(domain.id.as_str(), domain.version.as_str()))
+            .map_err(invalid)?;
         if proposal.domain_version_id != baseline_key {
             return Err(invalid(
                 "candidate application baseline differs from proposal domain version",
@@ -219,7 +219,7 @@ impl crate::Engine {
         let mut property_changes = Vec::new();
         if proposal.kind == CandidateKind::CrossDomainStructure {
             let product_binding = crate::discovery::cross_domain::validate_candidate(proposal)?;
-            let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+            let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
             if domain.units.contains_key(&unit_id) {
                 return Err(invalid(
                     "candidate unit identity already exists in the baseline",
@@ -234,7 +234,7 @@ impl crate::Engine {
                     properties: BTreeMap::from([
                         (
                             "candidate_id".into(),
-                            PropertyValue::Text(candidate.id().0.clone()),
+                            PropertyValue::Text(candidate.id().to_string()),
                         ),
                         (
                             "candidate_pattern".into(),
@@ -268,7 +268,7 @@ impl crate::Engine {
                         "atomic application requires a nonempty exact observed-label pattern",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in the baseline",
@@ -283,7 +283,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -329,7 +329,7 @@ impl crate::Engine {
                     "community candidate requires selection parameters",
                 )?;
                 crate::discovery::structure::validate_community(&evidence.result)?;
-                if evidence.structure.0.is_empty()
+                if evidence.structure.is_empty()
                     || evidence.result.communities.get(evidence.community_index)
                         != Some(&pattern.members)
                     || selection.minimum_samples < 2
@@ -342,7 +342,7 @@ impl crate::Engine {
                         "community candidate pattern and selection conflict with recorded evidence",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in the baseline",
@@ -357,7 +357,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -410,7 +410,7 @@ impl crate::Engine {
                     .eigenpairs
                     .get(evidence.eigenpair_index)
                     .ok_or_else(|| invalid("latent eigenpair index is out of range"))?;
-                if evidence.structure.0.is_empty()
+                if evidence.structure.is_empty()
                     || pattern.units != evidence.result.units
                     || pattern.eigenvalue != pair.eigenvalue
                     || pattern.loadings != pair.loadings
@@ -425,7 +425,7 @@ impl crate::Engine {
                         "latent pattern and selection conflict with recorded spectral evidence",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in the baseline",
@@ -440,7 +440,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -475,7 +475,7 @@ impl crate::Engine {
             }
             CandidateKind::DynamicCoupling => {
                 let coupling_units = crate::applications::coupling::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in the baseline",
@@ -490,7 +490,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -516,7 +516,7 @@ impl crate::Engine {
             }
             CandidateKind::GraphMotif => {
                 crate::applications::motif::validate(proposal)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in the baseline",
@@ -531,7 +531,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -554,7 +554,7 @@ impl crate::Engine {
             }
             CandidateKind::SemanticRole => {
                 let pattern = crate::applications::role::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in baseline",
@@ -569,7 +569,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -610,7 +610,7 @@ impl crate::Engine {
             }
             CandidateKind::Transformation => {
                 let pattern = crate::applications::transformation::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id().0));
+                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
                 if domain.units.contains_key(&unit_id) {
                     return Err(invalid(
                         "candidate unit identity already exists in baseline",
@@ -625,7 +625,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),
@@ -696,7 +696,7 @@ impl crate::Engine {
                 }) {
                     return Err(invalid("directed relation already exists in baseline"));
                 }
-                let id = RelationId::new(format!("candidate:{}", candidate.id().0));
+                let id = RelationId::new(format!("candidate:{}", candidate.id()));
                 if domain.relations.contains_key(&id) {
                     return Err(invalid(
                         "candidate relation identity already exists in baseline",
@@ -712,7 +712,7 @@ impl crate::Engine {
                         properties: BTreeMap::from([
                             (
                                 "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().0.clone()),
+                                PropertyValue::Text(candidate.id().to_string()),
                             ),
                             (
                                 "candidate_pattern".into(),

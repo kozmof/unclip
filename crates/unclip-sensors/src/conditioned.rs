@@ -112,7 +112,7 @@ fn find<'a>(ranks: &'a [RankTrajectory], unit: &UnitId) -> Result<&'a RankTrajec
     ranks.iter().find(|rank| rank.unit == *unit).ok_or_else(|| {
         invalid(format!(
             "selected unit {} is not in the measurement frame",
-            unit.0
+            unit.as_str()
         ))
     })
 }

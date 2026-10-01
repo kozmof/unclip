@@ -42,12 +42,16 @@ fn the_registry_is_not_empty() {
 fn every_sensor_has_a_namespaced_nonempty_id() {
     for descriptor in descriptors() {
         assert!(
-            descriptor.id.0.starts_with("sensor."),
+            descriptor.id.as_str().starts_with("sensor."),
             "sensor id {} is not namespaced under `sensor.`",
             descriptor.id
         );
         assert!(
-            !descriptor.id.0.trim_start_matches("sensor.").is_empty(),
+            !descriptor
+                .id
+                .as_str()
+                .trim_start_matches("sensor.")
+                .is_empty(),
             "sensor id {} has an empty name",
             descriptor.id
         );
@@ -137,7 +141,7 @@ fn conditioned_pair_sensors_pin_their_known_sample_floors() {
     let floor = |id: &str| {
         descriptors()
             .into_iter()
-            .find(|descriptor| descriptor.id.0 == id)
+            .find(|descriptor| descriptor.id.as_str() == id)
             .unwrap_or_else(|| panic!("{id} is not registered"))
             .evidence
             .iter()
@@ -161,7 +165,7 @@ fn the_explanation_and_residual_stages_have_exactly_one_sensor_each() {
         descriptors()
             .into_iter()
             .filter(|descriptor| descriptor.stage == stage)
-            .map(|descriptor| descriptor.id.0)
+            .map(|descriptor| descriptor.id.to_string())
             .collect::<Vec<_>>()
     };
     assert_eq!(staged(SensorStage::Explanation), vec!["sensor.coverage"]);

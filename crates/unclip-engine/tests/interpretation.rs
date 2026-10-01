@@ -80,7 +80,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         .unwrap();
     measurements
         .insert_unverified_structure(EmpiricalStructureRecord {
-            id: source_id.0.clone(),
+            id: source_id.to_string(),
             profile_id: None,
             provenance: source_id.clone(),
             created_at: "2026-09-23T00:00:00Z".into(),
@@ -90,7 +90,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         .unwrap();
 
     let stored_source = measurements
-        .get_empirical_structure(&source_id.0)
+        .get_empirical_structure(source_id.as_str())
         .await
         .unwrap()
         .unwrap();

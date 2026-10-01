@@ -48,7 +48,7 @@ fn index<'a>(
     let mut result = BTreeMap::new();
     for input in inputs {
         crate::require_calculated_evidence(input, "profile input measurement")?;
-        if input.id().0.is_empty() || result.insert(input.id().clone(), input).is_some() {
+        if input.id().is_empty() || result.insert(input.id().clone(), input).is_some() {
             return Err(invalid(
                 "profile measurements require unique nonempty derived identities",
             ));

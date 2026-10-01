@@ -98,7 +98,7 @@ impl NullModel for RankingConstraintNull {
         for input in ctx.observations() {
             let observation = ctx.read(input);
             if !derived_ids.insert(input.id())
-                || observation.id.0.is_empty()
+                || observation.id.is_empty()
                 || observations.insert(&observation.id, observation).is_some()
             {
                 return Err(invalid("duplicate or empty null observation identity"));
@@ -122,7 +122,7 @@ impl NullModel for RankingConstraintNull {
         for (id, observation) in observations {
             let mut units = BTreeMap::new();
             for unit in &observation.units {
-                if unit.id.0.is_empty() || units.insert(&unit.id, unit).is_some() {
+                if unit.id.is_empty() || units.insert(&unit.id, unit).is_some() {
                     return Err(invalid("duplicate or empty observed unit identity"));
                 }
             }

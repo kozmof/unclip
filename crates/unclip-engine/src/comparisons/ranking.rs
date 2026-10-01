@@ -30,6 +30,38 @@ pub enum RankingComparison {
         reason: String,
     },
 }
+/// The write side of [`RankingComparison`], borrowing what it serializes.
+///
+/// Both measured arms report the two ranked states verbatim, and a ranked
+/// state owns a tier vector per unit; the `Unavailable` arm is reached when a
+/// reading is not a ranking at all, so it can carry a matrix or a graph.
+/// Either way the payload is built only to become JSON and is then dropped.
+/// The round-trip test below pins this shape to the owning one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum RankingComparisonRef<'a> {
+    Kendall {
+        distance: f64,
+        discordant_pairs: usize,
+        pairs: usize,
+        before: &'a RankedState,
+        after: &'a RankedState,
+    },
+    Rbo {
+        similarity: f64,
+        p: f64,
+        depth: usize,
+        before: &'a RankedState,
+        after: &'a RankedState,
+    },
+    Unavailable {
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct KendallComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -80,13 +112,13 @@ fn validate(state: &RankedState) -> Result<()> {
             return Err(invalid("ranking contains an empty tier"));
         }
         for id in tier {
-            if id.0.is_empty() || !seen.insert(id) {
+            if id.is_empty() || !seen.insert(id) {
                 return Err(invalid("ranking has empty or repeated unit identities"));
             }
         }
     }
     for id in &state.unknown {
-        if id.0.is_empty() || !seen.insert(id) {
+        if id.is_empty() || !seen.insert(id) {
             return Err(invalid(
                 "unknown ranks overlap known ranks or repeat identities",
             ));
@@ -94,13 +126,13 @@ fn validate(state: &RankedState) -> Result<()> {
     }
     let mut unresolved = BTreeSet::new();
     for id in &state.unresolved {
-        if id.0.is_empty() || !unresolved.insert(id) {
+        if id.is_empty() || !unresolved.insert(id) {
             return Err(invalid("invalid unresolved ranking identities"));
         }
     }
     Ok(())
 }
-fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
+fn compare<'a>(ctx: &'a CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparisonRef<'a>> {
     let before = ctx.before();
     let after = ctx.after();
     if before.sensor != after.sensor
@@ -121,8 +153,8 @@ fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
     }
     let unsupported = |reading: &Reading| matches!(reading,Reading::Value {value} if !matches!(value,MeasurementValue::Ranking(_)));
     if unsupported(&before.reading) || unsupported(&after.reading) {
-        return Ok(RankingComparison::NotApplicable {
-            reason: "requires ranking measurements".into(),
+        return Ok(RankingComparisonRef::NotApplicable {
+            reason: "requires ranking measurements",
         });
     }
     let (
@@ -134,31 +166,31 @@ fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
         },
     ) = (&before.reading, &after.reading)
     else {
-        return Ok(RankingComparison::Unavailable {
-            before: before.reading.clone(),
-            after: after.reading.clone(),
+        return Ok(RankingComparisonRef::Unavailable {
+            before: &before.reading,
+            after: &after.reading,
         });
     };
     if !a.unresolved.is_empty()
         || !b.unresolved.is_empty()
         || a.tiers.iter().chain(&b.tiers).any(|t| t.len() != 1)
     {
-        return Ok(RankingComparison::NotApplicable {
-            reason: "this comparator requires untied rankings without unresolved identities".into(),
+        return Ok(RankingComparisonRef::NotApplicable {
+            reason: "this comparator requires untied rankings without unresolved identities",
         });
     }
     let left = a.tiers.iter().map(|t| &t[0]).collect::<Vec<_>>();
     let right = b.tiers.iter().map(|t| &t[0]).collect::<Vec<_>>();
     if let Some(p) = p {
         if left.len() != right.len() {
-            return Ok(RankingComparison::NotApplicable {
-                reason: "this RBO comparator requires equal observed prefix depths".into(),
+            return Ok(RankingComparisonRef::NotApplicable {
+                reason: "this RBO comparator requires equal observed prefix depths",
             });
         }
         if left.is_empty() {
-            return Ok(RankingComparison::Unavailable {
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            return Ok(RankingComparisonRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             });
         }
         let mut left_prefix = BTreeSet::new();
@@ -174,12 +206,12 @@ fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
             persistence *= p;
         }
         similarity += persistence * agreement;
-        Ok(RankingComparison::Rbo {
+        Ok(RankingComparisonRef::Rbo {
             similarity: similarity.clamp(0.0, 1.0),
             p,
             depth: left.len(),
-            before: a.clone(),
-            after: b.clone(),
+            before: a,
+            after: b,
         })
     } else {
         if !a.unknown.is_empty()
@@ -187,14 +219,14 @@ fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
             || left.iter().copied().collect::<BTreeSet<_>>()
                 != right.iter().copied().collect::<BTreeSet<_>>()
         {
-            return Ok(RankingComparison::NotApplicable {
-                reason: "Kendall distance requires complete rankings over the same units".into(),
+            return Ok(RankingComparisonRef::NotApplicable {
+                reason: "Kendall distance requires complete rankings over the same units",
             });
         }
         if left.len() < 2 {
-            return Ok(RankingComparison::Unavailable {
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            return Ok(RankingComparisonRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             });
         }
         let positions = right
@@ -213,18 +245,18 @@ fn compare(ctx: &CompareCtx<'_>, p: Option<f64>) -> Result<RankingComparison> {
                 discordant_pairs += usize::from(positions[left[i]] > positions[left[j]]);
             }
         }
-        Ok(RankingComparison::Kendall {
+        Ok(RankingComparisonRef::Kendall {
             distance: discordant_pairs as f64 / pairs as f64,
             discordant_pairs,
             pairs,
-            before: a.clone(),
-            after: b.clone(),
+            before: a,
+            after: b,
         })
     }
 }
 fn emit(
     id: &PluginId,
-    result: RankingComparison,
+    result: RankingComparisonRef<'_>,
     token: CalculationToken,
 ) -> Result<Calculated<Delta>> {
     Ok(token.emit(Delta {
@@ -256,5 +288,92 @@ impl Comparator for RboComparator {
             ));
         }
         emit(&self.descriptor.id, compare(ctx, Some(params.p))?, token)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use unclip_domain::UnitId;
+
+    /// `RankingComparisonRef` is what both comparators write and
+    /// `RankingComparison` is what consumers read. They are one wire format,
+    /// so this pins them to each other over all four arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let a = RankedState {
+            tiers: vec![vec![UnitId::new("a")], vec![UnitId::new("b")]],
+            unknown: Vec::new(),
+            unresolved: Vec::new(),
+        };
+        let b = RankedState {
+            tiers: vec![vec![UnitId::new("b")], vec![UnitId::new("a")]],
+            unknown: Vec::new(),
+            unresolved: Vec::new(),
+        };
+        let matrix = Reading::Value {
+            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]]),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                RankingComparisonRef::Kendall {
+                    distance: 1.0,
+                    discordant_pairs: 1,
+                    pairs: 1,
+                    before: &a,
+                    after: &b,
+                },
+                RankingComparison::Kendall {
+                    distance: 1.0,
+                    discordant_pairs: 1,
+                    pairs: 1,
+                    before: a.clone(),
+                    after: b.clone(),
+                },
+            ),
+            (
+                RankingComparisonRef::Rbo {
+                    similarity: 0.25,
+                    p: 0.5,
+                    depth: 2,
+                    before: &a,
+                    after: &b,
+                },
+                RankingComparison::Rbo {
+                    similarity: 0.25,
+                    p: 0.5,
+                    depth: 2,
+                    before: a.clone(),
+                    after: b.clone(),
+                },
+            ),
+            (
+                RankingComparisonRef::Unavailable {
+                    before: &matrix,
+                    after: &missing,
+                },
+                RankingComparison::Unavailable {
+                    before: matrix.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                RankingComparisonRef::NotApplicable { reason: "why" },
+                RankingComparison::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: RankingComparison =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
     }
 }

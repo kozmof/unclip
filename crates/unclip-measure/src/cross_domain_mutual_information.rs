@@ -139,14 +139,14 @@ pub fn cross_domain_mutual_information_iter<'a>(
     if config.minimum_samples.get() < 2 || config.bins.get() > MAXIMUM_BINS {
         return Err(CrossDomainMutualInformationError::InvalidConfiguration);
     }
-    if binding.product.0.trim().is_empty()
-        || binding.product_version.0.trim().is_empty()
-        || binding.frame.0.trim().is_empty()
-        || binding.frame_version.0.trim().is_empty()
-        || binding.left.domain.0.trim().is_empty()
-        || binding.left.version.0.trim().is_empty()
-        || binding.right.domain.0.trim().is_empty()
-        || binding.right.version.0.trim().is_empty()
+    if binding.product.trim().is_empty()
+        || binding.product_version.trim().is_empty()
+        || binding.frame.trim().is_empty()
+        || binding.frame_version.trim().is_empty()
+        || binding.left.domain.trim().is_empty()
+        || binding.left.version.trim().is_empty()
+        || binding.right.domain.trim().is_empty()
+        || binding.right.version.trim().is_empty()
         || binding.left.domain == binding.right.domain
     {
         return Err(CrossDomainMutualInformationError::InvalidConfiguration);
@@ -155,7 +155,7 @@ pub fn cross_domain_mutual_information_iter<'a>(
     let mut left_units = BTreeSet::new();
     let mut right_units = BTreeSet::new();
     for axis in axes {
-        if axis.left.0.trim().is_empty() || axis.right.0.trim().is_empty() {
+        if axis.left.trim().is_empty() || axis.right.trim().is_empty() {
             return Err(CrossDomainMutualInformationError::InvalidAxis {
                 left: axis.left.clone(),
                 right: axis.right.clone(),
@@ -187,7 +187,7 @@ pub fn cross_domain_mutual_information_iter<'a>(
         }
     }
     for sample in &ordered {
-        if sample.observation.0.trim().is_empty()
+        if sample.observation.trim().is_empty()
             || sample
                 .left
                 .values()

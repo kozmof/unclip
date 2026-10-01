@@ -157,9 +157,9 @@ pub(crate) async fn provenance(
         }
         let value = repository.get_provenance(&id).await?.ok_or_else(|| {
             if depth == 0 {
-                anyhow::anyhow!("provenance not found: {}", id.0)
+                anyhow::anyhow!("provenance not found: {}", id)
             } else {
-                anyhow::anyhow!("provenance dependency not found: {}", id.0)
+                anyhow::anyhow!("provenance dependency not found: {}", id)
             }
         })?;
         for input in &value.provenance.inputs {
@@ -173,7 +173,7 @@ pub(crate) async fn provenance(
         };
         crate::output::outln!(
             "{}\t{}\t{}@{}\tdepth={} inputs={}",
-            value.id.0,
+            value.id.as_str(),
             operation,
             value.provenance.producer,
             value.provenance.version,
@@ -233,12 +233,12 @@ pub(crate) async fn explain(
         &observation.provenance,
     )
     .await?
-    .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", observation.provenance.0))?;
+    .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", observation.provenance))?;
     crate::output::outln!(
         "OBSERVATION\tINFERRED\t{}@{}\tid={} units={} relations={}",
         provenance.provenance.producer,
         provenance.provenance.version,
-        observation.value.id.0,
+        observation.value.id.as_str(),
         observation.value.units.len(),
         observation.value.relations.len()
     );
@@ -249,10 +249,10 @@ pub(crate) async fn explain(
             &alignment.provenance,
         )
         .await?
-        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", alignment.provenance.0))?;
+        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", alignment.provenance))?;
         let mut counts = std::collections::BTreeMap::new();
         for candidate in &alignment.value.candidates {
-            *counts.entry(&candidate.observed.0).or_insert(0usize) += 1;
+            *counts.entry(candidate.observed.as_str()).or_insert(0usize) += 1;
         }
         let ambiguous = counts.values().filter(|count| **count > 1).count();
         crate::output::outln!(
@@ -270,7 +270,7 @@ pub(crate) async fn explain(
             &ranking.provenance,
         )
         .await?
-        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", ranking.provenance.0))?;
+        .ok_or_else(|| anyhow::anyhow!("provenance not found: {}", ranking.provenance))?;
         let known = ranking
             .value
             .tiers

@@ -151,7 +151,7 @@ pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
         if rankings.insert(&ranking.observation, ranking).is_some() {
             return Err(PluginError::Message(format!(
                 "multiple rankings for observation {} require explicit selection",
-                ranking.observation.0
+                ranking.observation.as_str()
             )));
         }
     }
@@ -161,7 +161,7 @@ pub(crate) fn batch_states(ctx: &MeasureCtx<'_>) -> Result<BatchStates> {
         if !observations.insert(&observation.id) {
             return Err(PluginError::Message(format!(
                 "duplicate observation {}",
-                observation.id.0
+                observation.id.as_str()
             )));
         }
     }

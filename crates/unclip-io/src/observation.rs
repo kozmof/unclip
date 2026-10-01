@@ -42,7 +42,7 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
         ensure!(
             unit_ids.insert(&unit.id),
             "duplicate observed unit id: {}",
-            unit.id.0
+            unit.id.as_str()
         );
         if let Some(value) = unit.salience {
             ensure!(value.is_finite(), "unit salience must be finite");
@@ -60,17 +60,17 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
         ensure!(
             relation_ids.insert(&relation.id),
             "duplicate observed relation id: {}",
-            relation.id.0
+            relation.id.as_str()
         );
         ensure!(
             unit_ids.contains(&relation.source),
             "relation {} has an unknown source unit",
-            relation.id.0
+            relation.id.as_str()
         );
         ensure!(
             unit_ids.contains(&relation.target),
             "relation {} has an unknown target unit",
-            relation.id.0
+            relation.id.as_str()
         );
         ensure!(!relation.kind.is_empty(), "relation kind must not be empty");
         if let Some(value) = relation.uncertainty {
@@ -96,12 +96,12 @@ fn validate(document: &ManualObservationDocument) -> anyhow::Result<()> {
             ensure!(
                 unit_ids.contains(unit),
                 "ranking refers to unknown observed unit: {}",
-                unit.0
+                unit.as_str()
             );
             ensure!(
                 ranked.insert(unit),
                 "observed unit appears more than once in ranking: {}",
-                unit.0
+                unit.as_str()
             );
         }
         ensure!(

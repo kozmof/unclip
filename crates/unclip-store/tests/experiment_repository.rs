@@ -481,7 +481,7 @@ async fn candidate_listing_is_domain_scoped_ordered_and_bounded() {
     }
     let first = repo.list_candidates("d1", None, 2).await.unwrap();
     assert_eq!(
-        first.iter().map(|c| c.id.0.as_str()).collect::<Vec<_>>(),
+        first.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
         vec!["a", "b"]
     );
     assert_eq!(first[0].proposal, proposal());
@@ -490,7 +490,7 @@ async fn candidate_listing_is_domain_scoped_ordered_and_bounded() {
         .await
         .unwrap();
     assert_eq!(
-        next.iter().map(|c| c.id.0.as_str()).collect::<Vec<_>>(),
+        next.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
         vec!["c"]
     );
     assert!(repo
@@ -882,7 +882,7 @@ async fn revision_ledger_reconstructs_evidence_profiles_sensors_and_interpretati
     let operations = ledger
         .provenance
         .iter()
-        .map(|value| (value.id.0.as_str(), value.provenance.operation))
+        .map(|value| (value.id.as_str(), value.provenance.operation))
         .collect::<std::collections::BTreeMap<_, _>>();
     assert_eq!(operations["interpretation"], Operation::Interpreted);
     assert_eq!(operations["experiment"], Operation::Experimental);

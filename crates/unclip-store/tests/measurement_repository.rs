@@ -353,7 +353,7 @@ async fn calculated_empirical_payloads_round_trip_with_complete_provenance() {
             .unwrap();
         assert_eq!(record.structure, payload);
         assert_eq!(record.provenance, *derived.id());
-        assert_eq!(record.created_at, derived.provenance().timestamp.0);
+        assert_eq!(record.created_at, derived.provenance().timestamp.as_str());
         assert_eq!(record.profile_id.as_deref(), Some("empirical-profile"));
         let stored = provenance
             .get_provenance(derived.id())

@@ -52,7 +52,7 @@ pub(crate) fn residual_evidence(
             return Err(invalid("duplicate discovery measurement"));
         }
         let measurement = ctx.read(tracked);
-        if measurement.sensor.0 != "sensor.residual"
+        if measurement.sensor.as_str() != "sensor.residual"
             || measurement
                 .context
                 .values
@@ -114,7 +114,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
                 return Err(invalid("duplicate discovery observation"));
             }
             for unit in &observation.units {
-                let qualified = format!("{}/{}", observation.id.0, unit.id.0);
+                let qualified = format!("{}/{}", observation.id, unit.id);
                 if units
                     .insert(qualified, (&observation.id, &unit.id, unit.label.as_str()))
                     .is_some()

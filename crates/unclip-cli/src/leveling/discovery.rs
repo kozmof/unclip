@@ -69,7 +69,7 @@ fn calculate(
         })
         .collect::<Vec<_>>();
     let (domain_id, version) = super::parse_domain_selector(domain)?;
-    let domain_key = serde_json::to_string(&(&domain_id.0, &version.0))?;
+    let domain_key = serde_json::to_string(&(domain_id.as_str(), version.as_str()))?;
     Ok(unclip_engine::generate_candidates(
         &plan,
         unclip_engine::CandidateInputs {
@@ -190,7 +190,7 @@ pub(crate) async fn discover(
     let plan = engine.plan(&parsed.profile)?;
     let timestamp = unclip_store::now();
     let run_id = format!("discover-{timestamp}");
-    let domain_key = serde_json::to_string(&(&domain.0, &version.0))?;
+    let domain_key = serde_json::to_string(&(domain.as_str(), version.as_str()))?;
     let outputs = unclip_engine::generate_candidates(
         &plan,
         unclip_engine::CandidateInputs {

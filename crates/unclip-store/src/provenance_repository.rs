@@ -120,7 +120,7 @@ fn parse_operation(operation: &str) -> StoreResult<Operation> {
 
 async fn inputs_in_txn(txn: &DatabaseTransaction, id: &DerivedId) -> StoreResult<Vec<DerivedId>> {
     Ok(provenance_inputs::Entity::find()
-        .filter(provenance_inputs::Column::DerivedId.eq(&id.0))
+        .filter(provenance_inputs::Column::DerivedId.eq(id.as_str()))
         .order_by_asc(provenance_inputs::Column::Position)
         .all(txn)
         .await?
@@ -139,11 +139,14 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
     }
 
     async fn get_provenance(&self, id: &DerivedId) -> StoreResult<Option<StoredProvenance>> {
-        let Some(row) = provenance::Entity::find_by_id(&id.0).one(&self.db).await? else {
+        let Some(row) = provenance::Entity::find_by_id(id.as_str())
+            .one(&self.db)
+            .await?
+        else {
             return Ok(None);
         };
         let inputs = provenance_inputs::Entity::find()
-            .filter(provenance_inputs::Column::DerivedId.eq(&id.0))
+            .filter(provenance_inputs::Column::DerivedId.eq(id.as_str()))
             .order_by_asc(provenance_inputs::Column::Position)
             .all(&self.db)
             .await?
@@ -156,7 +159,7 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
             provenance: Arc::new(Provenance {
                 operation: parse_operation(&row.operation)?,
                 producer: PluginId::new(row.producer),
-                algorithm: row.algorithm,
+                algorithm: row.algorithm.into(),
                 version: semver::Version::parse(&row.version)
                     .context("invalid stored provenance version")?,
                 params: serde_json::from_str(&row.params_json)
@@ -173,15 +176,17 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
     }
 
     async fn direct_inputs(&self, id: &DerivedId) -> StoreResult<Vec<DerivedId>> {
-        if provenance::Entity::find_by_id(&id.0)
+        if provenance::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
             .is_none()
         {
-            return Err(StoreError::NotFound { path: id.0.clone() });
+            return Err(StoreError::NotFound {
+                path: id.to_string(),
+            });
         }
         Ok(provenance_inputs::Entity::find()
-            .filter(provenance_inputs::Column::DerivedId.eq(&id.0))
+            .filter(provenance_inputs::Column::DerivedId.eq(id.as_str()))
             .order_by_asc(provenance_inputs::Column::Position)
             .all(&self.db)
             .await?
@@ -191,12 +196,14 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
     }
 
     async fn ancestors(&self, id: &DerivedId) -> StoreResult<Vec<DerivedId>> {
-        if provenance::Entity::find_by_id(&id.0)
+        if provenance::Entity::find_by_id(id.as_str())
             .one(&self.db)
             .await?
             .is_none()
         {
-            return Err(StoreError::NotFound { path: id.0.clone() });
+            return Err(StoreError::NotFound {
+                path: id.to_string(),
+            });
         }
         let txn = self.db.begin().await?;
         let mut queue: VecDeque<_> = inputs_in_txn(&txn, id).await?.into();
@@ -218,7 +225,7 @@ pub(crate) async fn insert_provenance_in_transaction(
     txn: &DatabaseTransaction,
     value: StoredProvenance,
 ) -> StoreResult<()> {
-    if value.id.0.is_empty() {
+    if value.id.is_empty() {
         return Err(invalid("derived id must not be empty"));
     }
     if value.provenance.params_hash != hash_params(&value.provenance.params) {
@@ -236,12 +243,14 @@ pub(crate) async fn insert_provenance_in_transaction(
         }
     }
 
-    if provenance::Entity::find_by_id(&value.id.0)
+    if provenance::Entity::find_by_id(value.id.as_str())
         .one(txn)
         .await?
         .is_some()
     {
-        return Err(StoreError::AlreadyExists { path: value.id.0 });
+        return Err(StoreError::AlreadyExists {
+            path: value.id.to_string(),
+        });
     }
 
     let StoredProvenance {
@@ -254,37 +263,43 @@ pub(crate) async fn insert_provenance_in_transaction(
     // field that can be arbitrarily large — is serialized straight from the
     // borrow, so persisting provenance never duplicates its parameter tree.
     provenance::Entity::insert(provenance::ActiveModel {
-        derived_id: Set(id.0.clone()),
+        derived_id: Set(id.to_string()),
         run_id: Set(run_id),
         operation: Set(operation_name(details.operation).into()),
-        producer: Set(details.producer.0.clone()),
-        algorithm: Set(details.algorithm.clone()),
+        producer: Set(details.producer.to_string()),
+        algorithm: Set(details.algorithm.to_string()),
         version: Set(details.version.to_string()),
         params_json: Set(serde_json::to_string(&details.params).map_err(anyhow::Error::from)?),
-        params_hash: Set(details.params_hash.0.clone()),
-        source: Set(details.source.as_ref().map(|value| value.0.clone())),
-        timestamp: Set(details.timestamp.0.clone()),
-        domain_version: Set(details.domain_version.as_ref().map(|value| value.0.clone())),
-        frame_version: Set(details.frame_version.as_ref().map(|value| value.0.clone())),
-        model: Set(details.model.as_ref().map(|value| value.0.clone())),
+        params_hash: Set(details.params_hash.to_string()),
+        source: Set(details.source.as_ref().map(|value| value.to_string())),
+        timestamp: Set(details.timestamp.to_string()),
+        domain_version: Set(details
+            .domain_version
+            .as_ref()
+            .map(|value| value.to_string())),
+        frame_version: Set(details
+            .frame_version
+            .as_ref()
+            .map(|value| value.to_string())),
+        model: Set(details.model.as_ref().map(|value| value.to_string())),
     })
     .exec(txn)
     .await?;
 
     for (position, input) in details.inputs.iter().enumerate() {
-        if provenance::Entity::find_by_id(&input.0)
+        if provenance::Entity::find_by_id(input.as_str())
             .one(txn)
             .await?
             .is_none()
         {
             return Err(StoreError::NotFound {
-                path: format!("provenance input {}", input.0),
+                path: format!("provenance input {}", input),
             });
         }
         let position = i32::try_from(position).context("too many provenance inputs")?;
         provenance_inputs::Entity::insert(provenance_inputs::ActiveModel {
-            derived_id: Set(id.0.clone()),
-            input_derived_id: Set(input.0.clone()),
+            derived_id: Set(id.to_string()),
+            input_derived_id: Set(input.to_string()),
             position: Set(position),
         })
         .exec(txn)

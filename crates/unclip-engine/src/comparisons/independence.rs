@@ -49,9 +49,9 @@ pub struct IndependenceComparisonResult {
 
 fn valid_calculated_profile<T>(value: &Calculated<T>, producer: &str, algorithm: &str) -> bool {
     let provenance = value.provenance();
-    !value.id().0.trim().is_empty()
+    !value.id().trim().is_empty()
         && provenance.producer == PluginId::new(producer)
-        && provenance.algorithm == algorithm
+        && provenance.algorithm.as_ref() == algorithm
         && provenance.params_hash == hash_params(&provenance.params)
 }
 
@@ -59,7 +59,7 @@ fn valid_sources(sources: &[DerivedId], available: &BTreeSet<&DerivedId>) -> boo
     !sources.is_empty()
         && sources
             .iter()
-            .all(|identity| !identity.0.trim().is_empty() && available.contains(identity))
+            .all(|identity| !identity.trim().is_empty() && available.contains(identity))
         && sources.iter().collect::<BTreeSet<_>>().len() == sources.len()
 }
 
@@ -161,7 +161,7 @@ pub fn compare_product_with_independence(
         .collect::<BTreeSet<_>>();
     identities.insert(composition.id().clone());
     identities.insert(expectations.id().clone());
-    if profile_id.0.trim().is_empty() || !identities.insert(profile_id.clone()) {
+    if profile_id.trim().is_empty() || !identities.insert(profile_id.clone()) {
         return Err(invalid(
             "independence comparison output identity collides with an input",
         ));

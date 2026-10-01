@@ -132,7 +132,7 @@ impl Inferrer for PatternInferrer {
             .filter_map(|id| {
                 let relation = &ctx.domain().relations[&id];
                 Some(ObservedRelation {
-                    id: ObservedRelationId::new(format!("relation-{}", id.0)),
+                    id: ObservedRelationId::new(format!("relation-{}", id)),
                     source: mapped.get(&relation.source)?.clone(),
                     target: mapped.get(&relation.target)?.clone(),
                     kind: relation.kind.clone(),
@@ -180,7 +180,7 @@ mod tests {
             source: &SourceRef,
             params: &serde_json::Value,
         ) -> Result<serde_json::Value> {
-            assert_eq!(source.0, "notes/pattern.txt");
+            assert_eq!(source.as_str(), "notes/pattern.txt");
             assert_eq!(params, &serde_json::json!({"min_confidence": 0.7}));
             Ok(
                 serde_json::from_str(include_str!("../tests/fixtures/pattern.json"))

@@ -165,7 +165,7 @@ pub fn canonical_correlation_iter<'a>(
     let mut retained = Vec::new();
     let mut excluded_observations = Vec::new();
     for sample in ordered {
-        if sample.observation.0.trim().is_empty()
+        if sample.observation.trim().is_empty()
             || sample
                 .left
                 .values()
@@ -327,7 +327,7 @@ fn validate_config(config: CanonicalCorrelationConfig) -> Result<(), CanonicalCo
 fn validate_units(side: &'static str, units: &[UnitId]) -> Result<(), CanonicalCorrelationError> {
     let mut seen = BTreeSet::new();
     for unit in units {
-        if unit.0.trim().is_empty() || !seen.insert(unit) {
+        if unit.trim().is_empty() || !seen.insert(unit) {
             return Err(CanonicalCorrelationError::DuplicateUnit {
                 side,
                 unit: unit.clone(),

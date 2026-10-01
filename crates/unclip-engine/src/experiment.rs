@@ -203,7 +203,7 @@ impl super::Engine {
         for input in transfer {
             let used = constraints.iter().any(|constraint| matches!(constraint, super::ExperimentConstraint::ScalarTransfer { source, target, .. } if source == input.id() || target == input.id()));
             if !used
-                || input.id().0.trim().is_empty()
+                || input.id().trim().is_empty()
                 || dependencies.snapshot().contains(input.id())
                 || input.id() == &id
             {
@@ -421,7 +421,7 @@ pub fn persistable_experiment(
         "before_profile": before_profile_id,
         "after_profile": after_profile_id,
     });
-    let id = DerivedId::new(format!("{}/completed", experiment.evidence.id().0));
+    let id = DerivedId::new(format!("{}/completed", experiment.evidence.id()));
     if dependencies.snapshot().contains(&id) {
         return Err(invalid(
             "persisted experiment identity collides with an evidence input",

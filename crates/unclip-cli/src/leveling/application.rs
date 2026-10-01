@@ -99,7 +99,8 @@ pub(crate) async fn run(
         .with_context(|| {
             format!(
                 "candidate baseline domain version not found: {}@{}",
-                baseline_domain.0, baseline_version.0
+                baseline_domain.as_str(),
+                baseline_version.as_str()
             )
         })?;
 
@@ -177,7 +178,9 @@ pub(crate) async fn run(
     let timestamp = unclip_store::now();
     let revision_id = DerivedId::new(format!(
         "{}/revision/{}@{}",
-        experiment.id.0, target_domain_id.0, target_version.0
+        experiment.id.as_str(),
+        target_domain_id.as_str(),
+        target_version.as_str()
     ));
     let engine = unclip_engine::Engine::with_builtins()?;
     let application_kind = candidate.proposal.kind;
@@ -188,7 +191,7 @@ pub(crate) async fn run(
         &tracked_baseline,
         &tracked_candidate,
         bindings.as_ref(),
-        &revision_id.0,
+        revision_id.as_str(),
         Timestamp::new(timestamp.clone()),
     )?;
     checked_application_parameter(
@@ -217,7 +220,7 @@ pub(crate) async fn run(
     // out rather than copied before its version is retargeted.
     let mut snapshot: DomainSnapshot = Arc::unwrap_or_clone(application.into_value().domain);
     snapshot.version = target_version.clone();
-    let target_key = serde_json::to_string(&(&target_domain_id.0, &target_version.0))?;
+    let target_key = serde_json::to_string(&(target_domain_id.as_str(), target_version.as_str()))?;
     let dependencies = DependencyCollector::default();
     dependencies.read(&Tracked::from_recorded(candidate_id.clone(), ()));
     dependencies.read(&Tracked::from_recorded(experiment.id.clone(), ()));

@@ -190,7 +190,7 @@ fn engine_cross_domain_mi_preserves_axes_versions_and_dependencies() {
     assert_eq!(result.value().sample_count, None);
     assert_eq!(result.provenance().producer, result.value().sensor);
     assert_eq!(
-        result.provenance().algorithm,
+        result.provenance().algorithm.as_ref(),
         "equal_width_cross_domain_mutual_information"
     );
     assert_eq!(result.provenance().params["product_version"], "2");
