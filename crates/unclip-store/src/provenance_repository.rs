@@ -1,6 +1,7 @@
 //! Persistence and graph traversal for epistemic provenance.
 
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -16,11 +17,34 @@ use unclip_epistemic::{
 
 use crate::{StoreError, StoreResult};
 
+/// One provenance record addressed by the identity it was emitted under.
+///
+/// The record is shared rather than owned: it is built straight off an emitted
+/// value — see [`Derived::shared_provenance`] — and its parameter tree can be
+/// arbitrarily large, so duplicating it on the way to the database is pure
+/// cost. Writing the row reads through the handle and copies only the short
+/// columns it has to own.
+///
+/// [`Derived::shared_provenance`]: unclip_epistemic::Derived::shared_provenance
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredProvenance {
     pub id: DerivedId,
     pub run_id: Option<String>,
-    pub provenance: Provenance,
+    pub provenance: Arc<Provenance>,
+}
+
+impl StoredProvenance {
+    /// Record the provenance an emitted value carries, without copying it.
+    pub fn of<T: ?Sized, O: unclip_epistemic::OperationKind>(
+        value: &unclip_epistemic::Derived<T, O>,
+        run_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: value.id().clone(),
+            run_id,
+            provenance: value.shared_provenance(),
+        }
+    }
 }
 
 #[async_trait]
@@ -129,7 +153,7 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
         Ok(Some(StoredProvenance {
             id: DerivedId::new(row.derived_id),
             run_id: row.run_id,
-            provenance: Provenance {
+            provenance: Arc::new(Provenance {
                 operation: parse_operation(&row.operation)?,
                 producer: PluginId::new(row.producer),
                 algorithm: row.algorithm,
@@ -144,7 +168,7 @@ impl ProvenanceRepository for SeaOrmProvenanceRepository {
                 domain_version: row.domain_version.map(DomainVersion::new),
                 frame_version: row.frame_version.map(FrameVersion::new),
                 model: row.model.map(ModelRef::new),
-            },
+            }),
         }))
     }
 
@@ -225,26 +249,29 @@ pub(crate) async fn insert_provenance_in_transaction(
         run_id,
         provenance: details,
     } = value;
-    let inputs = details.inputs;
+    // The columns are filled from the shared record rather than by moving out
+    // of it. Only the short identifier strings are copied; `params` — the one
+    // field that can be arbitrarily large — is serialized straight from the
+    // borrow, so persisting provenance never duplicates its parameter tree.
     provenance::Entity::insert(provenance::ActiveModel {
         derived_id: Set(id.0.clone()),
         run_id: Set(run_id),
         operation: Set(operation_name(details.operation).into()),
-        producer: Set(details.producer.0),
-        algorithm: Set(details.algorithm),
+        producer: Set(details.producer.0.clone()),
+        algorithm: Set(details.algorithm.clone()),
         version: Set(details.version.to_string()),
         params_json: Set(serde_json::to_string(&details.params).map_err(anyhow::Error::from)?),
-        params_hash: Set(details.params_hash.0),
-        source: Set(details.source.map(|value| value.0)),
-        timestamp: Set(details.timestamp.0),
-        domain_version: Set(details.domain_version.map(|value| value.0)),
-        frame_version: Set(details.frame_version.map(|value| value.0)),
-        model: Set(details.model.map(|value| value.0)),
+        params_hash: Set(details.params_hash.0.clone()),
+        source: Set(details.source.as_ref().map(|value| value.0.clone())),
+        timestamp: Set(details.timestamp.0.clone()),
+        domain_version: Set(details.domain_version.as_ref().map(|value| value.0.clone())),
+        frame_version: Set(details.frame_version.as_ref().map(|value| value.0.clone())),
+        model: Set(details.model.as_ref().map(|value| value.0.clone())),
     })
     .exec(txn)
     .await?;
 
-    for (position, input) in inputs.into_iter().enumerate() {
+    for (position, input) in details.inputs.iter().enumerate() {
         if provenance::Entity::find_by_id(&input.0)
             .one(txn)
             .await?
@@ -257,7 +284,7 @@ pub(crate) async fn insert_provenance_in_transaction(
         let position = i32::try_from(position).context("too many provenance inputs")?;
         provenance_inputs::Entity::insert(provenance_inputs::ActiveModel {
             derived_id: Set(id.0.clone()),
-            input_derived_id: Set(input.0),
+            input_derived_id: Set(input.0.clone()),
             position: Set(position),
         })
         .exec(txn)

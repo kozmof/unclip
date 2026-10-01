@@ -117,13 +117,13 @@ fn motif_null() -> NullEvidence {
     NullEvidence {
         id: DerivedId::new("motif-null"),
         model: PluginId::new("null.existing-motif"),
-        reading: Reading::Value {
+        reading: std::sync::Arc::new(Reading::Value {
             value: MeasurementValue::Structured(json!({
                 "model": "existing_motif_exact_pattern",
                 "match_count": 0,
                 "has_existing_alternative": false
             })),
-        },
+        }),
     }
 }
 
@@ -155,10 +155,10 @@ fn comparison() -> DeltaProfile {
         deltas: vec![ProfileDelta {
             pair,
             id: DerivedId::new("motif-delta"),
-            delta: Delta {
+            delta: std::sync::Arc::new(Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
-            },
+            }),
         }],
         unmatched_before: vec![],
         unmatched_after: vec![],
@@ -219,12 +219,12 @@ fn fixture(
         before: vec![DerivedId::new("motif-before")],
         after: vec![DerivedId::new("motif-after")],
         comparison: DerivedId::new("motif-comparison"),
-        delta_profile: comparison(),
+        delta_profile: std::sync::Arc::new(comparison()),
         null_results: include_null.then(motif_null).into_iter().collect(),
         constraint_assessment: constraint_status
             .as_ref()
             .map(|_| DerivedId::new("motif-constraints")),
-        constraints: constraint_status.into_iter().map(constraint).collect(),
+        constraints: std::sync::Arc::new(constraint_status.into_iter().map(constraint).collect()),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,

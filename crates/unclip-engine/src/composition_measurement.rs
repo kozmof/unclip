@@ -16,11 +16,16 @@ use unclip_measure::{Measurement, ProductMeasurementBinding};
 use unclip_plugin::Result;
 
 /// One calculated measurement retained with the identity used by provenance.
+///
+/// The measurement is shared with the derived value it was read from: a
+/// composition profile retains one entry per input measurement, and the inputs
+/// outlive the profile, so copying each reading and its context per profile is
+/// avoidable work that scales with the number of measured axes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileMeasurement {
     pub id: DerivedId,
-    pub measurement: Measurement,
+    pub measurement: std::sync::Arc<Measurement>,
 }
 
 /// An ordinary-domain profile pinned to one immutable domain and frame version.
@@ -128,7 +133,7 @@ fn ordinary_measurements(
         }
         result.push(ProfileMeasurement {
             id: input.id().clone(),
-            measurement: dependencies.read_derived(input).clone(),
+            measurement: dependencies.read_derived_shared(input),
         });
     }
     result.sort_by(|left, right| left.id.cmp(&right.id));
@@ -202,7 +207,7 @@ fn product_measurements(
         }
         result.push(ProfileMeasurement {
             id: input.id().clone(),
-            measurement: dependencies.read_derived(input).clone(),
+            measurement: dependencies.read_derived_shared(input),
         });
     }
     result.sort_by(|left, right| left.id.cmp(&right.id));

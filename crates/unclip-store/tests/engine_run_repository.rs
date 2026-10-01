@@ -43,20 +43,20 @@ fn provenance(id: &str) -> StoredProvenance {
     StoredProvenance {
         id: DerivedId::new(id),
         run_id: Some("run".into()),
-        provenance: Provenance {
+        provenance: std::sync::Arc::new(Provenance {
             operation: Operation::Calculated,
             producer: PluginId::new("test"),
             algorithm: "fixture".into(),
             version: semver::Version::new(1, 0, 0),
             params_hash: hash_params(&params),
-            params,
+            params: std::sync::Arc::new(params),
             inputs: Vec::new(),
             source: None,
             timestamp: Timestamp::new("now"),
             domain_version: None,
             frame_version: None,
             model: None,
-        },
+        }),
     }
 }
 
@@ -118,13 +118,13 @@ async fn lifecycle_and_replay_bundle_round_trip() {
         context: std::collections::BTreeMap::new(),
     };
     observation_repo
-        .insert_observation(observation.clone(), &DerivedId::new("prov-a"))
+        .insert_observation(&observation.clone(), &DerivedId::new("prov-a"))
         .await
         .unwrap();
     observation_repo
         .insert_alignment(
             "alignment",
-            unclip_observe::Alignment {
+            &unclip_observe::Alignment {
                 observation: observation.id.clone(),
                 candidates: Vec::new(),
             },
@@ -137,7 +137,7 @@ async fn lifecycle_and_replay_bundle_round_trip() {
     observation_repo
         .insert_ranking(
             "ranking",
-            unclip_observe::PartialRanking {
+            &unclip_observe::PartialRanking {
                 observation: observation.id.clone(),
                 tiers: Vec::new(),
                 unknown: vec![unclip_observe::ObservedUnitId::new("observed")],
@@ -174,7 +174,7 @@ async fn lifecycle_and_replay_bundle_round_trip() {
     assert_eq!(replay.profile_ids, vec!["profile-b"]);
     assert_eq!(replay.observations.len(), 1);
     assert_eq!(replay.observations[0].provenance, DerivedId::new("prov-a"));
-    assert_eq!(replay.observations[0].value, observation);
+    assert_eq!(*replay.observations[0].value, observation);
     assert_eq!(replay.alignments.len(), 1);
     assert_eq!(replay.alignments[0].provenance, DerivedId::new("prov-a"));
     assert_eq!(replay.rankings.len(), 1);

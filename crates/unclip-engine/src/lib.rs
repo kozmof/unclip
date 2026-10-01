@@ -123,6 +123,7 @@ pub use revision::{
 pub use transfer_constraint::TransferAssessment;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
@@ -201,47 +202,44 @@ impl InferenceResults {
                 alignments,
                 rankings,
             } => {
+                // Tracking a product shares the inferrer's allocation instead
+                // of copying it: the emitted output is retained in `outputs`
+                // for provenance, so both halves point at one observation.
                 self.observations.extend(
                     observations
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
                 self.alignments.extend(
                     alignments
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
                 self.rankings.extend(
                     rankings
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
             }
             unclip_plugin::InferenceOutput::Observations(values) => {
                 self.observations.extend(
                     values
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
             }
             unclip_plugin::InferenceOutput::Alignments(values) => {
                 self.alignments.extend(
                     values
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
             }
             unclip_plugin::InferenceOutput::Rankings(values) => {
                 self.rankings.extend(
                     values
                         .iter()
-                        .cloned()
-                        .map(|value| Tracked::from_derived(&output, value)),
+                        .map(|value| Tracked::from_derived_shared(&output, Arc::clone(value))),
                 );
             }
             unclip_plugin::InferenceOutput::Structured(_) => {}
@@ -343,20 +341,21 @@ impl Engine {
         // products by construction, so they are restored as inferred rather
         // than unlabeled. A sensor reads them through the context either way;
         // labeling them keeps them from passing a calculated-evidence gate.
+        let inferred = Some(unclip_epistemic::Operation::Inferred);
         let observations = replay
             .observations
             .iter()
-            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
+            .map(|record| record.tracked(inferred))
             .collect::<Vec<_>>();
         let alignments = replay
             .alignments
             .iter()
-            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
+            .map(|record| record.tracked(inferred))
             .collect::<Vec<_>>();
         let rankings = replay
             .rankings
             .iter()
-            .map(|record| Tracked::from_inferred(record.provenance.clone(), record.value.clone()))
+            .map(|record| record.tracked(inferred))
             .collect::<Vec<_>>();
 
         self.measure(
@@ -1294,30 +1293,15 @@ mod tests {
                 rankings,
             } = output.value()
             {
-                replay
-                    .observations
-                    .extend(observations.iter().cloned().map(|value| {
-                        unclip_record::RecordedInference {
-                            provenance: output.id().clone(),
-                            value,
-                        }
-                    }));
-                replay
-                    .alignments
-                    .extend(alignments.iter().cloned().map(|value| {
-                        unclip_record::RecordedInference {
-                            provenance: output.id().clone(),
-                            value,
-                        }
-                    }));
-                replay
-                    .rankings
-                    .extend(rankings.iter().cloned().map(|value| {
-                        unclip_record::RecordedInference {
-                            provenance: output.id().clone(),
-                            value,
-                        }
-                    }));
+                replay.observations.extend(observations.iter().map(|value| {
+                    unclip_record::RecordedInference::shared(output.id().clone(), Arc::clone(value))
+                }));
+                replay.alignments.extend(alignments.iter().map(|value| {
+                    unclip_record::RecordedInference::shared(output.id().clone(), Arc::clone(value))
+                }));
+                replay.rankings.extend(rankings.iter().map(|value| {
+                    unclip_record::RecordedInference::shared(output.id().clone(), Arc::clone(value))
+                }));
             }
         }
         let expected = results

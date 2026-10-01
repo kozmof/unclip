@@ -2,7 +2,8 @@
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use unclip_epistemic::{DerivedId, Timestamp, Tracked};
+use std::sync::Arc;
+use unclip_epistemic::{DerivedId, Operation, Timestamp, Tracked};
 use unclip_store::{
     CandidateRepository, DomainReader, EngineRunRecord, EngineRunRepository, EngineRunStatus,
     MeasurementRecord, MeasurementRepository, ObservationRepository, ProvenanceRepository,
@@ -14,7 +15,9 @@ use unclip_store::{
 struct SelectedStructure {
     id: String,
     provenance: DerivedId,
-    value: unclip_measure::EmpiricalStructure,
+    /// Shared with the tracked copy handed to the engine: the snapshot records
+    /// the structure a run read, and the run reads the same allocation.
+    value: Arc<unclip_measure::EmpiricalStructure>,
 }
 
 /// The evidence a discovery run selected, recorded in its run metadata.
@@ -49,15 +52,21 @@ fn calculate(
     let plan = engine.plan(&profile)?;
     let measurements = measurements
         .into_iter()
-        .map(|record| Tracked::from_calculated(record.provenance, record.measurement))
+        .map(|record| record.into_tracked())
         .collect::<Vec<_>>();
     let observations = observations
         .into_iter()
-        .map(|record| Tracked::from_inferred(record.provenance, record.value))
+        .map(|record| record.into_tracked(Some(Operation::Inferred)))
         .collect::<Vec<_>>();
     let structures = structures
         .into_iter()
-        .map(|record| Tracked::from_inferred(record.provenance, record.value))
+        // The label is left exactly as this path has always claimed it, so
+        // sharing the payload changes nothing but the copy. Note that
+        // `discover` labels the same structures `Calculated`; the two paths
+        // disagree, which is a separate question from this one.
+        .map(|record| {
+            Tracked::from_shared(record.provenance, record.value, Some(Operation::Inferred))
+        })
         .collect::<Vec<_>>();
     let (domain_id, version) = super::parse_domain_selector(domain)?;
     let domain_key = serde_json::to_string(&(&domain_id.0, &version.0))?;
@@ -142,10 +151,7 @@ pub(crate) async fn discover(
                 "duplicate measurement provenance: {}",
                 record.provenance
             );
-            measurements.push(Tracked::from_calculated(
-                record.provenance.clone(),
-                record.measurement.clone(),
-            ));
+            measurements.push(record.tracked());
             snapshot.measurements.push(record);
         }
     }
@@ -157,10 +163,7 @@ pub(crate) async fn discover(
             .get_recorded_observation(&unclip_observe::ObservationId::new(id))
             .await?
             .with_context(|| format!("observation not found: {id}"))?;
-        observed.push(Tracked::from_inferred(
-            record.provenance.clone(),
-            record.value.clone(),
-        ));
+        observed.push(record.tracked(Some(Operation::Inferred)));
         snapshot.observations.push(record);
     }
     let mut unique = BTreeSet::new();
@@ -171,14 +174,16 @@ pub(crate) async fn discover(
             .get_empirical_structure(id)
             .await?
             .with_context(|| format!("empirical structure not found: {id}"))?;
-        empirical.push(Tracked::from_calculated(
+        let structure = Arc::new(record.structure);
+        empirical.push(Tracked::from_shared(
             record.provenance.clone(),
-            record.structure.clone(),
+            Arc::clone(&structure),
+            Some(Operation::Calculated),
         ));
         snapshot.structures.push(SelectedStructure {
             id: record.id,
             provenance: record.provenance,
-            value: record.structure,
+            value: structure,
         });
     }
     let engine = unclip_engine::Engine::with_builtins()?;
@@ -299,7 +304,7 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
         ensure!(
             stored.proposal == *output.value()
                 && stored.created_at == run.started_at
-                && provenance.provenance == *output.provenance()
+                && *provenance.provenance == *output.provenance()
                 && provenance.run_id.as_ref() == Some(&run.id),
             "discovery candidate differs from stored result: {}",
             output.id()

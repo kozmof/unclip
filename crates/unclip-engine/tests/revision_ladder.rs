@@ -75,10 +75,10 @@ fn comparison(before: &str, after: &str, delta: &str) -> DeltaProfile {
         deltas: vec![ProfileDelta {
             pair,
             id: DerivedId::new(delta),
-            delta: Delta {
+            delta: std::sync::Arc::new(Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
-            },
+            }),
         }],
         unmatched_before: vec![],
         unmatched_after: vec![],
@@ -89,12 +89,12 @@ fn weight_null() -> NullEvidence {
     NullEvidence {
         id: DerivedId::new("weight-null"),
         model: PluginId::new("null.weight-change"),
-        reading: Reading::Value {
+        reading: std::sync::Arc::new(Reading::Value {
             value: MeasurementValue::Structured(json!({
                 "model": "retain_existing_numeric_property",
                 "within_tolerance": false
             })),
-        },
+        }),
     }
 }
 
@@ -171,12 +171,12 @@ fn fixture(
         before: vec![DerivedId::new("before")],
         after: vec![DerivedId::new("after")],
         comparison: DerivedId::new("comparison"),
-        delta_profile: comparison("before", "after", "delta"),
+        delta_profile: std::sync::Arc::new(comparison("before", "after", "delta")),
         null_results: include_null.then(weight_null).into_iter().collect(),
         constraint_assessment: constraint_status
             .as_ref()
             .map(|_| DerivedId::new("constraints")),
-        constraints: constraint_status.into_iter().map(constraint).collect(),
+        constraints: std::sync::Arc::new(constraint_status.into_iter().map(constraint).collect()),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,
@@ -334,13 +334,13 @@ fn existing_relation_null() -> NullEvidence {
     NullEvidence {
         id: DerivedId::new("relation-null"),
         model: PluginId::new("null.existing-relation"),
-        reading: Reading::Value {
+        reading: std::sync::Arc::new(Reading::Value {
             value: MeasurementValue::Structured(json!({
                 "model": "existing_domain_exact_match",
                 "match_count": 0,
                 "has_existing_alternative": false
             })),
-        },
+        }),
     }
 }
 
@@ -427,7 +427,11 @@ fn relation_fixture(
         before: vec![DerivedId::new("relation-before")],
         after: vec![DerivedId::new("relation-after")],
         comparison: DerivedId::new("relation-comparison"),
-        delta_profile: comparison("relation-before", "relation-after", "relation-delta"),
+        delta_profile: std::sync::Arc::new(comparison(
+            "relation-before",
+            "relation-after",
+            "relation-delta",
+        )),
         null_results: include_null
             .then(existing_relation_null)
             .into_iter()
@@ -435,10 +439,12 @@ fn relation_fixture(
         constraint_assessment: constraint_status
             .as_ref()
             .map(|_| DerivedId::new("relation-constraints")),
-        constraints: constraint_status
-            .into_iter()
-            .map(relation_constraint)
-            .collect(),
+        constraints: std::sync::Arc::new(
+            constraint_status
+                .into_iter()
+                .map(relation_constraint)
+                .collect(),
+        ),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,
@@ -615,7 +621,7 @@ fn coupling_zero_null() -> NullEvidence {
     NullEvidence {
         id: DerivedId::new("coupling-null"),
         model: PluginId::new("null.coupling-zero"),
-        reading: Reading::Value {
+        reading: std::sync::Arc::new(Reading::Value {
             value: MeasurementValue::Structured(json!({
                 "model": "zero_association_baseline",
                 "observed_value": 0.8,
@@ -623,7 +629,7 @@ fn coupling_zero_null() -> NullEvidence {
                 "within_tolerance": false,
                 "causal_claim": false
             })),
-        },
+        }),
     }
 }
 
@@ -705,15 +711,21 @@ fn coupling_fixture(
         before: vec![DerivedId::new("coupling-before")],
         after: vec![DerivedId::new("coupling-after")],
         comparison: DerivedId::new("coupling-comparison"),
-        delta_profile: comparison("coupling-before", "coupling-after", "coupling-delta"),
+        delta_profile: std::sync::Arc::new(comparison(
+            "coupling-before",
+            "coupling-after",
+            "coupling-delta",
+        )),
         null_results: include_null.then(coupling_zero_null).into_iter().collect(),
         constraint_assessment: constraint_status
             .as_ref()
             .map(|_| DerivedId::new("coupling-constraints")),
-        constraints: constraint_status
-            .into_iter()
-            .map(coupling_constraint)
-            .collect(),
+        constraints: std::sync::Arc::new(
+            constraint_status
+                .into_iter()
+                .map(coupling_constraint)
+                .collect(),
+        ),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,

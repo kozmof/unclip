@@ -114,7 +114,7 @@ pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> any
         .await?
         .ok_or_else(|| anyhow::anyhow!("calculated provenance not found: {}", value.id()))?;
         anyhow::ensure!(
-            recorded.provenance == *value.provenance(),
+            *recorded.provenance == *value.provenance(),
             "calculated provenance differs from stored evidence for {}",
             value.id()
         );

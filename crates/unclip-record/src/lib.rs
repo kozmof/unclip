@@ -13,8 +13,10 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
-use unclip_epistemic::{Calculated, DerivedId, ParameterHash, PluginId};
+use unclip_epistemic::{Calculated, DerivedId, Operation, ParameterHash, PluginId, Tracked};
 use unclip_measure::Delta;
 use unclip_observe::{Alignment, Observation, ObservationId, PartialRanking};
 
@@ -91,11 +93,51 @@ pub struct SensorRunRecord {
 }
 
 /// An inference product paired with the provenance identity it was stored under.
+///
+/// The payload is shared rather than owned inline. These records are read back
+/// in bulk — a replay's observations, an experiment's split — and every reader
+/// immediately re-tracks them as engine inputs. Holding the payload as an
+/// [`Arc`] lets [`Self::tracked`] hand it straight to the engine instead of
+/// deep-copying each observation on the way in. It serializes and compares
+/// exactly as the bare payload does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedInference<T> {
     pub provenance: DerivedId,
-    pub value: T,
+    pub value: Arc<T>,
+}
+
+impl<T> RecordedInference<T> {
+    /// Record an inference product under the provenance identity it carries.
+    pub fn new(provenance: DerivedId, value: T) -> Self {
+        Self {
+            provenance,
+            value: Arc::new(value),
+        }
+    }
+
+    /// Record a payload that is already shared, without copying it.
+    pub fn shared(provenance: DerivedId, value: Arc<T>) -> Self {
+        Self { provenance, value }
+    }
+
+    /// Track this record's payload under the operation the caller can vouch
+    /// for, sharing the payload instead of copying it.
+    ///
+    /// The operation stays the caller's to state, as it is for every `Tracked`
+    /// constructor: this record shape carries inference products on the replay
+    /// and split paths but calculated measurements on the transfer-evidence
+    /// path, so the record itself cannot settle the question. `None` still
+    /// means "no claim", which leaves a calculated-evidence gate inert.
+    pub fn tracked(&self, operation: Option<Operation>) -> Tracked<T> {
+        Tracked::from_shared(self.provenance.clone(), Arc::clone(&self.value), operation)
+    }
+
+    /// Consume this record into a tracked input, for a caller that keeps no
+    /// copy of the record itself.
+    pub fn into_tracked(self, operation: Option<Operation>) -> Tracked<T> {
+        Tracked::from_shared(self.provenance, self.value, operation)
+    }
 }
 
 /// Exact inference products selected by a measurement-only run. Keeping their

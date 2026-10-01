@@ -112,10 +112,10 @@ pub fn select_observations(
                 let input = available
                     .get(id)
                     .ok_or_else(|| invalid("selected observation is absent from the input pool"))?;
-                Ok(RecordedInference {
-                    provenance: input.id().clone(),
-                    value: dependencies.read(input).clone(),
-                })
+                Ok(RecordedInference::shared(
+                    input.id().clone(),
+                    dependencies.read_shared(input),
+                ))
             })
             .collect()
     };

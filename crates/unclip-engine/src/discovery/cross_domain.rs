@@ -230,7 +230,7 @@ pub(crate) fn validate_candidate(
         delta_id: value.evidence.delta,
         expected: value.evidence.expected,
         observed: value.evidence.observed,
-        delta: value.evidence.typed_delta,
+        delta: std::sync::Arc::new(value.evidence.typed_delta),
     };
     validate_evidence(&CrossDomainDeviationEvidence {
         comparison_profile: value.evidence.comparison_profile,

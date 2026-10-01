@@ -9,7 +9,7 @@
 //!
 //! let _ = Derived::<u32, ops::Calculation> {
 //!     id: todo!(),
-//!     value: 1,
+//!     value: todo!(),
 //!     provenance: todo!(),
 //!     operation: PhantomData,
 //! };
@@ -198,7 +198,12 @@ pub struct Provenance {
     pub producer: PluginId,
     pub algorithm: String,
     pub version: Version,
-    pub params: serde_json::Value,
+    /// Shared with the token that emitted this value, and with every other
+    /// value that token emitted. One token routinely emits several results
+    /// from one analysis, and they all record the same parameters; copying an
+    /// arbitrary parameter tree once per emission bought nothing. It
+    /// serializes exactly as the bare tree does.
+    pub params: Arc<serde_json::Value>,
     pub params_hash: ParameterHash,
     pub inputs: Vec<DerivedId>,
     pub source: Option<SourceRef>,
@@ -208,15 +213,56 @@ pub struct Provenance {
     pub model: Option<ModelRef>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Derived<T, O: OperationKind> {
+/// A value produced by one epistemic operation, together with its provenance.
+///
+/// The payload is held behind an [`Arc`] rather than inline. A derived value is
+/// immutable once emitted, and the same payload is routinely tracked as an
+/// input, stored, compared, and reported within one run; owning it inline made
+/// each of those hops deep-copy an observation, snapshot, or profile. Sharing
+/// the allocation turns them into a refcount bump, and lets a `Derived` be
+/// cloned even when its payload is not [`Clone`].
+pub struct Derived<T: ?Sized, O: OperationKind> {
     id: DerivedId,
-    value: T,
+    value: Arc<T>,
     provenance: Arc<Provenance>,
     operation: PhantomData<O>,
 }
 
-impl<T, O: OperationKind> Derived<T, O> {
+// These are written out rather than derived because `derive` bounds every impl
+// on `T`: cloning or comparing a `Derived` would then demand a clonable or
+// comparable payload even where the payload is only shared, never copied.
+impl<T: ?Sized, O: OperationKind> Clone for Derived<T, O> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            value: Arc::clone(&self.value),
+            provenance: Arc::clone(&self.provenance),
+            operation: PhantomData,
+        }
+    }
+}
+
+impl<T: std::fmt::Debug + ?Sized, O: OperationKind> std::fmt::Debug for Derived<T, O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Derived")
+            .field("id", &self.id)
+            .field("value", &self.value)
+            .field("provenance", &self.provenance)
+            .finish()
+    }
+}
+
+impl<T: PartialEq + ?Sized, O: OperationKind> PartialEq for Derived<T, O> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.provenance == other.provenance
+            && (Arc::ptr_eq(&self.value, &other.value) || self.value == other.value)
+    }
+}
+
+impl<T: Eq + ?Sized, O: OperationKind> Eq for Derived<T, O> {}
+
+impl<T: ?Sized, O: OperationKind> Derived<T, O> {
     pub fn id(&self) -> &DerivedId {
         &self.id
     }
@@ -229,8 +275,36 @@ impl<T, O: OperationKind> Derived<T, O> {
         &self.provenance
     }
 
-    pub fn into_value(self) -> T {
+    /// Share this payload without copying it.
+    ///
+    /// The result aliases the same allocation, so a caller that needs the value
+    /// to outlive this borrow no longer has to deep-copy it.
+    pub fn shared(&self) -> Arc<T> {
+        Arc::clone(&self.value)
+    }
+
+    /// Take the shared payload, dropping the provenance around it.
+    pub fn into_shared(self) -> Arc<T> {
         self.value
+    }
+
+    /// Share this value's provenance without copying it.
+    ///
+    /// Provenance carries the emitting call's whole parameter tree, so a
+    /// consumer that needs to keep or persist it should alias the record
+    /// rather than duplicate it.
+    pub fn shared_provenance(&self) -> Arc<Provenance> {
+        Arc::clone(&self.provenance)
+    }
+}
+
+impl<T: Clone, O: OperationKind> Derived<T, O> {
+    /// Take the payload by value, copying it only if it is still shared.
+    ///
+    /// Where this is the last handle — a value emitted and immediately consumed
+    /// — the allocation is unwrapped and nothing is copied.
+    pub fn into_value(self) -> T {
+        Arc::try_unwrap(self.value).unwrap_or_else(|shared| (*shared).clone())
     }
 }
 
@@ -239,21 +313,100 @@ pub type Calculated<T> = Derived<T, ops::Calculation>;
 pub type Experimental<T> = Derived<T, ops::Experiment>;
 pub type Interpreted<T> = Derived<T, ops::Interpretation>;
 
-#[derive(Debug, Clone)]
-pub struct Tracked<T> {
+/// One input to an operation, carrying the provenance identity to record for it.
+///
+/// As with [`Derived`], the payload is shared rather than owned inline.
+/// Tracking a derived value as an input is the most common hop in the
+/// workspace, and it must not cost a copy of the payload.
+pub struct Tracked<T: ?Sized> {
     id: DerivedId,
-    value: T,
+    value: Arc<T>,
     operation: Option<Operation>,
 }
 
-impl<T, O: OperationKind> From<&Derived<T, O>> for Tracked<T>
-where
-    T: Clone,
-{
+impl<T: ?Sized> Clone for Tracked<T> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            value: Arc::clone(&self.value),
+            operation: self.operation,
+        }
+    }
+}
+
+impl<T: std::fmt::Debug + ?Sized> std::fmt::Debug for Tracked<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tracked")
+            .field("id", &self.id)
+            .field("value", &self.value)
+            .field("operation", &self.operation)
+            .finish()
+    }
+}
+
+impl<T: PartialEq + ?Sized> PartialEq for Tracked<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.operation == other.operation
+            && (Arc::ptr_eq(&self.value, &other.value) || self.value == other.value)
+    }
+}
+
+impl<T: ?Sized, O: OperationKind> From<&Derived<T, O>> for Tracked<T> {
     fn from(value: &Derived<T, O>) -> Self {
         Self {
             id: value.id.clone(),
-            value: value.value.clone(),
+            value: Arc::clone(&value.value),
+            operation: Some(O::OPERATION),
+        }
+    }
+}
+
+impl<T: ?Sized> Tracked<T> {
+    /// Track an already-shared payload under a known identity and operation.
+    ///
+    /// This is the constructor to reach for when the payload is reachable as an
+    /// [`Arc`] already — from [`Derived::shared`], from another `Tracked`, or
+    /// from a record that stores it shared. The others below take the payload
+    /// by value and allocate; this one only bumps a refcount.
+    pub fn from_shared(id: DerivedId, value: Arc<T>, operation: Option<Operation>) -> Self {
+        Self {
+            id,
+            value,
+            operation,
+        }
+    }
+
+    /// Share this payload without copying it.
+    pub fn shared(&self) -> Arc<T> {
+        Arc::clone(&self.value)
+    }
+
+    pub fn id(&self) -> &DerivedId {
+        &self.id
+    }
+
+    /// Operation retained from an in-memory derived value. Persisted values use
+    /// their type-specific repository as the trusted operation boundary.
+    pub fn operation(&self) -> Option<Operation> {
+        self.operation
+    }
+}
+
+impl<T: ?Sized> Tracked<T> {
+    /// Track a shared payload extracted from a derived aggregate under that
+    /// aggregate's provenance id, without copying the payload.
+    ///
+    /// The same identity and operation as [`Self::from_derived`]; use this
+    /// wherever the aggregate already holds the part being tracked behind an
+    /// [`Arc`], so re-tracking it costs nothing.
+    pub fn from_derived_shared<S: ?Sized, O: OperationKind>(
+        source: &Derived<S, O>,
+        value: Arc<T>,
+    ) -> Self {
+        Self {
+            id: source.id.clone(),
+            value,
             operation: Some(O::OPERATION),
         }
     }
@@ -261,12 +414,8 @@ where
 
 impl<T> Tracked<T> {
     /// Track a value extracted from a derived aggregate under that aggregate's provenance id.
-    pub fn from_derived<S, O: OperationKind>(source: &Derived<S, O>, value: T) -> Self {
-        Self {
-            id: source.id.clone(),
-            value,
-            operation: Some(O::OPERATION),
-        }
+    pub fn from_derived<S: ?Sized, O: OperationKind>(source: &Derived<S, O>, value: T) -> Self {
+        Self::from_derived_shared(source, Arc::new(value))
     }
 
     /// Restore a tracked value whose operation is not known here.
@@ -279,7 +428,7 @@ impl<T> Tracked<T> {
     pub fn from_recorded(id: DerivedId, value: T) -> Self {
         Self {
             id,
-            value,
+            value: Arc::new(value),
             operation: None,
         }
     }
@@ -293,7 +442,7 @@ impl<T> Tracked<T> {
     pub fn from_calculated(id: DerivedId, value: T) -> Self {
         Self {
             id,
-            value,
+            value: Arc::new(value),
             operation: Some(Operation::Calculated),
         }
     }
@@ -306,7 +455,7 @@ impl<T> Tracked<T> {
     pub fn from_inferred(id: DerivedId, value: T) -> Self {
         Self {
             id,
-            value,
+            value: Arc::new(value),
             operation: Some(Operation::Inferred),
         }
     }
@@ -326,21 +475,7 @@ impl<T> Tracked<T> {
     /// the gate check it. `None` still means "no claim", for the import and
     /// legacy rows that genuinely have none.
     pub fn from_stored(id: DerivedId, value: T, operation: Option<Operation>) -> Self {
-        Self {
-            id,
-            value,
-            operation,
-        }
-    }
-
-    pub fn id(&self) -> &DerivedId {
-        &self.id
-    }
-
-    /// Operation retained from an in-memory derived value. Persisted values use
-    /// their type-specific repository as the trusted operation boundary.
-    pub fn operation(&self) -> Option<Operation> {
-        self.operation
+        Self::from_shared(id, Arc::new(value), operation)
     }
 }
 
@@ -362,15 +497,33 @@ impl DependencyCollector {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub fn read<'a, T>(&self, input: &'a Tracked<T>) -> &'a T {
+    pub fn read<'a, T: ?Sized>(&self, input: &'a Tracked<T>) -> &'a T {
         self.record(&input.id);
         &input.value
     }
 
     /// Read a derived value and record its identity without copying its payload.
-    pub fn read_derived<'a, T, O: OperationKind>(&self, input: &'a Derived<T, O>) -> &'a T {
+    pub fn read_derived<'a, T: ?Sized, O: OperationKind>(&self, input: &'a Derived<T, O>) -> &'a T {
         self.record(&input.id);
         &input.value
+    }
+
+    /// Read a tracked input and take a shared handle to its payload.
+    ///
+    /// For callers that must keep the value past the borrow: the handle aliases
+    /// the tracked allocation instead of copying it.
+    pub fn read_shared<T: ?Sized>(&self, input: &Tracked<T>) -> Arc<T> {
+        self.record(&input.id);
+        Arc::clone(&input.value)
+    }
+
+    /// Read a derived value and take a shared handle to its payload.
+    pub fn read_derived_shared<T: ?Sized, O: OperationKind>(
+        &self,
+        input: &Derived<T, O>,
+    ) -> Arc<T> {
+        self.record(&input.id);
+        Arc::clone(&input.value)
     }
 
     fn record(&self, id: &DerivedId) {
@@ -395,7 +548,7 @@ pub struct EmitMetadata {
     pub producer: PluginId,
     pub algorithm: String,
     pub version: Version,
-    pub params: serde_json::Value,
+    pub params: Arc<serde_json::Value>,
     pub params_hash: ParameterHash,
     pub source: Option<SourceRef>,
     pub timestamp: Timestamp,
@@ -429,7 +582,7 @@ impl EmitMetadata {
             algorithm: producer.0.clone(),
             producer,
             version,
-            params: params.clone(),
+            params: Arc::new(params.clone()),
             params_hash: hash_params(params),
             source: None,
             timestamp,
@@ -523,6 +676,15 @@ impl<O: OperationKind> EmitToken<O> {
     /// on. Verification relies on that direction: a missing input breaks a
     /// replay, an extra one does not.
     pub fn emit<T>(&self, value: T) -> Derived<T, O> {
+        self.emit_shared(Arc::new(value))
+    }
+
+    /// Emit a value whose payload is already shared, without copying it.
+    ///
+    /// A stage that hands one payload to both its emitted result and a
+    /// downstream input reaches for this, so only one allocation exists for it.
+    /// It records an emission exactly as [`Self::emit`] does.
+    pub fn emit_shared<T: ?Sized>(&self, value: Arc<T>) -> Derived<T, O> {
         let sequence = self.emitted.fetch_add(1, Ordering::Relaxed);
         let id = if sequence == 0 {
             self.metadata.id.clone()
@@ -534,7 +696,7 @@ impl<O: OperationKind> EmitToken<O> {
             producer: self.metadata.producer.clone(),
             algorithm: self.metadata.algorithm.clone(),
             version: self.metadata.version.clone(),
-            params: self.metadata.params.clone(),
+            params: Arc::clone(&self.metadata.params),
             params_hash: self.metadata.params_hash.clone(),
             inputs: self.dependencies.snapshot(),
             source: self.metadata.source.clone(),
@@ -602,6 +764,85 @@ mod tests {
         assert_eq!(result.provenance().inputs, vec![DerivedId::new("source")]);
     }
 
+    /// The point of holding payloads behind an `Arc`: tracking, cloning, and
+    /// re-emitting a derived value must alias one allocation rather than deep-
+    /// copy the payload at each hop. A regression here is silent — everything
+    /// still compiles and every value still compares equal — so it is pinned
+    /// by identity, not by contents.
+    #[test]
+    fn tracking_and_cloning_a_derived_value_share_one_payload() {
+        let source =
+            InferenceToken::from_harness(metadata("source"), DependencyCollector::default())
+                .emit(String::from("payload"));
+        let tracked = Tracked::from(&source);
+        assert!(Arc::ptr_eq(&source.shared(), &tracked.shared()));
+
+        let dependencies = DependencyCollector::default();
+        assert!(std::ptr::eq(dependencies.read(&tracked), source.value()));
+        assert!(Arc::ptr_eq(
+            &dependencies.read_shared(&tracked),
+            &source.shared()
+        ));
+        let copied_tracked = tracked.clone();
+        assert!(Arc::ptr_eq(&copied_tracked.shared(), &source.shared()));
+        let copied_source = source.clone();
+        assert!(Arc::ptr_eq(&copied_source.into_shared(), &source.shared()));
+
+        // Re-emitting under a new identity keeps the payload where it is.
+        let forwarded = CalculationToken::from_harness(metadata("forwarded"), dependencies)
+            .emit_shared(tracked.shared());
+        assert_eq!(forwarded.id(), &DerivedId::new("forwarded"));
+        assert_eq!(
+            forwarded.provenance().inputs,
+            vec![DerivedId::new("source")]
+        );
+        assert!(Arc::ptr_eq(&forwarded.shared(), &source.shared()));
+    }
+
+    /// Provenance is shared for the same reason the payload is: it carries the
+    /// emitting call's whole parameter tree, and a consumer that persists or
+    /// retains it should not duplicate it.
+    #[test]
+    fn provenance_is_shared_across_clones_of_a_derived_value() {
+        let source =
+            CalculationToken::from_harness(metadata("source"), DependencyCollector::default())
+                .emit(1);
+        let copied = source.clone();
+        assert!(Arc::ptr_eq(
+            &source.shared_provenance(),
+            &copied.shared_provenance()
+        ));
+        assert!(std::ptr::eq(
+            source.provenance(),
+            &*source.shared_provenance()
+        ));
+    }
+
+    /// A payload that is neither `Clone` nor `Sized` still travels the whole
+    /// path, because nothing on it copies the payload.
+    #[test]
+    fn an_unsized_non_clone_payload_can_be_emitted_tracked_and_cloned() {
+        let bytes: Arc<[u8]> = Arc::from(vec![1_u8, 2, 3]);
+        let source =
+            InferenceToken::from_harness(metadata("source"), DependencyCollector::default())
+                .emit_shared(bytes);
+        let tracked = Tracked::from(&source);
+        let dependencies = DependencyCollector::default();
+        let copied_tracked = tracked.clone();
+        assert_eq!(dependencies.read(&copied_tracked), &[1, 2, 3]);
+        assert!(Arc::ptr_eq(&copied_tracked.shared(), &source.shared()));
+        let copied_source = source.clone();
+        assert_eq!(copied_source.value(), &[1, 2, 3]);
+        assert!(Arc::ptr_eq(&copied_source.into_shared(), &tracked.shared()));
+        assert_eq!(
+            CalculationToken::from_harness(metadata("result"), dependencies)
+                .emit(())
+                .provenance()
+                .inputs,
+            vec![source.id().clone()]
+        );
+    }
+
     #[test]
     fn tracked_values_retain_their_in_memory_operation() {
         let interpreted = InterpretationToken::from_harness(
@@ -649,11 +890,7 @@ mod tests {
     #[test]
     fn a_poisoned_collector_still_reports_what_it_recorded() {
         let collector = DependencyCollector::default();
-        collector.read(&Tracked {
-            id: DerivedId::new("before"),
-            value: 1,
-            operation: None,
-        });
+        collector.read(&Tracked::from_recorded(DerivedId::new("before"), 1));
 
         let poisoned = collector.clone();
         let _ = std::thread::spawn(move || {
@@ -663,11 +900,7 @@ mod tests {
         .join();
         assert!(collector.0.is_poisoned());
 
-        collector.read(&Tracked {
-            id: DerivedId::new("after"),
-            value: 2,
-            operation: None,
-        });
+        collector.read(&Tracked::from_recorded(DerivedId::new("after"), 2));
         assert_eq!(
             collector.snapshot(),
             vec![DerivedId::new("after"), DerivedId::new("before")]
@@ -677,16 +910,8 @@ mod tests {
 
     #[test]
     fn dependency_ids_are_sorted_and_deduplicated() {
-        let a = Tracked {
-            id: DerivedId::new("a"),
-            value: 1,
-            operation: None,
-        };
-        let b = Tracked {
-            id: DerivedId::new("b"),
-            value: 2,
-            operation: None,
-        };
+        let a = Tracked::from_recorded(DerivedId::new("a"), 1);
+        let b = Tracked::from_recorded(DerivedId::new("b"), 2);
         let collector = DependencyCollector::default();
         collector.read(&b);
         collector.read(&a);

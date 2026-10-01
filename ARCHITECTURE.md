@@ -131,12 +131,13 @@ pub type Interpreted<T>  = Derived<T, ops::Interpretation>;
 Three mechanisms make that label trustworthy:
 
 1. **`Derived`'s fields are private and `OperationKind` is sealed.** The only
-   constructor is `EmitToken::<O>::emit`, and a plugin receives exactly one token
-   whose `O` its family fixes. A sensor gets a `CalculationToken`; an interpreter
-   gets an `InterpretationToken`. Neither can produce the other's output, and
-   `Inferred<T>` cannot be returned where `Calculated<T>` is expected. Both facts
-   are pinned by `trybuild` tests with full rendered diagnostics in
-   `crates/unclip-plugin/tests/ui/`.
+   constructors are `EmitToken::<O>::emit` and `emit_shared`, which differ only
+   in whether the payload arrives already shared, and a plugin receives exactly
+   one token whose `O` its family fixes. A sensor gets a `CalculationToken`; an
+   interpreter gets an `InterpretationToken`. Neither can produce the other's
+   output, and `Inferred<T>` cannot be returned where `Calculated<T>` is
+   expected. Both facts are pinned by `trybuild` tests with full rendered
+   diagnostics in `crates/unclip-plugin/tests/ui/`.
 2. **Inputs are read through a context that records them.** `MeasureCtx::read`
    routes through `DependencyCollector`, which inserts into a `BTreeSet`, so
    provenance inputs are automatically sorted, deduplicated, and impossible to
@@ -158,6 +159,13 @@ restoring caller names:
 | `Tracked::from_inferred` | a replayed inference product |
 | `Tracked::from_recorded` | the operation genuinely is not known here |
 | `Tracked::from_stored` | the operation as the provenance row records it |
+| `Tracked::from_shared` | any of the above, for a payload already shared |
+
+`Derived` and `Tracked` both hold their payload behind an `Arc`, so tracking,
+cloning, storing and reporting one value all alias a single allocation. That is
+a memory property, not an epistemic one: it changes nothing about which
+operation a value claims, and `from_shared` takes the operation explicitly for
+exactly that reason. `CLONE_AUDIT.md` records what it bought.
 
 `require_calculated_evidence` rejects evidence *labeled* as inferred,
 experimental, or interpreted. It accepts the unlabeled case, because "no claim

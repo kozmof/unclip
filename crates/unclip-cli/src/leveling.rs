@@ -165,7 +165,7 @@ async fn persist_inference(
             unclip_store::StoredProvenance {
                 id: provenance_id.clone(),
                 run_id: Some(run_id.to_owned()),
-                provenance: output.provenance().clone(),
+                provenance: output.shared_provenance(),
             },
         )
         .await?;
@@ -181,23 +181,23 @@ async fn persist_inference(
             ),
             unclip_plugin::InferenceOutput::Observations(v) => (
                 v.as_slice(),
-                &[] as &[unclip_observe::Alignment],
-                &[] as &[unclip_observe::PartialRanking],
+                &[] as &[std::sync::Arc<unclip_observe::Alignment>],
+                &[] as &[std::sync::Arc<unclip_observe::PartialRanking>],
             ),
             unclip_plugin::InferenceOutput::Alignments(v) => (
-                &[] as &[unclip_observe::Observation],
+                &[] as &[std::sync::Arc<unclip_observe::Observation>],
                 v.as_slice(),
-                &[] as &[unclip_observe::PartialRanking],
+                &[] as &[std::sync::Arc<unclip_observe::PartialRanking>],
             ),
             unclip_plugin::InferenceOutput::Rankings(v) => (
-                &[] as &[unclip_observe::Observation],
-                &[] as &[unclip_observe::Alignment],
+                &[] as &[std::sync::Arc<unclip_observe::Observation>],
+                &[] as &[std::sync::Arc<unclip_observe::Alignment>],
                 v.as_slice(),
             ),
             unclip_plugin::InferenceOutput::Structured(_) => (
-                &[] as &[unclip_observe::Observation],
-                &[] as &[unclip_observe::Alignment],
-                &[] as &[unclip_observe::PartialRanking],
+                &[] as &[std::sync::Arc<unclip_observe::Observation>],
+                &[] as &[std::sync::Arc<unclip_observe::Alignment>],
+                &[] as &[std::sync::Arc<unclip_observe::PartialRanking>],
             ),
         };
         for observation in obs {
@@ -212,7 +212,7 @@ async fn persist_inference(
     for (_, (observation, provenance)) in observations {
         unclip_store::ObservationRepository::insert_observation(
             &repositories.observations,
-            observation,
+            &observation,
             &provenance,
         )
         .await?;
@@ -222,7 +222,7 @@ async fn persist_inference(
         unclip_store::ObservationRepository::insert_alignment(
             &repositories.observations,
             &id,
-            alignment,
+            &alignment,
             domain_id,
             domain_version,
             &provenance,
@@ -234,7 +234,7 @@ async fn persist_inference(
         unclip_store::ObservationRepository::insert_ranking(
             &repositories.observations,
             &id,
-            ranking,
+            &ranking,
             &provenance,
         )
         .await?;

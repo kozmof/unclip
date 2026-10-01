@@ -2,7 +2,7 @@
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
 use unclip_engine::{EmpiricalMethod, EmpiricalResult};
-use unclip_epistemic::{DerivedId, Timestamp, Tracked};
+use unclip_epistemic::{DerivedId, Timestamp};
 use unclip_measure::MeasurementKind;
 use unclip_store::{
     EngineRunRecord, EngineRunRepository, EngineRunStatus, MeasurementRecord,
@@ -27,12 +27,7 @@ fn calculate(run: &EngineRunRecord, snapshot: &Snapshot) -> anyhow::Result<Vec<E
     let inputs = snapshot
         .inputs
         .iter()
-        .map(|input| {
-            Tracked::from_calculated(
-                input.record.provenance.clone(),
-                input.record.measurement.clone(),
-            )
-        })
+        .map(|input| input.record.tracked())
         .collect::<Vec<_>>();
     // Deriving structures from recorded measurements needs no plugin registry,
     // so this no longer builds an engine to reach a pure calculation.
@@ -223,7 +218,7 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
                 structure.id()
             );
             ensure!(
-                provenance.provenance == *structure.provenance()
+                *provenance.provenance == *structure.provenance()
                     && provenance.run_id.as_ref() == Some(&run.id),
                 "empirical provenance differs from stored evidence: {}",
                 structure.id()

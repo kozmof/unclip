@@ -237,11 +237,11 @@ fn retains_three_separate_versioned_profiles_and_exact_dependencies() {
     assert_eq!(value.right.measurements.len(), 1);
     assert_eq!(value.product.measurements.len(), 1);
     assert_eq!(
-        &value.left.measurements[0].measurement,
+        &*value.left.measurements[0].measurement,
         fixture.left_measurements[0].value()
     );
     assert_eq!(
-        &value.product.measurements[0].measurement,
+        &*value.product.measurements[0].measurement,
         fixture.product_measurements[0].value()
     );
 

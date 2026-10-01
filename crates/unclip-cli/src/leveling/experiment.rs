@@ -3,6 +3,7 @@
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use unclip_engine::{
     ComparisonPair, CounterfactualMeasurementInputs, ExperimentConstraints, HeldOutInputs,
     RelationBindings,
@@ -48,20 +49,20 @@ fn root_provenance(
     StoredProvenance {
         id,
         run_id: Some(run_id.into()),
-        provenance: Provenance {
+        provenance: std::sync::Arc::new(Provenance {
             operation: Operation::Calculated,
             producer: PluginId::new(producer),
             algorithm: "stored_version_snapshot".into(),
             version: "0.1.0".parse().expect("valid snapshot producer version"),
             params_hash: hash_params(&params),
-            params,
+            params: Arc::new(params),
             inputs: vec![],
             source: None,
             timestamp: Timestamp::new(timestamp),
             domain_version,
             frame_version,
             model: None,
-        },
+        }),
     }
 }
 
@@ -173,7 +174,7 @@ fn stored_profile(
                     .clone(),
                 provenance: value.id().clone(),
                 kind: measurement_kind(plan, measurement)?,
-                measurement: measurement.clone(),
+                measurement: value.shared(),
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
@@ -279,7 +280,7 @@ pub(crate) async fn run(
             .get_recorded_observation(id)
             .await?
             .with_context(|| format!("observation not found: {id:?}"))?;
-        observations.push(Tracked::from_inferred(record.provenance, record.value));
+        observations.push(record.into_tracked(Some(Operation::Inferred)));
     }
     let mut alignments = Vec::new();
     let mut rankings = Vec::new();
@@ -290,7 +291,7 @@ pub(crate) async fn run(
                 .alignments_for_observation(id)
                 .await?
                 .into_iter()
-                .map(|record| Tracked::from_inferred(record.provenance, record.value)),
+                .map(|record| record.into_tracked(Some(Operation::Inferred))),
         );
         rankings.extend(
             repos
@@ -298,7 +299,7 @@ pub(crate) async fn run(
                 .rankings_for_observation(id)
                 .await?
                 .into_iter()
-                .map(|record| Tracked::from_inferred(record.provenance, record.value)),
+                .map(|record| record.into_tracked(Some(Operation::Inferred))),
         );
     }
     let mut transfer = Vec::new();
@@ -313,17 +314,17 @@ pub(crate) async fn run(
             .get_profile_records(profile_id)
             .await?
             .with_context(|| format!("transfer measurement profile not found: {profile_id}"))?;
-        transfer.extend(
-            records
-                .into_iter()
-                .map(|record| Tracked::from_calculated(record.provenance, record.measurement)),
-        );
+        transfer.extend(records.into_iter().map(|record| record.into_tracked()));
     }
     let timestamp = unclip_store::now();
     let baseline_id = DerivedId::new(format!("{}/baseline", request.run_id));
     let frame_snapshot_id = DerivedId::new(format!("{}/frame", request.run_id));
-    let baseline = Tracked::from_recorded(baseline_id.clone(), domain.clone());
-    let tracked_frame = Tracked::from_recorded(frame_snapshot_id.clone(), frame.clone());
+    // The run tracks the same snapshot and frame it goes on to read versions
+    // from, so both are shared rather than copied into the tracked inputs.
+    let domain = Arc::new(domain);
+    let frame = Arc::new(frame);
+    let baseline = Tracked::from_shared(baseline_id.clone(), Arc::clone(&domain), None);
+    let tracked_frame = Tracked::from_shared(frame_snapshot_id.clone(), Arc::clone(&frame), None);
     let split = unclip_engine::select_observations(
         &observations,
         &request.training,
@@ -342,7 +343,7 @@ pub(crate) async fn run(
         split.value(),
         &held_out_inference_products,
     )?;
-    let tracked_split = Tracked::from_derived(&split, split.value().clone());
+    let tracked_split = Tracked::from(&split);
     let application_id = format!("{}/application", request.run_id);
     let application = engine.apply_candidate_with_relation_bindings(
         &baseline,
@@ -468,12 +469,12 @@ pub(crate) async fn run(
         StoredProvenance {
             id: split.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: split.provenance().clone(),
+            provenance: split.shared_provenance(),
         },
         StoredProvenance {
             id: application.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: application.provenance().clone(),
+            provenance: application.shared_provenance(),
         },
     ];
     prerequisite_provenance.extend(
@@ -486,7 +487,7 @@ pub(crate) async fn run(
             .map(|value| StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some(request.run_id.clone()),
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             }),
     );
     prerequisite_provenance.extend(
@@ -496,33 +497,33 @@ pub(crate) async fn run(
             .map(|value| StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some(request.run_id.clone()),
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             }),
     );
     if let Some(value) = &experiment.constraints {
         prerequisite_provenance.push(StoredProvenance {
             id: value.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: value.provenance().clone(),
+            provenance: value.shared_provenance(),
         });
     }
     if let Some(value) = &experiment.pareto {
         prerequisite_provenance.push(StoredProvenance {
             id: value.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: value.provenance().clone(),
+            provenance: value.shared_provenance(),
         });
     }
     let post_delta_provenance = vec![
         StoredProvenance {
             id: experiment.execution.comparison.profile.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: experiment.execution.comparison.profile.provenance().clone(),
+            provenance: experiment.execution.comparison.profile.shared_provenance(),
         },
         StoredProvenance {
             id: experiment.evidence.id().clone(),
             run_id: Some(request.run_id.clone()),
-            provenance: experiment.evidence.provenance().clone(),
+            provenance: experiment.evidence.shared_provenance(),
         },
     ];
     let run_record = unclip_engine::run_record(

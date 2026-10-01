@@ -1,6 +1,7 @@
 //! Atomic storage for anonymous proposals and completed counterfactual evidence.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -233,7 +234,7 @@ async fn provenance(
     txn: &DatabaseTransaction,
     run_id: Option<String>,
     id: &DerivedId,
-    value: &Provenance,
+    value: Arc<Provenance>,
 ) -> StoreResult<()> {
     if value.inputs.is_empty() {
         return Err(invalid(
@@ -245,7 +246,7 @@ async fn provenance(
         StoredProvenance {
             id: id.clone(),
             run_id,
-            provenance: value.clone(),
+            provenance: value,
         },
     )
     .await
@@ -260,7 +261,7 @@ impl CandidateRepository for SeaOrmExperimentRepository {
     ) -> StoreResult<()> {
         let value = candidate.value();
         let txn = self.db.begin().await?;
-        provenance(&txn, run_id, candidate.id(), candidate.provenance()).await?;
+        provenance(&txn, run_id, candidate.id(), candidate.shared_provenance()).await?;
         candidates::Entity::insert(candidates::ActiveModel {
             id: Set(candidate.id().0.clone()),
             domain_version_id: Set(value.domain_version_id.clone()),
@@ -354,7 +355,7 @@ impl CandidateInterpretationRepository for SeaOrmExperimentRepository {
             &txn,
             run_id,
             interpretation.id(),
-            interpretation.provenance(),
+            interpretation.shared_provenance(),
         )
         .await?;
         candidate_interpretations::Entity::insert(candidate_interpretations::ActiveModel {
@@ -434,7 +435,7 @@ async fn insert_completed_experiment_in_transaction(
         txn,
         Some(run_id.into()),
         experiment.id(),
-        experiment.provenance(),
+        experiment.shared_provenance(),
     )
     .await?;
     experiments::Entity::insert(experiments::ActiveModel {
@@ -658,7 +659,7 @@ async fn insert_revision_in_transaction(
         ));
     }
     require_input(revision.provenance(), &experiment.provenance_id)?;
-    provenance(txn, run_id, revision.id(), revision.provenance()).await?;
+    provenance(txn, run_id, revision.id(), revision.shared_provenance()).await?;
     domain_revisions::Entity::insert(domain_revisions::ActiveModel {
         id: Set(revision.id().0.clone()),
         candidate_id: Set(value.candidate_id.0.clone()),
@@ -713,7 +714,7 @@ async fn prepare_delta(
         txn,
         Some(run_id.into()),
         calculated.id(),
-        calculated.provenance(),
+        calculated.shared_provenance(),
     )
     .await?;
     Ok(experiment_deltas::ActiveModel {

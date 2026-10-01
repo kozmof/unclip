@@ -24,6 +24,33 @@ pub enum ScalarDifference {
         reason: String,
     },
 }
+
+/// The write side of [`ScalarDifference`], borrowing what it serializes.
+///
+/// The comparator builds this payload only to turn it straight into JSON, and
+/// it never retains it. The `Unavailable` arm is where that matters: it is
+/// reached precisely when the readings are *not* scalars, so the two readings
+/// it reports can be matrices or graphs, and copying both of them per
+/// comparison to serialize them once is the expensive path through this
+/// comparator. `ScalarDifference` stays as the readable, owning shape that
+/// consumers deserialize into; the round-trip test below pins the two
+/// together.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum ScalarDifferenceRef<'a> {
+    Value {
+        before: f64,
+        after: f64,
+        difference: f64,
+    },
+    Unavailable {
+        before: &'a Reading,
+        after: &'a Reading,
+    },
+    NotApplicable {
+        reason: &'a str,
+    },
+}
 pub struct ScalarDifferenceComparator {
     descriptor: ComparatorDescriptor,
 }
@@ -68,8 +95,8 @@ impl Comparator for ScalarDifferenceComparator {
             }
         }
         let result = if unsupported(&before.reading) || unsupported(&after.reading) {
-            ScalarDifference::NotApplicable {
-                reason: "requires scalar readings; structured values are not scalarized".into(),
+            ScalarDifferenceRef::NotApplicable {
+                reason: "requires scalar readings; structured values are not scalarized",
             }
         } else if let (
             Reading::Value {
@@ -84,15 +111,15 @@ impl Comparator for ScalarDifferenceComparator {
             if !difference.is_finite() {
                 return Err(invalid("scalar difference exceeds finite numeric range"));
             }
-            ScalarDifference::Value {
+            ScalarDifferenceRef::Value {
                 before: *a,
                 after: *b,
                 difference,
             }
         } else {
-            ScalarDifference::Unavailable {
-                before: before.reading.clone(),
-                after: after.reading.clone(),
+            ScalarDifferenceRef::Unavailable {
+                before: &before.reading,
+                after: &after.reading,
             }
         };
         Ok(token.emit(Delta {
@@ -132,4 +159,61 @@ pub fn compare_measurements(
         results.push(comparator.compare(&ctx, token)?);
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ScalarDifferenceRef` is what the comparator writes and
+    /// `ScalarDifference` is what consumers read. They are one wire format, so
+    /// a drift between them would silently change every recorded delta. This
+    /// pins them to each other over all three arms.
+    #[test]
+    fn the_borrowed_payload_writes_what_the_owned_one_reads() {
+        let matrix = Reading::Value {
+            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]]),
+        };
+        let missing = Reading::NotMeasured;
+        let cases = [
+            (
+                ScalarDifferenceRef::Value {
+                    before: 1.0,
+                    after: 2.5,
+                    difference: 1.5,
+                },
+                ScalarDifference::Value {
+                    before: 1.0,
+                    after: 2.5,
+                    difference: 1.5,
+                },
+            ),
+            (
+                ScalarDifferenceRef::Unavailable {
+                    before: &matrix,
+                    after: &missing,
+                },
+                ScalarDifference::Unavailable {
+                    before: matrix.clone(),
+                    after: missing.clone(),
+                },
+            ),
+            (
+                ScalarDifferenceRef::NotApplicable { reason: "why" },
+                ScalarDifference::NotApplicable {
+                    reason: "why".to_owned(),
+                },
+            ),
+        ];
+        for (borrowed, owned) in cases {
+            let written = serde_json::to_value(&borrowed).expect("borrowed payload serializes");
+            assert_eq!(
+                written,
+                serde_json::to_value(&owned).expect("owned payload serializes")
+            );
+            let read: ScalarDifference =
+                serde_json::from_value(written).expect("a written delta reads back");
+            assert_eq!(read, owned);
+        }
+    }
 }

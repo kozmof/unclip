@@ -1,5 +1,7 @@
 //! Persistence for sensor runs and typed, sparse measurement profiles.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::{
@@ -11,7 +13,7 @@ use unclip_domain::FrameId;
 use unclip_entity::{
     empirical_structures, frame_versions, measurement_profiles, measurements, sensor_runs,
 };
-use unclip_epistemic::{Calculated, DerivedId, FrameVersion, PluginId};
+use unclip_epistemic::{Calculated, DerivedId, FrameVersion, Operation, PluginId, Tracked};
 use unclip_measure::{
     EmpiricalStructure, Measurement, MeasurementContext, MeasurementKind, MeasurementProfile,
     MeasurementValue, Reading,
@@ -21,6 +23,15 @@ use crate::provenance_repository::insert_provenance_in_transaction;
 use crate::{StoreError, StoreResult, StoredProvenance};
 pub use unclip_record::SensorRunRecord;
 
+/// One stored measurement with the row identity and provenance it was read at.
+///
+/// The measurement is shared rather than owned inline, for the same reason a
+/// [`RecordedInference`] shares its payload: a caller that keeps the record —
+/// to write it into a run snapshot, or to report it — almost always tracks the
+/// same measurement as engine evidence at the same time, and the two should
+/// not cost two copies of the reading and its context.
+///
+/// [`RecordedInference`]: unclip_record::RecordedInference
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeasurementRecord {
@@ -29,7 +40,30 @@ pub struct MeasurementRecord {
     pub provenance: DerivedId,
     /// Required for sparse readings, whose value cannot communicate a kind.
     pub kind: MeasurementKind,
-    pub measurement: Measurement,
+    pub measurement: Arc<Measurement>,
+}
+
+impl MeasurementRecord {
+    /// Track this record's measurement as calculated evidence, without copying
+    /// it. Only calculation writes the `measurements` table, so the label is
+    /// the row's own, not a claim the caller invents.
+    pub fn tracked(&self) -> Tracked<Measurement> {
+        Tracked::from_shared(
+            self.provenance.clone(),
+            Arc::clone(&self.measurement),
+            Some(Operation::Calculated),
+        )
+    }
+
+    /// Consume this record into tracked evidence, for a caller that keeps no
+    /// copy of the record itself.
+    pub fn into_tracked(self) -> Tracked<Measurement> {
+        Tracked::from_shared(
+            self.provenance,
+            self.measurement,
+            Some(Operation::Calculated),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +90,18 @@ pub struct EmpiricalStructureRecord {
 struct StoredContext {
     values: MeasurementContext,
     sparse_reading: Option<Reading>,
+}
+
+/// The write side of [`StoredContext`], borrowing what it serializes.
+///
+/// Both halves of that column live on a shared measurement, so writing one row
+/// should not have to own a copy of the context map and the sparse reading
+/// just to turn them into JSON. The two shapes must serialize identically; the
+/// round-trip test below is what holds them together.
+#[derive(Debug, Serialize)]
+struct StoredContextRef<'a> {
+    values: &'a MeasurementContext,
+    sparse_reading: Option<&'a Reading>,
 }
 
 #[async_trait]
@@ -218,6 +264,10 @@ async fn insert_measurement(
             "measurement sensor and version do not match its sensor run",
         ));
     }
+    // Destructured by reference, and still exhaustively: the columns are
+    // filled from the shared measurement without copying its reading or
+    // context, while a new field on `Measurement` still fails to compile here
+    // until it is either stored or explicitly ignored.
     let Measurement {
         sensor: _,
         sensor_version: _,
@@ -225,24 +275,21 @@ async fn insert_measurement(
         confidence,
         sample_count,
         context,
-    } = record.measurement;
-    let status = status_name(&reading).to_string();
-    let value_json = match &reading {
+    } = &*record.measurement;
+    let status = status_name(reading).to_string();
+    let value_json = match reading {
         Reading::Value { value } => {
             Some(serde_json::to_string(value).map_err(anyhow::Error::from)?)
         }
         _ => None,
     };
-    let sparse_reading = if matches!(reading, Reading::Value { .. }) {
-        None
-    } else {
-        Some(reading)
-    };
-    let context_json = serde_json::to_string(&StoredContext {
+    let sparse_reading = (!matches!(reading, Reading::Value { .. })).then_some(reading);
+    let context_json = serde_json::to_string(&StoredContextRef {
         values: context,
         sparse_reading,
     })
     .map_err(anyhow::Error::from)?;
+    let confidence = *confidence;
     let sample_count = sample_count
         .map(i64::try_from)
         .transpose()
@@ -359,7 +406,9 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
             .map(|records| MeasurementProfile {
                 measurements: records
                     .into_iter()
-                    .map(|record| record.measurement)
+                    // The records were just hydrated for this call, so each
+                    // handle is the only one and nothing is copied here.
+                    .map(|record| Arc::unwrap_or_clone(record.measurement))
                     .collect(),
             }))
     }
@@ -411,7 +460,7 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
                 sensor_run_id: row.sensor_run_id,
                 provenance: DerivedId::new(row.provenance_id),
                 kind,
-                measurement: Measurement {
+                measurement: Arc::new(Measurement {
                     sensor: PluginId::new(run.sensor_id),
                     sensor_version: semver::Version::parse(&run.sensor_version)
                         .context("invalid stored sensor version")?,
@@ -423,7 +472,7 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
                         .transpose()
                         .context("negative stored sample count")?,
                     context: stored.values,
-                },
+                }),
             });
         }
         Ok(Some(hydrated))
@@ -449,11 +498,7 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
                 "calculated empirical structures require recorded evidence inputs",
             ));
         }
-        let provenance = StoredProvenance {
-            id: structure.id().clone(),
-            run_id,
-            provenance: structure.provenance().clone(),
-        };
+        let provenance = StoredProvenance::of(&structure, run_id);
         let record = EmpiricalStructureRecord {
             id: structure.id().0.clone(),
             profile_id,
@@ -522,4 +567,46 @@ async fn insert_structure_in_transaction(
     .exec(txn)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `StoredContextRef` exists only so writing a row need not own the
+    /// context it serializes. It is the same column as `StoredContext`, so if
+    /// the two shapes ever drift, every measurement written after the drift
+    /// becomes unreadable. This pins them to one another.
+    #[test]
+    fn the_borrowed_context_writes_what_the_owned_one_reads() {
+        let values = MeasurementContext {
+            values: [
+                ("axis".to_owned(), serde_json::json!("a")),
+                ("samples".to_owned(), serde_json::json!(3)),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        for sparse_reading in [
+            None,
+            Some(Reading::InsufficientEvidence { have: 1, need: 4 }),
+        ] {
+            let borrowed = serde_json::to_string(&StoredContextRef {
+                values: &values,
+                sparse_reading: sparse_reading.as_ref(),
+            })
+            .expect("borrowed context serializes");
+            let owned = serde_json::to_string(&StoredContext {
+                values: values.clone(),
+                sparse_reading: sparse_reading.clone(),
+            })
+            .expect("owned context serializes");
+            assert_eq!(borrowed, owned);
+
+            let read: StoredContext =
+                serde_json::from_str(&borrowed).expect("a written column reads back");
+            assert_eq!(read.values, values);
+            assert_eq!(read.sparse_reading, sparse_reading);
+        }
+    }
 }

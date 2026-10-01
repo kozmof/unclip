@@ -94,7 +94,7 @@ fn distinct_observation_presence_preserves_counts_and_replays_with_provenance() 
             DerivedId::new("z")
         ]
     );
-    assert_eq!(results[0].provenance().params, params());
+    assert_eq!(*results[0].provenance().params, params());
     observations.reverse();
     assert_eq!(evaluate(&c, &observations, params()).unwrap(), results);
 }

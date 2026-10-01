@@ -14,12 +14,12 @@ fn application() -> Tracked<CounterfactualSnapshot> {
             added_units: vec![UnitId::new("new")],
             added_relations: vec![],
             property_changes: vec![],
-            domain: DomainSnapshot {
+            domain: std::sync::Arc::new(DomainSnapshot {
                 id: DomainId::new("d"),
                 version: DomainVersion::new("2"),
                 units: BTreeMap::new(),
                 relations: BTreeMap::new(),
-            },
+            }),
         },
     )
 }

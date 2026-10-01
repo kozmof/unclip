@@ -80,7 +80,7 @@ fn profile_pairing_is_explicit_replayable_and_preserves_independent_deltas() {
                 vec![DerivedId::new("a2"), DerivedId::new("b2")]
             }
         );
-        assert_eq!(profile.deltas[index].delta, *delta.value());
+        assert_eq!(*profile.deltas[index].delta, *delta.value());
         assert_eq!(profile.deltas[index].id, *delta.id());
     }
     let replay = compare(

@@ -708,20 +708,20 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         unclip_store::StoredProvenance {
             id: training_evidence.clone(),
             run_id: None,
-            provenance: unclip_epistemic::Provenance {
+            provenance: std::sync::Arc::new(unclip_epistemic::Provenance {
                 operation: unclip_epistemic::Operation::Calculated,
                 producer: unclip_epistemic::PluginId::new("fixture.training"),
                 algorithm: "fixture.training".into(),
                 version: "0.1.0".parse().unwrap(),
                 params_hash: unclip_epistemic::hash_params(&root_params),
-                params: root_params,
+                params: std::sync::Arc::new(root_params),
                 inputs: vec![],
                 source: None,
                 timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
                 domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
                 frame_version: None,
                 model: None,
-            },
+            }),
         },
     )
     .await
@@ -733,20 +733,20 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
         unclip_store::StoredProvenance {
             id: leaked_intermediate.clone(),
             run_id: None,
-            provenance: unclip_epistemic::Provenance {
+            provenance: std::sync::Arc::new(unclip_epistemic::Provenance {
                 operation: unclip_epistemic::Operation::Calculated,
                 producer: unclip_epistemic::PluginId::new("fixture.intermediate"),
                 algorithm: "fixture.intermediate".into(),
                 version: "0.1.0".parse().unwrap(),
                 params_hash: unclip_epistemic::hash_params(&leaked_params),
-                params: leaked_params,
+                params: std::sync::Arc::new(leaked_params),
                 inputs: vec![unclip_epistemic::DerivedId::new(&derived_id)],
                 source: None,
                 timestamp: unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
                 domain_version: Some(unclip_epistemic::DomainVersion::new("7")),
                 frame_version: None,
                 model: None,
-            },
+            }),
         },
     )
     .await
@@ -1045,7 +1045,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
     unclip_store::ObservationRepository::insert_alignment(
         &observation_records,
         "manual-alignment",
-        unclip_observe::Alignment {
+        &unclip_observe::Alignment {
             observation: unclip_observe::ObservationId::new("manual-observation"),
             candidates: vec![unclip_observe::AlignmentCandidate {
                 observed: unclip_observe::ObservedUnitId::new("observed"),
@@ -1063,7 +1063,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
     unclip_store::ObservationRepository::insert_ranking(
         &observation_records,
         "manual-ranking",
-        unclip_observe::PartialRanking {
+        &unclip_observe::PartialRanking {
             observation: unclip_observe::ObservationId::new("manual-observation"),
             tiers: vec![unclip_observe::RankTier {
                 units: vec![unclip_observe::ObservedUnitId::new("observed")],
@@ -2044,12 +2044,12 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
             .insert_provenance(unclip_store::StoredProvenance {
                 id: derived_id.clone(),
                 run_id: None,
-                provenance: Provenance {
+                provenance: std::sync::Arc::new(Provenance {
                     operation: Operation::Inferred,
                     producer: PluginId::new("infer.fixture"),
                     algorithm: "fixture".into(),
                     version: "0.1.0".parse().unwrap(),
-                    params: serde_json::json!({}),
+                    params: std::sync::Arc::new(serde_json::json!({})),
                     params_hash: hash_params(&serde_json::json!({})),
                     inputs: vec![],
                     source: Some(SourceRef::new("fixture")),
@@ -2057,7 +2057,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
                     domain_version: Some(domain.version.clone()),
                     frame_version: None,
                     model: None,
-                },
+                }),
             })
             .await
             .unwrap();
@@ -2078,13 +2078,13 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
                 .into(),
         };
         observations
-            .insert_observation(observation.clone(), &derived_id)
+            .insert_observation(&observation.clone(), &derived_id)
             .await
             .unwrap();
         observations
             .insert_alignment(
                 &format!("align/{id}"),
-                Alignment {
+                &Alignment {
                     observation: observation.id.clone(),
                     candidates: ["a", "b"]
                         .map(|id| AlignmentCandidate {
@@ -2104,7 +2104,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
         observations
             .insert_ranking(
                 &format!("rank/{id}"),
-                PartialRanking {
+                &PartialRanking {
                     observation: observation.id,
                     tiers: order
                         .map(|id| RankTier {
@@ -2540,7 +2540,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
     observations
         .insert_ranking(
             "rank/later",
-            PartialRanking {
+            &PartialRanking {
                 observation: ObservationId::new("obs-1"),
                 tiers: ["b", "a"]
                     .map(|id| RankTier {

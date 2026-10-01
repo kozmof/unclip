@@ -84,18 +84,15 @@ fn fixture() -> Fixture {
         provenance.push(StoredProvenance {
             id: observation.id().clone(),
             run_id: None,
-            provenance: observation.provenance().clone(),
+            provenance: observation.shared_provenance(),
         });
         provenance.push(StoredProvenance {
             id: alignment.id().clone(),
             run_id: None,
-            provenance: alignment.provenance().clone(),
+            provenance: alignment.shared_provenance(),
         });
-        observations.push(Tracked::from_derived(
-            &observation,
-            observation.value().clone(),
-        ));
-        alignments.push(Tracked::from_derived(&alignment, alignment.value().clone()));
+        observations.push(Tracked::from(&observation));
+        alignments.push(Tracked::from(&alignment));
     }
     let engine = Engine::with_builtins().unwrap();
     let plan = engine
@@ -162,11 +159,7 @@ fn run_generator(
     )
 }
 fn measurements(fixture: &Fixture) -> Vec<Tracked<Measurement>> {
-    fixture
-        .measurements
-        .iter()
-        .map(|m| Tracked::from_derived(m, m.value().clone()))
-        .collect()
+    fixture.measurements.iter().map(Tracked::from).collect()
 }
 
 #[test]
@@ -314,7 +307,7 @@ async fn assert_stored(fixture: Fixture, generator: &str) {
             .insert_provenance(StoredProvenance {
                 id: measurement.id().clone(),
                 run_id: None,
-                provenance: measurement.provenance().clone(),
+                provenance: measurement.shared_provenance(),
             })
             .await
             .unwrap();
@@ -322,7 +315,7 @@ async fn assert_stored(fixture: Fixture, generator: &str) {
     let measured = fixture
         .measurements
         .iter()
-        .map(|m| Tracked::from_derived(m, m.value().clone()))
+        .map(Tracked::from)
         .collect::<Vec<_>>();
     let candidates = run_generator(
         generator,
@@ -351,7 +344,7 @@ async fn assert_stored(fixture: Fixture, generator: &str) {
                 .unwrap()
                 .unwrap()
                 .provenance,
-            *candidate.provenance()
+            candidate.shared_provenance()
         );
         assert!(provenance
             .ancestors(candidate.id())
@@ -870,7 +863,7 @@ fn generated_motif_applies_without_inventing_domain_edges_and_rejects_corrupt_su
     assert_eq!(candidates.len(), 1);
     let engine = Engine::with_builtins().unwrap();
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
-    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let candidate = Tracked::from(&candidates[0]);
     let result = engine
         .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
         .unwrap();

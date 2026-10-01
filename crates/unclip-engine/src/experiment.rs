@@ -4,12 +4,21 @@ use crate::nulls::models::evaluate_null_models_with_inputs;
 use crate::pareto::compare_pareto;
 use crate::run_record;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use unclip_epistemic::{
     Calculated, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken, Experimental,
     PluginId, Tracked,
 };
 use unclip_plugin::{PluginError, Result, RunPlan};
 
+/// Everything one counterfactual experiment concluded, as one recorded value.
+///
+/// The payloads this gathers — the delta profile, the null readings, the
+/// constraint assessments, the Pareto assessment — are all also returned
+/// alongside it on [`CounterfactualExperiment`], each still owned by the
+/// derived value that produced it. They are therefore shared here rather than
+/// copied: one experiment used to hold two of everything it concluded, and
+/// these are the largest values it handles.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CounterfactualEvidence {
@@ -21,15 +30,15 @@ pub struct CounterfactualEvidence {
     pub before: Vec<DerivedId>,
     pub after: Vec<DerivedId>,
     pub comparison: DerivedId,
-    pub delta_profile: super::DeltaProfile,
+    pub delta_profile: Arc<super::DeltaProfile>,
     pub null_results: Vec<NullEvidence>,
     pub constraint_assessment: Option<DerivedId>,
-    pub constraints: Vec<super::ConstraintAssessment>,
+    pub constraints: Arc<Vec<super::ConstraintAssessment>>,
     pub transfer_measurements: Vec<unclip_record::RecordedInference<unclip_measure::Measurement>>,
     #[serde(default)]
     pub pareto_assessment: Option<DerivedId>,
     #[serde(default)]
-    pub pareto: Option<super::ParetoAssessment>,
+    pub pareto: Option<Arc<super::ParetoAssessment>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,7 +46,7 @@ pub struct CounterfactualEvidence {
 pub struct NullEvidence {
     pub id: DerivedId,
     pub model: PluginId,
-    pub reading: unclip_measure::Reading,
+    pub reading: Arc<unclip_measure::Reading>,
 }
 
 #[derive(Default)]
@@ -78,8 +87,7 @@ impl super::Engine {
         let baseline = dependencies.read(inputs.baseline.baseline);
         let frame = dependencies.read(inputs.baseline.frame);
         let split = dependencies.read(inputs.baseline.split);
-        let applied =
-            Tracked::from_derived(inputs.counterfactual, inputs.counterfactual.value().clone());
+        let applied = Tracked::from(inputs.counterfactual);
         let snapshot = dependencies.read(&applied);
         let proposal = dependencies.read(candidate);
         if candidate.id() != &snapshot.candidate
@@ -115,19 +123,19 @@ impl super::Engine {
             candidate: snapshot.candidate.clone(),
             null_results: vec![],
             constraint_assessment: None,
-            constraints: vec![],
+            constraints: Arc::default(),
             transfer_measurements: vec![],
             pareto_assessment: None,
             pareto: None,
             before: vec![],
             after: vec![],
             comparison: DerivedId::new(format!("{}/comparison/profile", run.id)),
-            delta_profile: super::DeltaProfile {
+            delta_profile: Arc::new(super::DeltaProfile {
                 pairs: vec![],
                 deltas: vec![],
                 unmatched_before: vec![],
                 unmatched_after: vec![],
-            },
+            }),
         };
         let id = DerivedId::new(format!("{}/experiment", run.id));
         let domain_version = baseline.version.clone();
@@ -143,7 +151,7 @@ impl super::Engine {
         let observations = split
             .held_out
             .iter()
-            .map(|entry| Tracked::from_recorded(entry.provenance.clone(), entry.value.clone()))
+            .map(|entry| entry.tracked(None))
             .collect::<Vec<_>>();
         let null_inputs = super::NullInputs {
             observations: &observations,
@@ -174,7 +182,7 @@ impl super::Engine {
         }
         let profile = &execution.comparison.profile;
         evidence.comparison = profile.id().clone();
-        evidence.delta_profile = dependencies.read_derived(profile).clone();
+        evidence.delta_profile = dependencies.read_derived_shared(profile);
         for result in &null_results {
             if dependencies.snapshot().contains(result.id()) || result.id() == &id {
                 return Err(PluginError::Message(
@@ -184,7 +192,7 @@ impl super::Engine {
             evidence.null_results.push(NullEvidence {
                 id: result.id().clone(),
                 model: result.provenance().producer.clone(),
-                reading: dependencies.read_derived(result).clone(),
+                reading: dependencies.read_derived_shared(result),
             });
         }
         let mut transfer = constraint_inputs
@@ -206,10 +214,10 @@ impl super::Engine {
             }
             evidence
                 .transfer_measurements
-                .push(unclip_record::RecordedInference {
-                    provenance: input.id().clone(),
-                    value: dependencies.read(input).clone(),
-                });
+                .push(unclip_record::RecordedInference::shared(
+                    input.id().clone(),
+                    dependencies.read_shared(input),
+                ));
         }
         let pareto = if pareto_dimensions.is_empty() {
             None
@@ -219,7 +227,7 @@ impl super::Engine {
                 .before
                 .iter()
                 .chain(&execution.measurements.after)
-                .map(|value| Tracked::from_derived(value, value.value().clone()))
+                .map(Tracked::from)
                 .collect::<Vec<_>>();
             let result = compare_pareto(
                 &measurements,
@@ -233,7 +241,7 @@ impl super::Engine {
                 ));
             }
             evidence.pareto_assessment = Some(result.id().clone());
-            evidence.pareto = Some(dependencies.read_derived(&result).clone());
+            evidence.pareto = Some(dependencies.read_derived_shared(&result));
             Some(result)
         };
         let assessments = if constraints.is_empty() {
@@ -244,11 +252,14 @@ impl super::Engine {
                 .before
                 .iter()
                 .chain(&execution.measurements.after)
-                .map(|value| Tracked::from_derived(value, value.value().clone()))
+                .map(Tracked::from)
                 .collect::<Vec<_>>();
-            measurements.extend(evidence.transfer_measurements.iter().map(|entry| {
-                Tracked::from_recorded(entry.provenance.clone(), entry.value.clone())
-            }));
+            measurements.extend(
+                evidence
+                    .transfer_measurements
+                    .iter()
+                    .map(|entry| entry.tracked(None)),
+            );
             let result = assess_experiment_constraints(
                 constraints,
                 &measurements,
@@ -262,7 +273,7 @@ impl super::Engine {
                 ));
             }
             evidence.constraint_assessment = Some(result.id().clone());
-            evidence.constraints = dependencies.read_derived(&result).clone();
+            evidence.constraints = dependencies.read_derived_shared(&result);
             Some(result)
         };
         if dependencies.snapshot().contains(&id) || evidence.candidate == id {

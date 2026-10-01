@@ -392,7 +392,7 @@ fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
     .unwrap();
     assert_eq!(candidates.len(), 1);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
-    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let candidate = Tracked::from(&candidates[0]);
     let result = engine
         .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
         .unwrap();
@@ -491,7 +491,7 @@ fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
     assert_eq!(candidates.len(), 2);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
     for generated in candidates {
-        let candidate = Tracked::from_derived(&generated, generated.value().clone());
+        let candidate = Tracked::from(&generated);
         let result = engine
             .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
             .unwrap();
@@ -610,7 +610,7 @@ fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
         .unwrap();
         assert_eq!(candidates.len(), 1);
         let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
-        let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+        let candidate = Tracked::from(&candidates[0]);
         let result = engine
             .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
             .unwrap();
@@ -722,7 +722,7 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
     .unwrap();
     assert_eq!(candidates.len(), 1);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), relation_domain());
-    let candidate = Tracked::from_derived(&candidates[0], candidates[0].value().clone());
+    let candidate = Tracked::from(&candidates[0]);
     let result = engine
         .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
         .unwrap();

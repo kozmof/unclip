@@ -223,7 +223,7 @@ fn has_measured_null(evidence: &CounterfactualEvidence, plugin: &str, model: &st
     evidence.null_results.iter().any(|result| {
         result.model == PluginId::new(plugin)
             && matches!(
-                &result.reading,
+                &*result.reading,
                 Reading::Value {
                     value: MeasurementValue::Structured(value)
                 } if value.get("model").and_then(serde_json::Value::as_str) == Some(model)

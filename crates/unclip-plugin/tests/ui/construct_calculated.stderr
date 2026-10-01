@@ -5,7 +5,7 @@ error[E0451]: fields `id`, `value`, `provenance` and `operation` of struct `Deri
    |             -------------------------------- in this type
 10 |         id: unavailable(),
    |         ^^ private field
-11 |         value: 1,
+11 |         value: unavailable(),
    |         ^^^^^ private field
 12 |         provenance: unavailable(),
    |         ^^^^^^^^^^ private field

@@ -276,10 +276,10 @@ fn comparison() -> DeltaProfile {
         deltas: vec![ProfileDelta {
             pair,
             id: DerivedId::new("transformation-delta"),
-            delta: Delta {
+            delta: std::sync::Arc::new(Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
-            },
+            }),
         }],
         unmatched_before: vec![],
         unmatched_after: vec![],
@@ -346,23 +346,23 @@ fn structural_fixture(
         before: vec![DerivedId::new("transformation-before")],
         after: vec![DerivedId::new("transformation-after")],
         comparison: DerivedId::new("transformation-comparison"),
-        delta_profile: comparison(),
+        delta_profile: std::sync::Arc::new(comparison()),
         null_results: include_transformation_null
             .then(|| NullEvidence {
                 id: DerivedId::new("transformation-null"),
                 model: PluginId::new("null.existing-transformation"),
-                reading: Reading::Value {
+                reading: std::sync::Arc::new(Reading::Value {
                     value: MeasurementValue::Structured(json!({
                         "model":"existing_transformation_exact_pattern",
                         "match_count":0,
                         "has_existing_alternative":false
                     })),
-                },
+                }),
             })
             .into_iter()
             .collect(),
         constraint_assessment: None,
-        constraints: vec![],
+        constraints: std::sync::Arc::default(),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,

@@ -8,7 +8,7 @@ fn unavailable<T>() -> T {
 fn main() {
     let _ = Derived::<u32, ops::Calculation> {
         id: unavailable(),
-        value: 1,
+        value: unavailable(),
         provenance: unavailable(),
         operation: PhantomData,
     };

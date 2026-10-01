@@ -19,7 +19,11 @@ pub struct CounterfactualSnapshot {
     pub added_units: Vec<UnitId>,
     pub added_relations: Vec<RelationId>,
     pub property_changes: Vec<PropertyChange>,
-    pub domain: DomainSnapshot,
+    /// Shared, because a counterfactual is measured by tracking this very
+    /// snapshot as engine evidence: the proposed domain is the largest value
+    /// in an experiment, and re-tracking it should not copy every unit and
+    /// relation in it.
+    pub domain: std::sync::Arc<DomainSnapshot>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -821,7 +825,7 @@ impl crate::Engine {
             added_units,
             added_relations,
             property_changes,
-            domain: temporary,
+            domain: std::sync::Arc::new(temporary),
         }))
     }
 }

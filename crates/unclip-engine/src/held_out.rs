@@ -3,7 +3,7 @@ use crate::comparisons::profile::compare_profiles;
 use crate::support::invalid;
 use std::collections::BTreeSet;
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
-use unclip_epistemic::{Calculated, DependencyCollector, Tracked};
+use unclip_epistemic::{Calculated, DependencyCollector, Operation, Tracked};
 use unclip_measure::Measurement;
 use unclip_observe::{Alignment, PartialRanking};
 use unclip_plugin::{Result, RunPlan};
@@ -101,7 +101,7 @@ impl super::Engine {
         let observations = split
             .held_out
             .iter()
-            .map(|entry| Tracked::from_inferred(entry.provenance.clone(), entry.value.clone()))
+            .map(|entry| entry.tracked(Some(Operation::Inferred)))
             .collect::<Vec<_>>();
         let results = self.measure_with_dependencies(
             plan,
@@ -180,7 +180,10 @@ impl super::Engine {
                 "counterfactual must derive from the selected baseline and have a distinct version",
             ));
         }
-        let counterfactual = Tracked::from_derived(inputs.counterfactual, snapshot.domain.clone());
+        let counterfactual = Tracked::from_derived_shared(
+            inputs.counterfactual,
+            std::sync::Arc::clone(&snapshot.domain),
+        );
         if counterfactual.id() == inputs.baseline.baseline.id() {
             return Err(invalid(
                 "counterfactual and baseline identities must differ",
@@ -281,12 +284,12 @@ impl super::Engine {
         let before = measurements
             .before
             .iter()
-            .map(|value| Tracked::from_derived(value, value.value().clone()))
+            .map(Tracked::from)
             .collect::<Vec<_>>();
         let after = measurements
             .after
             .iter()
-            .map(|value| Tracked::from_derived(value, value.value().clone()))
+            .map(Tracked::from)
             .collect::<Vec<_>>();
         let comparison = compare_profiles(
             plan,

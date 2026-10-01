@@ -455,7 +455,7 @@ async fn assert_persisted_batch(
             .insert_provenance(StoredProvenance {
                 id: id.clone(),
                 run_id: Some("batch".into()),
-                provenance: inferred.provenance().clone(),
+                provenance: inferred.shared_provenance(),
             })
             .await
             .unwrap();
@@ -463,7 +463,7 @@ async fn assert_persisted_batch(
     for value in &fixture.observations {
         observations
             .insert_observation(
-                value.clone(),
+                &value.clone(),
                 &DerivedId::new(format!("observation/{}", value.id.0)),
             )
             .await
@@ -473,7 +473,7 @@ async fn assert_persisted_batch(
         observations
             .insert_alignment(
                 &format!("alignment/{}", value.observation.0),
-                value.clone(),
+                &value.clone(),
                 &fixture.domain.id,
                 &fixture.domain.version,
                 &DerivedId::new(format!("alignment/{}", value.observation.0)),
@@ -485,7 +485,7 @@ async fn assert_persisted_batch(
         observations
             .insert_ranking(
                 &format!("ranking/{}", value.observation.0),
-                value.clone(),
+                &value.clone(),
                 &DerivedId::new(format!("ranking/{}", value.observation.0)),
             )
             .await
@@ -508,7 +508,7 @@ async fn assert_persisted_batch(
             .insert_provenance(StoredProvenance {
                 id: result.id().clone(),
                 run_id: Some("batch".into()),
-                provenance: result.provenance().clone(),
+                provenance: result.shared_provenance(),
             })
             .await
             .unwrap();
@@ -542,7 +542,7 @@ async fn assert_persisted_batch(
             sensor_run_id: result.id().0.clone(),
             provenance: result.id().clone(),
             kind: value.kind(),
-            measurement: result.value().clone(),
+            measurement: result.shared(),
         });
     }
     measurements
@@ -587,7 +587,7 @@ async fn assert_persisted_batch(
                 }
             )
         })
-        .map(|result| Tracked::from_derived(result, result.value().clone()))
+        .map(Tracked::from)
         .collect::<Vec<_>>();
     if !matrix_inputs.is_empty() {
         let discovery_plan = engine
@@ -653,7 +653,7 @@ async fn assert_persisted_batch(
                         .unwrap()
                         .unwrap()
                         .provenance,
-                    *output.provenance()
+                    output.shared_provenance()
                 );
             }
         }
@@ -699,7 +699,7 @@ async fn assert_persisted_batch(
                             ..Default::default()
                         })
                         .unwrap();
-                    let inputs = [Tracked::from_derived(&structure, structure.value().clone())];
+                    let inputs = [Tracked::from(&structure)];
                     let params = BTreeMap::from([(PluginId::new(generator), params)]);
                     let id = format!("structure-candidates/{}", structure.id().0);
                     let calculate = || {
@@ -737,7 +737,7 @@ async fn assert_persisted_batch(
                                 .unwrap()
                                 .unwrap()
                                 .provenance,
-                            *proposal.provenance()
+                            proposal.shared_provenance()
                         );
                     }
                     let stored = measurements
@@ -760,7 +760,7 @@ async fn assert_persisted_batch(
                             .unwrap()
                             .unwrap()
                             .provenance,
-                        *structure.provenance()
+                        structure.shared_provenance()
                     );
                 }
             }
@@ -784,10 +784,7 @@ async fn assert_persisted_batch(
             PluginId::new("generate.temporal-coupling"),
             serde_json::json!({"threshold":0.5,"minimum_samples":2}),
         )]);
-        let selected = results
-            .iter()
-            .map(|result| Tracked::from_derived(result, result.value().clone()))
-            .collect::<Vec<_>>();
+        let selected = results.iter().map(Tracked::from).collect::<Vec<_>>();
         let calculate = || {
             generate_candidates(
                 &discovery_plan,
@@ -828,7 +825,7 @@ async fn assert_persisted_batch(
                     .unwrap()
                     .unwrap()
                     .provenance,
-                *output.provenance()
+                output.shared_provenance()
             );
         }
     }
@@ -864,7 +861,7 @@ async fn assert_persisted_batch(
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored_provenance.provenance, *result.provenance());
+        assert_eq!(stored_provenance.provenance, result.shared_provenance());
         assert_eq!(
             provenance.direct_inputs(result.id()).await.unwrap().len(),
             fixture.observations.len() + fixture.alignments.len() + fixture.rankings.len()
@@ -923,11 +920,11 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
             let mut meta = metadata("selected", &plugin.descriptor().id.0);
-            meta.params = configured.clone();
+            meta.params = std::sync::Arc::new(configured.clone());
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
             assert_eq!(results[0].provenance().inputs.len(), 12);
-            assert_eq!(results[0].provenance().params, *configured);
+            assert_eq!(*results[0].provenance().params, *configured);
             assert_eq!(results[0].value().sample_count, Some(4));
             let Reading::Value {
                 value: MeasurementValue::Scalar(value),
@@ -1163,11 +1160,11 @@ fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
             let mut meta = metadata("temporal", &plugin.descriptor().id.0);
-            meta.params = configured.clone();
+            meta.params = std::sync::Arc::new(configured.clone());
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
             assert_eq!(results[0].provenance().inputs.len(), 12);
-            assert_eq!(results[0].provenance().params, *configured);
+            assert_eq!(*results[0].provenance().params, *configured);
             let value = results[0].value();
             match plugin.descriptor().id.0.as_str() {
                 "sensor.lagged-dependency" => {
@@ -1430,7 +1427,7 @@ fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() 
         Timestamp::new("now"),
     )
     .unwrap();
-    let split = Tracked::from_derived(&split, split.value().clone());
+    let split = Tracked::from(&split);
     let baseline = Tracked::from_recorded(DerivedId::new("baseline"), fixture.domain.clone());
     let frame = Tracked::from_recorded(DerivedId::new("frame"), fixture.frame.clone());
     let mut subset = fixture.clone();
@@ -1555,7 +1552,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         Timestamp::new("now"),
     )
     .unwrap();
-    let split = Tracked::from_derived(&selected, selected.value().clone());
+    let split = Tracked::from(&selected);
     let proposal = Tracked::from_recorded(DerivedId::new("candidate"), CandidateProposal {
         domain_version_id: serde_json::to_string(&(&fixture.domain.id.0, &fixture.domain.version.0)).unwrap(),
         kind: CandidateKind::AtomicMeaning,
@@ -1733,7 +1730,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     let pareto = experiment.pareto.as_ref().unwrap();
     assert_eq!(evidence.constraint_assessment.as_ref(), Some(assessed.id()));
     assert_eq!(evidence.pareto_assessment.as_ref(), Some(pareto.id()));
-    assert_eq!(evidence.pareto.as_ref(), Some(pareto.value()));
+    assert_eq!(evidence.pareto.as_deref(), Some(pareto.value()));
     assert_eq!(
         pareto.value().relation,
         unclip_engine::ParetoRelation::Incomparable
@@ -1742,7 +1739,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         pareto.provenance().operation,
         unclip_epistemic::Operation::Calculated
     );
-    assert_eq!(&evidence.constraints, assessed.value());
+    assert_eq!(&*evidence.constraints, assessed.value());
     assert_eq!(
         evidence.constraints[0].status,
         unclip_engine::ConstraintStatus::Violated
@@ -1756,7 +1753,10 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         unclip_epistemic::Operation::Calculated
     );
     assert_eq!(evidence.candidate, *proposal.id());
-    assert_eq!(evidence.delta_profile, *compared.comparison.profile.value());
+    assert_eq!(
+        *evidence.delta_profile,
+        *compared.comparison.profile.value()
+    );
     assert_eq!(
         evidence.before,
         result
@@ -1777,7 +1777,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
     assert_eq!(evidence.null_results.len(), 2);
     for (recorded, calculated) in evidence.null_results.iter().zip(&experiment.null_results) {
         assert_eq!(recorded.id, *calculated.id());
-        assert_eq!(recorded.reading, *calculated.value());
+        assert_eq!(*recorded.reading, *calculated.value());
         assert_eq!(recorded.model, calculated.provenance().producer);
         assert!(calculated.provenance().inputs.contains(proposal.id()));
         assert_eq!(

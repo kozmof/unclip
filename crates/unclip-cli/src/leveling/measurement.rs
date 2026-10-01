@@ -75,32 +75,17 @@ pub(crate) async fn measure(
     let observations = snapshot
         .observations
         .iter()
-        .map(|record| {
-            unclip_epistemic::Tracked::from_inferred(
-                record.provenance.clone(),
-                record.value.clone(),
-            )
-        })
+        .map(|record| record.tracked(Some(unclip_epistemic::Operation::Inferred)))
         .collect::<Vec<_>>();
     let alignments = snapshot
         .alignments
         .iter()
-        .map(|record| {
-            unclip_epistemic::Tracked::from_inferred(
-                record.provenance.clone(),
-                record.value.clone(),
-            )
-        })
+        .map(|record| record.tracked(Some(unclip_epistemic::Operation::Inferred)))
         .collect::<Vec<_>>();
     let rankings = snapshot
         .rankings
         .iter()
-        .map(|record| {
-            unclip_epistemic::Tracked::from_inferred(
-                record.provenance.clone(),
-                record.value.clone(),
-            )
-        })
+        .map(|record| record.tracked(Some(unclip_epistemic::Operation::Inferred)))
         .collect::<Vec<_>>();
 
     let parsed = document.resolve()?;
@@ -182,7 +167,7 @@ pub(crate) async fn measure(
             unclip_store::StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some(run_id.clone()),
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             },
         )
         .await?;
@@ -211,7 +196,7 @@ pub(crate) async fn measure(
             sensor_run_id: value.id().0.clone(),
             provenance: value.id().clone(),
             kind,
-            measurement: measurement.clone(),
+            measurement: value.shared(),
         });
         crate::output::outln!(
             "MEASUREMENT\tCALCULATED\t{}@{}\t{}",

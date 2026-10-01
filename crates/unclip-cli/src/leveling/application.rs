@@ -1,6 +1,7 @@
 //! Promotion of one tested candidate into an immutable domain successor.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use anyhow::{ensure, Context};
 use serde_json::Value;
@@ -211,7 +212,10 @@ pub(crate) async fn run(
         &application_kind,
     )?;
 
-    let mut snapshot: DomainSnapshot = application.value().domain.clone();
+    // Nothing reads the application after this point, and it is the only
+    // handle on the snapshot it just produced, so the proposed domain is moved
+    // out rather than copied before its version is retargeted.
+    let mut snapshot: DomainSnapshot = Arc::unwrap_or_clone(application.into_value().domain);
     snapshot.version = target_version.clone();
     let target_key = serde_json::to_string(&(&target_domain_id.0, &target_version.0))?;
     let dependencies = DependencyCollector::default();

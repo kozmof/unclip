@@ -1,5 +1,7 @@
 //! Hand-authored observation inference.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use semver::Version;
 use serde::Deserialize;
@@ -53,9 +55,9 @@ impl Inferrer for ManualInferrer {
             }
         }
         Ok(token.emit(InferenceOutput::Bundle {
-            observations: vec![input.observation],
+            observations: vec![Arc::new(input.observation)],
             alignments: Vec::new(),
-            rankings: input.ranking.into_iter().collect(),
+            rankings: input.ranking.into_iter().map(Arc::new).collect(),
         }))
     }
 }
@@ -134,7 +136,7 @@ mod tests {
             other => panic!("unexpected output: {other:?}"),
         }
         assert_eq!(output.provenance().source.as_ref(), Some(&source));
-        assert_eq!(output.provenance().params, params);
+        assert_eq!(*output.provenance().params, params);
         assert_eq!(
             output.provenance().domain_version.as_ref(),
             Some(&domain.version)

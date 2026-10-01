@@ -1,5 +1,7 @@
 //! Pattern-dictionary observation inference.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use semver::Version;
 use serde::Deserialize;
@@ -147,11 +149,11 @@ impl Inferrer for PatternInferrer {
             context: BTreeMap::new(),
         };
         Ok(token.emit(InferenceOutput::Bundle {
-            observations: vec![observation],
-            alignments: vec![Alignment {
+            observations: vec![Arc::new(observation)],
+            alignments: vec![Arc::new(Alignment {
                 observation: observation_id,
                 candidates,
-            }],
+            })],
             rankings: Vec::new(),
         }))
     }
@@ -271,6 +273,6 @@ mod tests {
             other => panic!("unexpected output: {other:?}"),
         }
         assert_eq!(output.provenance().source.as_ref(), Some(&source));
-        assert_eq!(output.provenance().params, params);
+        assert_eq!(*output.provenance().params, params);
     }
 }

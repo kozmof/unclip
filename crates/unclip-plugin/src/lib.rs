@@ -601,16 +601,24 @@ impl<'a> InferCtx<'a> {
     }
 }
 
+/// What one inference stage produced.
+///
+/// The products are held as shared handles rather than owned inline. The
+/// engine keeps the emitted output for provenance *and* tracks every product
+/// inside it as a separate engine input, so owning them here meant copying
+/// each observation, alignment, and ranking once per run — the workspace's
+/// most repeated copy, scaling with the number of observations. Building one
+/// is [`Arc::new`] per product; nothing downstream copies them again.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InferenceOutput {
     Bundle {
-        observations: Vec<Observation>,
-        alignments: Vec<Alignment>,
-        rankings: Vec<PartialRanking>,
+        observations: Vec<Arc<Observation>>,
+        alignments: Vec<Arc<Alignment>>,
+        rankings: Vec<Arc<PartialRanking>>,
     },
-    Observations(Vec<Observation>),
-    Alignments(Vec<Alignment>),
-    Rankings(Vec<PartialRanking>),
+    Observations(Vec<Arc<Observation>>),
+    Alignments(Vec<Arc<Alignment>>),
+    Rankings(Vec<Arc<PartialRanking>>),
     Structured(serde_json::Value),
 }
 

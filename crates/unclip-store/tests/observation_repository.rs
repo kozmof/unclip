@@ -98,7 +98,7 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
     let repo = SeaOrmObservationRepository::new(db);
     let expected_observation = observation();
 
-    repo.insert_observation(expected_observation.clone(), &provenance)
+    repo.insert_observation(&expected_observation, &provenance)
         .await
         .unwrap();
     assert_eq!(
@@ -128,7 +128,7 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
     };
     repo.insert_alignment(
         "alignment",
-        alignment.clone(),
+        &alignment,
         &DomainId::new("domain"),
         &DomainVersion::new("1"),
         &provenance,
@@ -146,16 +146,16 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
         .unwrap()
         .unwrap();
     assert_eq!(recorded.provenance, provenance);
-    assert_eq!(recorded.value, expected_observation);
+    assert_eq!(*recorded.value, expected_observation);
     let observation_id = expected_observation.id.clone();
     assert_eq!(
         repo.alignments_for_observation(&observation_id)
             .await
             .unwrap(),
-        vec![unclip_store::RecordedInference {
-            provenance: provenance.clone(),
-            value: alignment.clone(),
-        }]
+        vec![unclip_store::RecordedInference::new(
+            provenance.clone(),
+            alignment.clone()
+        )]
     );
 
     let ranking = PartialRanking {
@@ -165,7 +165,7 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
         }],
         unknown: vec![ObservedUnitId::new("o3")],
     };
-    repo.insert_ranking("ranking", ranking.clone(), &provenance)
+    repo.insert_ranking("ranking", &ranking, &provenance)
         .await
         .unwrap();
     assert_eq!(repo.get_ranking("ranking").await.unwrap().unwrap(), ranking);
@@ -173,10 +173,7 @@ async fn observation_alignment_and_partial_ranking_round_trip() {
         repo.rankings_for_observation(&observation_id)
             .await
             .unwrap(),
-        vec![unclip_store::RecordedInference {
-            provenance,
-            value: ranking,
-        }]
+        vec![unclip_store::RecordedInference::new(provenance, ranking)]
     );
 }
 
@@ -190,7 +187,7 @@ async fn invalid_observation_is_rolled_back() {
     invalid.units[1].uncertainty = Some(2.0);
 
     let error = repo
-        .insert_observation(invalid.clone(), &provenance)
+        .insert_observation(&invalid, &provenance)
         .await
         .unwrap_err();
     assert!(matches!(error, StoreError::InvalidRequest { .. }));
@@ -203,7 +200,7 @@ async fn missing_provenance_prevents_any_observation_rows() {
     let repo = SeaOrmObservationRepository::new(db);
     let value = observation();
 
-    repo.insert_observation(value.clone(), &DerivedId::new("missing"))
+    repo.insert_observation(&value, &DerivedId::new("missing"))
         .await
         .unwrap_err();
 

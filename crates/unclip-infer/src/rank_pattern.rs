@@ -1,6 +1,7 @@
 //! Pattern-evidence salience and partial-ranking inference.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use semver::Version;
@@ -170,9 +171,9 @@ impl Inferrer for RankPatternInferrer {
         .map_err(|error| PluginError::Message(format!("invalid rank-pattern input: {error}")))?;
         let (observation, ranking) = rank_observation(input.observation, input.evidence)?;
         Ok(token.emit(InferenceOutput::Bundle {
-            observations: vec![observation],
+            observations: vec![Arc::new(observation)],
             alignments: Vec::new(),
-            rankings: vec![ranking],
+            rankings: vec![Arc::new(ranking)],
         }))
     }
 }
@@ -263,6 +264,6 @@ mod tests {
             other => panic!("unexpected output: {other:?}"),
         }
         assert_eq!(output.provenance().source.as_ref(), Some(&source));
-        assert_eq!(output.provenance().params, params);
+        assert_eq!(*output.provenance().params, params);
     }
 }

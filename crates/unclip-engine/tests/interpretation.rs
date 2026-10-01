@@ -38,20 +38,20 @@ fn source_provenance(id: &DerivedId) -> StoredProvenance {
     StoredProvenance {
         id: id.clone(),
         run_id: None,
-        provenance: Provenance {
+        provenance: std::sync::Arc::new(Provenance {
             operation: Operation::Calculated,
             producer: PluginId::new("empirical.communities"),
             algorithm: "empirical.communities".into(),
             version: semver::Version::new(0, 1, 0),
             params_hash: hash_params(&params),
-            params,
+            params: std::sync::Arc::new(params),
             inputs: vec![],
             source: None,
             timestamp: Timestamp::new("2026-09-23T00:00:00Z"),
             domain_version: None,
             frame_version: None,
             model: None,
-        },
+        }),
     }
 }
 
@@ -133,7 +133,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         PluginId::new("interpret.llm-label")
     );
     assert_eq!(output.provenance().version, semver::Version::new(1, 0, 0));
-    assert_eq!(output.provenance().params, interpreter_params());
+    assert_eq!(*output.provenance().params, interpreter_params());
     assert_eq!(
         output.provenance().params_hash,
         hash_params(&interpreter_params())
@@ -151,7 +151,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         .insert_provenance(StoredProvenance {
             id: output.id().clone(),
             run_id: None,
-            provenance: output.provenance().clone(),
+            provenance: output.shared_provenance(),
         })
         .await
         .unwrap();
@@ -160,7 +160,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reloaded.provenance, output.provenance().clone());
+    assert_eq!(*reloaded.provenance, *output.provenance());
     assert_eq!(
         provenance.direct_inputs(output.id()).await.unwrap(),
         vec![source_id]

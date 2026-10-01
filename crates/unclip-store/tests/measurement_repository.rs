@@ -70,7 +70,7 @@ fn value_record(id: &str, value: f64) -> MeasurementRecord {
         sensor_run_id: "value-run".into(),
         provenance: DerivedId::new("value-prov"),
         kind: MeasurementKind::Scalar,
-        measurement: Measurement {
+        measurement: std::sync::Arc::new(Measurement {
             sensor: PluginId::new("sensor.value"),
             sensor_version: semver::Version::new(1, 0, 0),
             reading: Reading::Value {
@@ -83,7 +83,7 @@ fn value_record(id: &str, value: f64) -> MeasurementRecord {
                     .into_iter()
                     .collect(),
             },
-        },
+        }),
     }
 }
 
@@ -93,14 +93,14 @@ fn sparse_record() -> MeasurementRecord {
         sensor_run_id: "sparse-run".into(),
         provenance: DerivedId::new("sparse-prov"),
         kind: MeasurementKind::Ranking,
-        measurement: Measurement {
+        measurement: std::sync::Arc::new(Measurement {
             sensor: PluginId::new("sensor.sparse"),
             sensor_version: semver::Version::new(1, 0, 0),
             reading: Reading::InsufficientEvidence { have: 2, need: 5 },
             confidence: None,
             sample_count: Some(2),
             context: MeasurementContext::default(),
-        },
+        }),
     }
 }
 
@@ -119,7 +119,7 @@ async fn typed_values_and_sparse_readings_round_trip() {
     let value = value_record("a-value", 0.0);
     let sparse = sparse_record();
     let expected = MeasurementProfile {
-        measurements: vec![value.measurement.clone(), sparse.measurement.clone()],
+        measurements: vec![(*value.measurement).clone(), (*sparse.measurement).clone()],
     };
     repo.insert_profile(header("profile"), vec![value, sparse])
         .await
@@ -234,11 +234,11 @@ async fn pairwise_matrix_preserves_labels_sparse_cells_and_exact_values() {
     let matrix = pairwise_matrix(&trajectories, PairwiseMetric::MutualInformation).unwrap();
     let mut record = value_record("matrix", 0.0);
     record.kind = MeasurementKind::Matrix;
-    record.measurement.reading = Reading::Value {
+    std::sync::Arc::make_mut(&mut record.measurement).reading = Reading::Value {
         value: MeasurementValue::PairwiseMatrix(matrix),
     };
     let expected = MeasurementProfile {
-        measurements: vec![record.measurement.clone()],
+        measurements: vec![(*record.measurement).clone()],
     };
     repo.insert_profile(header("matrix-profile"), vec![record])
         .await
@@ -360,7 +360,7 @@ async fn calculated_empirical_payloads_round_trip_with_complete_provenance() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored.provenance, *derived.provenance());
+        assert_eq!(*stored.provenance, *derived.provenance());
         assert_eq!(stored.provenance.operation, Operation::Calculated);
         assert_eq!(stored.run_id.as_deref(), Some("run"));
         assert_eq!(

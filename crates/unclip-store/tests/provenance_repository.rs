@@ -13,20 +13,20 @@ fn stored(id: &str, inputs: &[&str]) -> StoredProvenance {
     StoredProvenance {
         id: DerivedId::new(id),
         run_id: None,
-        provenance: Provenance {
+        provenance: std::sync::Arc::new(Provenance {
             operation: Operation::Calculated,
             producer: PluginId::new("test.producer"),
             algorithm: "fixture".into(),
             version: semver::Version::new(1, 2, 3),
             params_hash: hash_params(&params),
-            params,
+            params: std::sync::Arc::new(params),
             inputs: inputs.iter().copied().map(DerivedId::new).collect(),
             source: Some(SourceRef::new("fixture")),
             timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
             domain_version: Some(DomainVersion::new("domain-v1")),
             frame_version: Some(FrameVersion::new("frame-v2")),
             model: Some(ModelRef::new("model-v3")),
-        },
+        }),
     }
 }
 
@@ -113,7 +113,7 @@ async fn restored_values_carry_the_operation_their_provenance_records() {
         ("interp", Operation::Interpreted),
     ] {
         let mut row = stored(id, &[]);
-        row.provenance.operation = operation;
+        std::sync::Arc::make_mut(&mut row.provenance).operation = operation;
         repo.insert_provenance(row).await.unwrap();
 
         let tracked = repo

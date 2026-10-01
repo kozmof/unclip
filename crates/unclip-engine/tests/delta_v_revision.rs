@@ -103,14 +103,14 @@ fn existing_unit_null() -> NullEvidence {
     NullEvidence {
         id: DerivedId::new("unit-null"),
         model: PluginId::new("null.existing-unit"),
-        reading: Reading::Value {
+        reading: std::sync::Arc::new(Reading::Value {
             value: MeasurementValue::Structured(json!({
                 "model": "existing_domain_exact_match",
                 "matching": "exact_observed_label",
                 "match_count": 0,
                 "has_existing_alternative": false
             })),
-        },
+        }),
     }
 }
 
@@ -142,10 +142,10 @@ fn comparison() -> DeltaProfile {
         deltas: vec![ProfileDelta {
             pair,
             id: DerivedId::new("atomic-delta"),
-            delta: Delta {
+            delta: std::sync::Arc::new(Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.5),
-            },
+            }),
         }],
         unmatched_before: vec![],
         unmatched_after: vec![],
@@ -215,12 +215,12 @@ fn fixture(
         before: vec![DerivedId::new("atomic-before")],
         after: vec![DerivedId::new("atomic-after")],
         comparison: DerivedId::new("atomic-comparison"),
-        delta_profile: comparison(),
+        delta_profile: std::sync::Arc::new(comparison()),
         null_results: include_null.then(existing_unit_null).into_iter().collect(),
         constraint_assessment: constraint_status
             .as_ref()
             .map(|_| DerivedId::new("atomic-constraints")),
-        constraints: constraint_status.into_iter().map(constraint).collect(),
+        constraints: std::sync::Arc::new(constraint_status.into_iter().map(constraint).collect()),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,

@@ -258,10 +258,10 @@ fn comparison() -> DeltaProfile {
         deltas: vec![ProfileDelta {
             pair,
             id: DerivedId::new("role-delta"),
-            delta: Delta {
+            delta: std::sync::Arc::new(Delta {
                 comparator: PluginId::new("compare.scalar-difference"),
                 value: MeasurementValue::Scalar(0.25),
-            },
+            }),
         }],
         unmatched_before: vec![],
         unmatched_after: vec![],
@@ -325,23 +325,23 @@ fn structural_fixture(
         before: vec![DerivedId::new("role-before")],
         after: vec![DerivedId::new("role-after")],
         comparison: DerivedId::new("role-comparison"),
-        delta_profile: comparison(),
+        delta_profile: std::sync::Arc::new(comparison()),
         null_results: include_role_null
             .then(|| NullEvidence {
                 id: DerivedId::new("role-null"),
                 model: PluginId::new("null.existing-role"),
-                reading: Reading::Value {
+                reading: std::sync::Arc::new(Reading::Value {
                     value: MeasurementValue::Structured(json!({
                         "model":"existing_role_exact_pattern",
                         "match_count":0,
                         "has_existing_alternative":false
                     })),
-                },
+                }),
             })
             .into_iter()
             .collect(),
         constraint_assessment: None,
-        constraints: vec![],
+        constraints: std::sync::Arc::default(),
         transfer_measurements: vec![],
         pareto_assessment: None,
         pareto: None,

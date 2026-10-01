@@ -16,12 +16,18 @@ pub struct ComparisonPair {
     pub before: DerivedId,
     pub after: DerivedId,
 }
+/// One comparison a profile recorded, with the delta it produced.
+///
+/// The delta is shared with the [`Calculated`] value returned beside the
+/// profile in [`ProfileComparisonResult`]: both halves of that result describe
+/// the same comparisons, and a comparator payload can be as large as the
+/// graphs or matrices it compared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileDelta {
     pub pair: ComparisonPair,
     pub id: DerivedId,
-    pub delta: Delta,
+    pub delta: std::sync::Arc<Delta>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,7 +132,7 @@ pub fn compare_profiles(
             entries.push(ProfileDelta {
                 pair: pair.clone(),
                 id: delta.id().clone(),
-                delta: dependencies.read_derived(&delta).clone(),
+                delta: dependencies.read_derived_shared(&delta),
             });
             deltas.push(delta);
         }

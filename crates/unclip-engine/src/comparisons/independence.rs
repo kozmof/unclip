@@ -1,6 +1,7 @@
 //! Typed comparison of measured product behavior with explicit independence rules.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
@@ -23,7 +24,11 @@ pub struct IndependenceComparisonEntry {
     pub delta_id: DerivedId,
     pub expected: Reading,
     pub observed: Reading,
-    pub delta: Delta,
+    /// Shared with the calculated delta returned beside this profile, for the
+    /// same reason a [`ProfileDelta`] shares its own.
+    ///
+    /// [`ProfileDelta`]: crate::ProfileDelta
+    pub delta: Arc<Delta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -225,8 +230,13 @@ pub fn compare_product_with_independence(
         let dependencies = DependencyCollector::default();
         dependencies.read_derived(composition);
         dependencies.read_derived(expectations);
-        let observed_tracked =
-            Tracked::from_recorded(expectation.product_measurement.clone(), (*observed).clone());
+        // The composition profile already holds these measurements shared, so
+        // tracking one as an input aliases it rather than copying the reading.
+        let observed_tracked = Tracked::from_shared(
+            expectation.product_measurement.clone(),
+            Arc::clone(observed),
+            None,
+        );
         dependencies.read(&observed_tracked);
         aggregate_dependencies.read(&observed_tracked);
         for source in expectation
@@ -237,7 +247,7 @@ pub fn compare_product_with_independence(
             let measurement = all_measurements.get(source).ok_or_else(|| {
                 invalid("independence expectation references unavailable source evidence")
             })?;
-            let tracked = Tracked::from_recorded(source.clone(), *measurement);
+            let tracked = Tracked::from_shared(source.clone(), Arc::clone(measurement), None);
             dependencies.read(&tracked);
             aggregate_dependencies.read(&tracked);
         }
@@ -311,7 +321,7 @@ pub fn compare_product_with_independence(
                 delta_id: delta.id().clone(),
                 expected: expected_reading.clone(),
                 observed: observed.reading.clone(),
-                delta: delta.value().clone(),
+                delta: delta.shared(),
             });
             deltas.push(delta);
         }

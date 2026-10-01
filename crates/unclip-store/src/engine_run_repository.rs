@@ -227,10 +227,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                     .get_observation(&unclip_observe::ObservationId::new(&row.id))
                     .await?
                     .ok_or_else(|| invalid(format!("missing replay observation: {}", row.id)))?;
-                observations.push(RecordedInference {
-                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                observations.push(RecordedInference::new(
+                    unclip_epistemic::DerivedId::new(row.provenance_id),
                     value,
-                });
+                ));
             }
             let alignment_rows = if provenance_ids.is_empty() {
                 Vec::new()
@@ -250,10 +250,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                     .get_alignment(&row.id)
                     .await?
                     .ok_or_else(|| invalid(format!("missing replay alignment: {}", row.id)))?;
-                alignments.push(RecordedInference {
-                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                alignments.push(RecordedInference::new(
+                    unclip_epistemic::DerivedId::new(row.provenance_id),
                     value,
-                });
+                ));
             }
             let ranking_rows = if provenance_ids.is_empty() {
                 Vec::new()
@@ -273,10 +273,10 @@ impl EngineRunRepository for SeaOrmEngineRunRepository {
                     .get_ranking(&row.id)
                     .await?
                     .ok_or_else(|| invalid(format!("missing replay ranking: {}", row.id)))?;
-                rankings.push(RecordedInference {
-                    provenance: unclip_epistemic::DerivedId::new(row.provenance_id),
+                rankings.push(RecordedInference::new(
+                    unclip_epistemic::DerivedId::new(row.provenance_id),
                     value,
-                });
+                ));
             }
             (observations, alignments, rankings)
         };

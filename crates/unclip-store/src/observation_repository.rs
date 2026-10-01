@@ -23,9 +23,15 @@ use crate::{StoreError, StoreResult};
 
 #[async_trait]
 pub trait ObservationRepository: Sync {
+    /// Write one observation and its units and relations atomically.
+    ///
+    /// Taken by reference: writing a row copies only the short column values
+    /// it has to own, so a caller that keeps the observation — the inference
+    /// stage keeps every product it emits — no longer has to hand over a copy
+    /// of the whole thing to store it.
     async fn insert_observation(
         &self,
-        observation: Observation,
+        observation: &Observation,
         provenance: &DerivedId,
     ) -> StoreResult<()>;
     async fn get_observation(&self, id: &ObservationId) -> StoreResult<Option<Observation>>;
@@ -37,7 +43,7 @@ pub trait ObservationRepository: Sync {
     async fn insert_alignment(
         &self,
         id: &str,
-        alignment: Alignment,
+        alignment: &Alignment,
         domain_id: &DomainId,
         domain_version: &DomainVersion,
         provenance: &DerivedId,
@@ -51,7 +57,7 @@ pub trait ObservationRepository: Sync {
     async fn insert_ranking(
         &self,
         id: &str,
-        ranking: PartialRanking,
+        ranking: &PartialRanking,
         provenance: &DerivedId,
     ) -> StoreResult<()>;
     async fn get_ranking(&self, id: &str) -> StoreResult<Option<PartialRanking>>;
@@ -88,7 +94,7 @@ fn validate_probability(name: &str, value: Option<f64>) -> StoreResult<()> {
 
 async fn insert_observation_rows(
     txn: &DatabaseTransaction,
-    observation: Observation,
+    observation: &Observation,
     provenance: &DerivedId,
 ) -> StoreResult<()> {
     if observations::Entity::find_by_id(&observation.id.0)
@@ -97,28 +103,28 @@ async fn insert_observation_rows(
         .is_some()
     {
         return Err(StoreError::AlreadyExists {
-            path: observation.id.0,
+            path: observation.id.0.clone(),
         });
     }
     observations::Entity::insert(observations::ActiveModel {
         id: Set(observation.id.0.clone()),
         provenance_id: Set(provenance.0.clone()),
-        source: Set(observation.source.0),
-        observed_at: Set(observation.observed_at),
+        source: Set(observation.source.0.clone()),
+        observed_at: Set(observation.observed_at.clone()),
         context_json: Set(serde_json::to_string(&observation.context).map_err(anyhow::Error::from)?),
     })
     .exec(txn)
     .await?;
 
-    for unit in observation.units {
+    for unit in &observation.units {
         validate_probability("unit uncertainty", unit.uncertainty)?;
         if unit.salience.is_some_and(|value| !value.is_finite()) {
             return Err(invalid("unit salience must be finite"));
         }
         observed_units::Entity::insert(observed_units::ActiveModel {
             observation_id: Set(observation.id.0.clone()),
-            id: Set(unit.id.0),
-            label: Set(unit.label),
+            id: Set(unit.id.0.clone()),
+            label: Set(unit.label.clone()),
             salience: Set(unit.salience),
             uncertainty: Set(unit.uncertainty),
             context_json: Set(serde_json::to_string(&unit.context).map_err(anyhow::Error::from)?),
@@ -127,14 +133,14 @@ async fn insert_observation_rows(
         .exec(txn)
         .await?;
     }
-    for relation in observation.relations {
+    for relation in &observation.relations {
         validate_probability("relation uncertainty", relation.uncertainty)?;
         observed_relations::Entity::insert(observed_relations::ActiveModel {
             observation_id: Set(observation.id.0.clone()),
-            id: Set(relation.id.0),
-            source_unit_id: Set(relation.source.0),
-            target_unit_id: Set(relation.target.0),
-            kind: Set(relation.kind),
+            id: Set(relation.id.0.clone()),
+            source_unit_id: Set(relation.source.0.clone()),
+            target_unit_id: Set(relation.target.0.clone()),
+            kind: Set(relation.kind.clone()),
             uncertainty: Set(relation.uncertainty),
             provenance_id: Set(provenance.0.clone()),
         })
@@ -148,7 +154,7 @@ async fn insert_observation_rows(
 impl ObservationRepository for SeaOrmObservationRepository {
     async fn insert_observation(
         &self,
-        observation: Observation,
+        observation: &Observation,
         provenance: &DerivedId,
     ) -> StoreResult<()> {
         let txn = self.db.begin().await?;
@@ -224,16 +230,16 @@ impl ObservationRepository for SeaOrmObservationRepository {
             .get_observation(id)
             .await?
             .ok_or_else(|| StoreError::NotFound { path: id.0.clone() })?;
-        Ok(Some(crate::RecordedInference {
-            provenance: DerivedId::new(row.provenance_id),
+        Ok(Some(crate::RecordedInference::new(
+            DerivedId::new(row.provenance_id),
             value,
-        }))
+        )))
     }
 
     async fn insert_alignment(
         &self,
         id: &str,
-        alignment: Alignment,
+        alignment: &Alignment,
         domain_id: &DomainId,
         domain_version: &DomainVersion,
         provenance: &DerivedId,
@@ -265,15 +271,15 @@ impl ObservationRepository for SeaOrmObservationRepository {
         })
         .exec(&txn)
         .await?;
-        for (position, candidate) in alignment.candidates.into_iter().enumerate() {
+        for (position, candidate) in alignment.candidates.iter().enumerate() {
             validate_probability("alignment confidence", Some(candidate.confidence))?;
             let position = i32::try_from(position).context("too many alignment candidates")?;
             alignment_candidates::Entity::insert(alignment_candidates::ActiveModel {
                 alignment_id: Set(id.into()),
                 observation_id: Set(alignment.observation.0.clone()),
-                observed_unit_id: Set(candidate.observed.0),
+                observed_unit_id: Set(candidate.observed.0.clone()),
                 domain_version_id: Set(domain_version_id.clone()),
-                domain_unit_id: Set(candidate.domain.0),
+                domain_unit_id: Set(candidate.domain.0.clone()),
                 position: Set(position),
                 confidence: Set(candidate.confidence),
                 evidence_json: Set(
@@ -331,10 +337,10 @@ impl ObservationRepository for SeaOrmObservationRepository {
                 .ok_or_else(|| StoreError::NotFound {
                     path: row.id.clone(),
                 })?;
-            values.push(crate::RecordedInference {
-                provenance: DerivedId::new(row.provenance_id),
+            values.push(crate::RecordedInference::new(
+                DerivedId::new(row.provenance_id),
                 value,
-            });
+            ));
         }
         Ok(values)
     }
@@ -342,7 +348,7 @@ impl ObservationRepository for SeaOrmObservationRepository {
     async fn insert_ranking(
         &self,
         id: &str,
-        ranking: PartialRanking,
+        ranking: &PartialRanking,
         provenance: &DerivedId,
     ) -> StoreResult<()> {
         if id.is_empty() {
@@ -359,14 +365,14 @@ impl ObservationRepository for SeaOrmObservationRepository {
         })
         .exec(&txn)
         .await?;
-        for (tier, group) in ranking.tiers.into_iter().enumerate() {
+        for (tier, group) in ranking.tiers.iter().enumerate() {
             let tier = i32::try_from(tier).context("too many ranking tiers")?;
-            for (position, unit) in group.units.into_iter().enumerate() {
+            for (position, unit) in group.units.iter().enumerate() {
                 let position = i32::try_from(position).context("ranking tier is too large")?;
                 ranking_entries::Entity::insert(ranking_entries::ActiveModel {
                     ranking_id: Set(id.into()),
                     observation_id: Set(ranking.observation.0.clone()),
-                    observed_unit_id: Set(unit.0),
+                    observed_unit_id: Set(unit.0.clone()),
                     state: Set("ranked".into()),
                     tier: Set(tier),
                     position: Set(position),
@@ -376,12 +382,12 @@ impl ObservationRepository for SeaOrmObservationRepository {
                 .await?;
             }
         }
-        for (position, unit) in ranking.unknown.into_iter().enumerate() {
+        for (position, unit) in ranking.unknown.iter().enumerate() {
             let position = i32::try_from(position).context("ranking unknown tail is too large")?;
             ranking_entries::Entity::insert(ranking_entries::ActiveModel {
                 ranking_id: Set(id.into()),
                 observation_id: Set(ranking.observation.0.clone()),
-                observed_unit_id: Set(unit.0),
+                observed_unit_id: Set(unit.0.clone()),
                 state: Set("unknown".into()),
                 tier: Set(-1),
                 position: Set(position),
@@ -441,10 +447,10 @@ impl ObservationRepository for SeaOrmObservationRepository {
                 .get_ranking(&row.id)
                 .await?
                 .ok_or_else(|| StoreError::NotFound { path: row.id })?;
-            values.push(crate::RecordedInference {
-                provenance: DerivedId::new(row.provenance_id),
+            values.push(crate::RecordedInference::new(
+                DerivedId::new(row.provenance_id),
                 value,
-            });
+            ));
         }
         Ok(values)
     }

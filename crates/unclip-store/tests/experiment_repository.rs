@@ -142,7 +142,7 @@ async fn setup() -> (
             .insert_provenance(unclip_store::StoredProvenance {
                 id: value.id().clone(),
                 run_id: None,
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             })
             .await
             .unwrap();
@@ -204,7 +204,7 @@ async fn completed_evidence_round_trips_without_scalarizing_or_changing_domains(
             .unwrap()
             .unwrap()
             .provenance,
-        *c.provenance()
+        c.shared_provenance()
     );
     let result = experiment(outcome());
     let comparisons = deltas();
@@ -235,7 +235,7 @@ async fn completed_evidence_round_trips_without_scalarizing_or_changing_domains(
                 .unwrap()
                 .unwrap()
                 .provenance,
-            *calculated.calculated.provenance()
+            calculated.calculated.shared_provenance()
         );
     }
     assert_eq!(
@@ -245,7 +245,7 @@ async fn completed_evidence_round_trips_without_scalarizing_or_changing_domains(
             .unwrap()
             .unwrap()
             .provenance,
-        *result.provenance()
+        result.shared_provenance()
     );
     let rev =
         derived::<_, ops::Experiment>("revision", "revision.fixture", &["experiment"], revision());
@@ -543,7 +543,7 @@ fn completed_bundle(value: ExperimentOutcome) -> CompletedExperimentBundle {
             vec![StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some("run".into()),
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             }]
         },
         experiment: experiment(value),
@@ -776,7 +776,7 @@ async fn revision_ledger_reconstructs_evidence_profiles_sensors_and_interpretati
             .insert_provenance(StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some("run".into()),
-                provenance: value.provenance().clone(),
+                provenance: value.shared_provenance(),
             })
             .await
             .unwrap();
