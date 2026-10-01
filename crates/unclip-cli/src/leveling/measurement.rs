@@ -175,7 +175,7 @@ pub(crate) async fn measure(
             .params
             .get(&measurement.sensor)
             .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
+            .unwrap_or_else(|| serde_json::json!({}).into());
         unclip_store::MeasurementRepository::insert_sensor_run(
             &repositories.measurements,
             unclip_store::SensorRunRecord {

@@ -108,7 +108,10 @@ fn evaluate_null(
         MeasurementRun {
             id: "transformation-null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.existing-transformation"), params)]),
+            params: &BTreeMap::from([(
+                PluginId::new("null.existing-transformation"),
+                params.into(),
+            )]),
         },
     )?;
     Ok(results.remove(0))
@@ -244,7 +247,7 @@ fn prior() -> Experimental<RevisionAttempt> {
             DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
             PluginId::new("experiment.revision-ladder"),
             "0.1.0".parse().unwrap(),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("minimal_revision_dynamic_coupling")
@@ -329,7 +332,7 @@ fn structural_fixture(
             DerivedId::new("transformation-experiment"),
             PluginId::new("experiment.counterfactual"),
             "0.5.0".parse().unwrap(),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")
@@ -352,11 +355,14 @@ fn structural_fixture(
                 id: DerivedId::new("transformation-null"),
                 model: PluginId::new("null.existing-transformation"),
                 reading: std::sync::Arc::new(Reading::Value {
-                    value: MeasurementValue::Structured(json!({
-                        "model":"existing_transformation_exact_pattern",
-                        "match_count":0,
-                        "has_existing_alternative":false
-                    })),
+                    value: MeasurementValue::Structured(
+                        json!({
+                            "model":"existing_transformation_exact_pattern",
+                            "match_count":0,
+                            "has_existing_alternative":false
+                        })
+                        .into(),
+                    ),
                 }),
             })
             .into_iter()

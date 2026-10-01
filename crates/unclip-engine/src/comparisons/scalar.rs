@@ -2,7 +2,8 @@
 use crate::support::{invalid, invalid_params};
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
-    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
+    SharedParams, Tracked,
 };
 use unclip_measure::{Delta, Measurement, MeasurementKind, MeasurementValue, Reading};
 use unclip_plugin::{Comparator, ComparatorDescriptor, CompareCtx, PluginError, Result, RunPlan};
@@ -125,7 +126,9 @@ impl Comparator for ScalarDifferenceComparator {
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(
-                serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
+                serde_json::to_value(result)
+                    .map_err(|e| PluginError::Message(e.to_string()))?
+                    .into(),
             ),
         }))
     }
@@ -143,7 +146,7 @@ pub fn compare_measurements(
     let mut comparators = plan.comparators.iter().collect::<Vec<_>>();
     comparators.sort_by_key(|p| &p.descriptor().id);
     let mut results = Vec::new();
-    let empty = serde_json::json!({});
+    let empty = SharedParams::new(serde_json::json!({}));
     for comparator in comparators {
         let descriptor = comparator.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
@@ -153,7 +156,7 @@ pub fn compare_measurements(
             DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
             descriptor.id.clone(),
             descriptor.version.clone(),
-            params,
+            ctx.shared_params(),
             run.timestamp.clone(),
         ));
         results.push(comparator.compare(&ctx, token)?);
@@ -172,7 +175,7 @@ mod tests {
     #[test]
     fn the_borrowed_payload_writes_what_the_owned_one_reads() {
         let matrix = Reading::Value {
-            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]]),
+            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]].into()),
         };
         let missing = Reading::NotMeasured;
         let cases = [

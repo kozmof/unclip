@@ -87,7 +87,7 @@ impl Sensor for PermutationSensor {
                             sensor: self.descriptor.id.clone(),
                             sensor_version: self.descriptor.version.clone(),
                             reading: Reading::Value {
-                                value: MeasurementValue::Ranking(state),
+                                value: MeasurementValue::Ranking(state.into()),
                             },
                             confidence: None,
                             sample_count: Some(sample_count),
@@ -197,7 +197,7 @@ mod tests {
     use unclip_domain::{DomainId, DomainSnapshot, FrameAxis, FrameId, MeasurementFrame};
     use unclip_epistemic::{
         DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion, InferenceToken,
-        SourceRef, Timestamp, Tracked,
+        SharedParams, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{
         Alignment, AlignmentCandidate, Observation, ObservationId, ObservedUnit, PartialRanking,
@@ -209,12 +209,11 @@ mod tests {
     use crate::LehmerSensor;
 
     fn metadata(id: &str, producer: &str) -> EmitMetadata {
-        let params = serde_json::json!({});
         EmitMetadata::new(
             DerivedId::new(id),
             PluginId::new(producer),
             Version::new(0, 1, 0),
-            &params,
+            serde_json::json!({}),
             Timestamp::new("2026-09-17T00:00:00Z"),
         )
     }
@@ -319,7 +318,7 @@ mod tests {
         let observations = vec![Tracked::from(&observation)];
         let alignments = vec![Tracked::from(&alignment)];
         let rankings = vec![Tracked::from(&ranking)];
-        let params = serde_json::json!({});
+        let params = SharedParams::new(serde_json::json!({}));
         let ctx = MeasureCtx::new(
             &domain,
             &frame,

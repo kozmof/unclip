@@ -30,7 +30,7 @@ fn sensor(id: &str, plugin: &str) -> SensorRunRecord {
         engine_run_id: "run".into(),
         sensor: PluginId::new(plugin),
         sensor_version: semver::Version::new(1, 0, 0),
-        params: json!({}),
+        params: json!({}).into(),
         params_hash: unclip_epistemic::ParameterHash::new("hash"),
         status: "completed".into(),
         started_at: "start".into(),

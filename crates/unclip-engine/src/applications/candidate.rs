@@ -812,7 +812,7 @@ impl crate::Engine {
                 output_id,
                 PluginId::new("experiment.apply-candidate"),
                 semver::Version::new(0, 8, 0),
-                &params,
+                params,
                 timestamp,
             )
             .with_algorithm("temporary_candidate_application")

@@ -104,7 +104,7 @@ impl ProductSensor for CanonicalCorrelationSensor {
                 let excluded = analysis.excluded_observations;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(reading_value),
+                        value: MeasurementValue::Structured(reading_value.into()),
                     },
                     sample_count,
                     excluded,

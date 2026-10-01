@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, num::NonZeroUsize};
 
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
-    Timestamp, Tracked,
+    SharedParams, Timestamp, Tracked,
 };
 use unclip_measure::{
     detect_communities, spectral_decomposition, EmpiricalStructure, Measurement, MeasurementValue,
@@ -93,6 +93,10 @@ pub fn derive_empirical(
             return Err(invalid("duplicate empirical input measurement"));
         }
     }
+    // One tree for the whole derivation: every structure this emits records the
+    // same method parameters, and each shares this allocation rather than
+    // copying it.
+    let params = SharedParams::new(params);
     let mut selected = measurements.iter().collect::<Vec<_>>();
     selected.sort_by_key(|measurement| measurement.id());
     selected
@@ -137,7 +141,7 @@ pub fn derive_empirical(
                         DerivedId::new(format!("{run_id}/{algorithm}/{source_key}")),
                         PluginId::new(algorithm),
                         semver::Version::new(0, 1, 0),
-                        &params,
+                        SharedParams::clone(&params),
                         timestamp.clone(),
                     )
                     .with_algorithm(algorithm),

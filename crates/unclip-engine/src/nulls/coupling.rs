@@ -121,7 +121,7 @@ impl NullModel for CouplingZeroNull {
                 "scope": "distance from zero association only; this is not a significance, exchangeability, or causal test",
                 "causal_claim": false,
                 "decision": "no automatic candidate acceptance or rejection"
-            })),
+            }).into()),
         }))
     }
 }

@@ -251,7 +251,9 @@ impl Comparator for ChangePointAlignmentComparator {
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
-            value: MeasurementValue::Structured(serde_json::to_value(result).map_err(invalid)?),
+            value: MeasurementValue::Structured(
+                serde_json::to_value(result).map_err(invalid)?.into(),
+            ),
         }))
     }
 }

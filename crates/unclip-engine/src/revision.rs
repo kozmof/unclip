@@ -435,7 +435,7 @@ fn emit_attempt(
             output_id,
             PluginId::new("experiment.revision-ladder"),
             version,
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm(algorithm)

@@ -97,7 +97,7 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
                 let unassessed = analysis.unassessed_axes;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(reading_value),
+                        value: MeasurementValue::Structured(reading_value.into()),
                     },
                     None,
                     "value",

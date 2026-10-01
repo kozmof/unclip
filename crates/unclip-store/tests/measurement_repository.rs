@@ -44,7 +44,7 @@ fn sensor_run(id: &str, sensor: &str) -> SensorRunRecord {
         engine_run_id: "run".into(),
         sensor: PluginId::new(sensor),
         sensor_version: semver::Version::new(1, 0, 0),
-        params: json!({}),
+        params: json!({}).into(),
         params_hash: ParameterHash::new("hash"),
         status: "completed".into(),
         started_at: "now".into(),
@@ -267,7 +267,7 @@ fn calculated_structure(
             DerivedId::new(id),
             PluginId::new("structure.fixture"),
             semver::Version::new(1, 0, 0),
-            &params,
+            params,
             Timestamp::new("2026-09-19T00:00:00Z"),
         )
         .with_algorithm(value.kind.clone())

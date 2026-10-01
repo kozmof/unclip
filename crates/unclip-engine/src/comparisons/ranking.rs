@@ -262,7 +262,9 @@ fn emit(
     Ok(token.emit(Delta {
         comparator: id.clone(),
         value: MeasurementValue::Structured(
-            serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
+            serde_json::to_value(result)
+                .map_err(|e| PluginError::Message(e.to_string()))?
+                .into(),
         ),
     }))
 }
@@ -312,7 +314,7 @@ mod tests {
             unresolved: Vec::new(),
         };
         let matrix = Reading::Value {
-            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]]),
+            value: MeasurementValue::Matrix(vec![vec![1.0, 0.5], vec![0.5, 1.0]].into()),
         };
         let missing = Reading::NotMeasured;
         let cases = [

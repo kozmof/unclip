@@ -37,6 +37,18 @@ use std::{
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+/// One plugin's parameters for one run, shared rather than copied.
+///
+/// A run's parameters are configured once and then read by every emission the
+/// plugin makes under them — once per source, candidate, or comparator in the
+/// loops that drive a stage. [`EmitMetadata::new`] takes one of these and
+/// [`Provenance`] keeps it, so the tree is allocated once and aliased from then
+/// on. It serializes exactly as the bare tree does.
+pub type SharedParams = Arc<serde_json::Value>;
+
+/// Per-plugin parameters for one run, keyed by the plugin they configure.
+pub type PluginParams = std::collections::BTreeMap<PluginId, SharedParams>;
+
 /// Canonicalize and hash plugin parameters with a stable FNV-1a digest.
 ///
 /// Object keys are sorted recursively, so insertion order does not affect the
@@ -295,12 +307,14 @@ pub struct Provenance {
     pub producer: PluginId,
     pub algorithm: Arc<str>,
     pub version: Version,
-    /// Shared with the token that emitted this value, and with every other
-    /// value that token emitted. One token routinely emits several results
-    /// from one analysis, and they all record the same parameters; copying an
-    /// arbitrary parameter tree once per emission bought nothing. It
+    /// Shared with the run configuration these parameters came from, with the
+    /// token that emitted this value, and with every other value that token
+    /// emitted. One run configures a plugin once and then emits under that
+    /// configuration repeatedly — per source, candidate, or comparator — and one
+    /// token routinely emits several results from one analysis; copying an
+    /// arbitrary parameter tree at any of those hops bought nothing. It
     /// serializes exactly as the bare tree does.
-    pub params: Arc<serde_json::Value>,
+    pub params: SharedParams,
     pub params_hash: ParameterHash,
     pub inputs: Vec<DerivedId>,
     pub source: Option<SourceRef>,
@@ -645,7 +659,7 @@ pub struct EmitMetadata {
     pub producer: PluginId,
     pub algorithm: Arc<str>,
     pub version: Version,
-    pub params: Arc<serde_json::Value>,
+    pub params: SharedParams,
     pub params_hash: ParameterHash,
     pub source: Option<SourceRef>,
     pub timestamp: Timestamp,
@@ -667,20 +681,26 @@ impl EmitMetadata {
     /// `algorithm` defaults to the producer's id, which is what every
     /// first-party emission uses; override the field for a plugin that runs
     /// more than one named algorithm.
+    ///
+    /// The parameters are taken as [`SharedParams`]: a caller holding the run's
+    /// configuration hands over a handle to it, and one that built a tree for
+    /// this emission alone moves it in. Either way nothing is copied, where
+    /// this used to deep-copy the whole tree once per token.
     pub fn new(
         id: DerivedId,
         producer: PluginId,
         version: Version,
-        params: &serde_json::Value,
+        params: impl Into<SharedParams>,
         timestamp: Timestamp,
     ) -> Self {
+        let params = params.into();
         Self {
             id,
             algorithm: producer.as_shared(),
             producer,
             version,
-            params: Arc::new(params.clone()),
-            params_hash: hash_params(params),
+            params_hash: hash_params(&params),
+            params,
             source: None,
             timestamp,
             domain_version: None,
@@ -825,7 +845,7 @@ mod tests {
             DerivedId::new(id),
             PluginId::new("sensor.test"),
             Version::new(0, 1, 0),
-            &serde_json::json!({}),
+            serde_json::json!({}),
             Timestamp::new("2026-09-17T00:00:00Z"),
         )
         .with_algorithm("test")
@@ -915,7 +935,7 @@ mod tests {
                 id.clone(),
                 PluginId::new("test.plugin"),
                 Version::new(0, 1, 0),
-                &serde_json::json!({}),
+                serde_json::json!({}),
                 Timestamp::new("2026-01-01T00:00:00Z"),
             ),
             DependencyCollector::default(),
@@ -926,6 +946,66 @@ mod tests {
             emitted.provenance().algorithm.as_ref(),
             emitted.provenance().producer.as_str()
         ));
+    }
+
+    /// A run configures a plugin's parameters once, and every emission that
+    /// plugin makes under them records the same tree — once per source,
+    /// candidate, or comparator in the loops a stage drives. So `new` takes a
+    /// shared handle and keeps it rather than copying what it is given. Only
+    /// pointer identity catches a regression: a copied tree still compares,
+    /// hashes and serializes identically.
+    #[test]
+    fn emitting_shares_the_configured_parameter_tree_rather_than_copying_it() {
+        let configured = SharedParams::new(serde_json::json!({"threshold": 0.5}));
+        let first = CalculationToken::from_harness(
+            EmitMetadata::new(
+                DerivedId::new("first"),
+                PluginId::new("sensor.test"),
+                Version::new(0, 1, 0),
+                SharedParams::clone(&configured),
+                Timestamp::new("2026-09-17T00:00:00Z"),
+            ),
+            DependencyCollector::default(),
+        )
+        .emit(1);
+        let second = CalculationToken::from_harness(
+            EmitMetadata::new(
+                DerivedId::new("second"),
+                PluginId::new("sensor.test"),
+                Version::new(0, 1, 0),
+                SharedParams::clone(&configured),
+                Timestamp::new("2026-09-17T00:00:00Z"),
+            ),
+            DependencyCollector::default(),
+        )
+        .emit(2);
+        assert!(Arc::ptr_eq(&first.provenance().params, &configured));
+        assert!(Arc::ptr_eq(
+            &first.provenance().params,
+            &second.provenance().params
+        ));
+        // The hash still describes exactly the tree that is recorded, which is
+        // the invariant `new` derives it for.
+        assert_eq!(
+            first.provenance().params_hash,
+            hash_params(&first.provenance().params)
+        );
+
+        // A caller that built a tree for one emission alone hands it over
+        // instead, and the record owns that same allocation.
+        let owned = CalculationToken::from_harness(
+            EmitMetadata::new(
+                DerivedId::new("owned"),
+                PluginId::new("sensor.test"),
+                Version::new(0, 1, 0),
+                serde_json::json!({"threshold": 0.5}),
+                Timestamp::new("2026-09-17T00:00:00Z"),
+            ),
+            DependencyCollector::default(),
+        )
+        .emit(3);
+        assert_eq!(owned.provenance().params, configured);
+        assert!(!Arc::ptr_eq(&owned.provenance().params, &configured));
     }
 
     /// Provenance is shared for the same reason the payload is: it carries the

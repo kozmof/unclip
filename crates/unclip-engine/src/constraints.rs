@@ -260,7 +260,7 @@ pub fn assess_experiment_constraints(
             output,
             PluginId::new("experiment.constraints"),
             semver::Version::new(0, 3, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("explicit_evidence_constraints"),

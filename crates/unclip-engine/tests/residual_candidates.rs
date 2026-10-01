@@ -26,7 +26,7 @@ fn metadata(id: &str) -> EmitMetadata {
         DerivedId::new(id),
         PluginId::new("infer.fixture"),
         "0.1.0".parse().unwrap(),
-        &serde_json::json!({}),
+        serde_json::json!({}),
         Timestamp::new("now"),
     )
     .with_algorithm("fixture")
@@ -154,7 +154,7 @@ fn run_generator(
         MeasurementRun {
             id: "discover",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new(generator), params)]),
+            params: &BTreeMap::from([(PluginId::new(generator), params.into())]),
         },
     )
 }
@@ -231,7 +231,7 @@ fn duplicate_profiles_do_not_inflate_support_and_sparse_evidence_emits_nothing()
             reason: "unsupported".into(),
         },
         Reading::Value {
-            value: MeasurementValue::Structured(serde_json::json!({"count":0,"ids":[]})),
+            value: MeasurementValue::Structured(serde_json::json!({"count":0,"ids":[]}).into()),
         },
     ] {
         let mut value = fixture.measurements[0].value().clone();
@@ -263,7 +263,7 @@ fn rejects_invalid_parameters_and_inconsistent_or_unselected_evidence() {
     ] {
         let mut measurement = fixture.measurements[0].value().clone();
         measurement.reading = Reading::Value {
-            value: MeasurementValue::Structured(value),
+            value: MeasurementValue::Structured(value.into()),
         };
         assert!(run(
             &fixture.observations,
@@ -583,7 +583,7 @@ fn missing_relation_generation_rejects_invalid_graphs_and_unselected_residuals()
     let mut measurement = fixture.measurements[1].value().clone();
     measurement.reading = Reading::Value {
         value: MeasurementValue::Structured(
-            serde_json::json!({"count":1,"ids":["absent/relation"]}),
+            serde_json::json!({"count":1,"ids":["absent/relation"]}).into(),
         ),
     };
     assert!(run_generator(
@@ -597,7 +597,7 @@ fn missing_relation_generation_rejects_invalid_graphs_and_unselected_residuals()
         Reading::NotMeasured,
         Reading::InsufficientEvidence { have: 1, need: 2 },
         Reading::Value {
-            value: MeasurementValue::Structured(serde_json::json!({"count":0,"ids":[]})),
+            value: MeasurementValue::Structured(serde_json::json!({"count":0,"ids":[]}).into()),
         },
     ] {
         let mut measurement = fixture.measurements[1].value().clone();

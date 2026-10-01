@@ -9,7 +9,7 @@ use unclip_engine::{
     RelationBindings,
 };
 use unclip_epistemic::{
-    hash_params, DerivedId, Operation, PluginId, Provenance, Timestamp, Tracked,
+    hash_params, DerivedId, Operation, PluginId, PluginParams, Provenance, Timestamp, Tracked,
 };
 use unclip_measure::{Measurement, MeasurementKind, Reading};
 use unclip_store::{
@@ -91,7 +91,7 @@ fn stored_sensor_runs(
     run_id: &str,
     before: &[unclip_epistemic::Calculated<Measurement>],
     after: &[unclip_epistemic::Calculated<Measurement>],
-    params: &BTreeMap<PluginId, serde_json::Value>,
+    params: &PluginParams,
     timestamp: &str,
 ) -> anyhow::Result<(BTreeMap<PluginId, String>, Vec<SensorRunRecord>)> {
     let mut identities = BTreeMap::new();
@@ -114,7 +114,7 @@ fn stored_sensor_runs(
         let sensor_params = params
             .get(&measurement.sensor)
             .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
+            .unwrap_or_else(|| serde_json::json!({}).into());
         identities.insert(measurement.sensor.clone(), id.clone());
         sensor_runs.push(SensorRunRecord {
             id,

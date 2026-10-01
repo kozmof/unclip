@@ -109,7 +109,7 @@ impl ProductSensor for CrossDomainCommunitySensor {
                 let unassessed = detection.unassessed_interactions;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(reading_value),
+                        value: MeasurementValue::Structured(reading_value.into()),
                     },
                     None,
                     "value",

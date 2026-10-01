@@ -101,7 +101,7 @@ fn run_metadata() -> EmitMetadata {
         DerivedId::new("stage-run"),
         PluginId::new("test"),
         semver::Version::new(0, 1, 0),
-        &params,
+        params,
         Timestamp::new("2026-09-19T00:00:00Z"),
     )
     .with_source(SourceRef::new("fixture"))

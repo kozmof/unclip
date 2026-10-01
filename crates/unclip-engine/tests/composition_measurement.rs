@@ -376,7 +376,8 @@ fn independence_rules_are_typed_versioned_and_bound_to_both_input_profiles() {
             value: serde_json::json!({
                 "status": "independent",
                 "assumption": "factorized inputs"
-            }),
+            })
+            .into(),
         },
     );
     let expectations = fixture
@@ -407,10 +408,13 @@ fn independence_rules_are_typed_versioned_and_bound_to_both_input_profiles() {
     assert_eq!(
         value.expectations[0].expected.reading(),
         Reading::Value {
-            value: unclip_measure::MeasurementValue::Structured(serde_json::json!({
-                "status": "independent",
-                "assumption": "factorized inputs"
-            }))
+            value: unclip_measure::MeasurementValue::Structured(
+                serde_json::json!({
+                    "status": "independent",
+                    "assumption": "factorized inputs"
+                })
+                .into()
+            )
         }
     );
     assert_eq!(
@@ -433,6 +437,7 @@ fn independence_rules_are_typed_versioned_and_bound_to_both_input_profiles() {
                             "status": "independent",
                             "assumption": "factorized inputs"
                         })
+                        .into()
                     }
                 )],
                 "expectation-run",
@@ -596,7 +601,7 @@ fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
         panic!("expected structured delta")
     };
     let delta: unclip_engine::StructuredIdentityComparison =
-        serde_json::from_value(delta.clone()).unwrap();
+        serde::Deserialize::deserialize(&**delta).unwrap();
     assert!(matches!(
         delta,
         unclip_engine::StructuredIdentityComparison::Value {
@@ -646,6 +651,34 @@ fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
         result.profile.provenance().params["binding"]["product_version"],
         "product-v6"
     );
+    // A retained entry reports two whole readings, and so does the baseline
+    // measurement emitted beside it. Both alias the trees the comparison was
+    // given rather than holding copies of them: a structured product
+    // measurement is arbitrarily large, and a comparison keeps one entry per
+    // selected comparator. Equality cannot see the difference, so this asserts
+    // pointer identity.
+    let (
+        Reading::Value {
+            value: MeasurementValue::Structured(entry_expected),
+        },
+        Reading::Value {
+            value: MeasurementValue::Structured(entry_observed),
+        },
+        Reading::Value {
+            value: MeasurementValue::Structured(baseline),
+        },
+    ) = (
+        &entry.expected,
+        &entry.observed,
+        &result.expectations[0].value().reading,
+    )
+    else {
+        panic!("every reported reading is structured")
+    };
+    assert!(std::sync::Arc::ptr_eq(entry_expected, observed));
+    assert!(std::sync::Arc::ptr_eq(entry_observed, observed));
+    assert!(std::sync::Arc::ptr_eq(baseline, observed));
+
     let replay = compare().unwrap();
     assert_eq!(replay.profile, result.profile);
     assert_eq!(replay.expectations, result.expectations);
@@ -685,7 +718,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         panic!("expected structured delta")
     };
     let delta: unclip_engine::StructuredIdentityComparison =
-        serde_json::from_value(delta.clone()).unwrap();
+        serde::Deserialize::deserialize(&**delta).unwrap();
     assert!(matches!(
         delta,
         unclip_engine::StructuredIdentityComparison::Unavailable {
@@ -767,7 +800,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
         &fixture,
         &composition,
         ExpectedIndependentBehavior::Structured {
-            value: serde_json::json!({"status":"independent","rule":"fixture"}),
+            value: serde_json::json!({"status":"independent","rule":"fixture"}).into(),
         },
         "cross-domain-candidate",
     );
@@ -937,7 +970,7 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
         &fixture,
         &composition,
         ExpectedIndependentBehavior::Structured {
-            value: serde_json::json!({"status":"independent","rule":"pipeline-fixture"}),
+            value: serde_json::json!({"status":"independent","rule":"pipeline-fixture"}).into(),
         },
         "cross-domain-pipeline",
     );

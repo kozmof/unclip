@@ -216,7 +216,7 @@ impl crate::Engine {
                 output_id,
                 PluginId::new("calculate.independence-expectations"),
                 semver::Version::new(0, 1, 0),
-                &params,
+                params,
                 timestamp,
             )
             .with_algorithm("explicit_typed_independence_rules"),

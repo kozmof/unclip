@@ -171,7 +171,7 @@ fn engine_cca_binds_product_versions_and_tracks_every_input() {
     else {
         panic!("expected structured CCA measurement")
     };
-    let analysis: CanonicalCorrelationAnalysis = serde_json::from_value(value.clone()).unwrap();
+    let analysis: CanonicalCorrelationAnalysis = serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(
         analysis.left_units,
         vec![UnitId::new("presentation"), UnitId::new("social")]

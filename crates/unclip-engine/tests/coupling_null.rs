@@ -119,7 +119,7 @@ fn evaluate(
         MeasurementRun {
             id: "null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.coupling-zero"), params)]),
+            params: &BTreeMap::from([(PluginId::new("null.coupling-zero"), params.into())]),
         },
     )?;
     Ok(results.remove(0))

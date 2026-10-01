@@ -49,7 +49,7 @@ fn generate(
         MeasurementRun {
             id: "discover",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("generate.pairwise-coupling"), params)]),
+            params: &BTreeMap::from([(PluginId::new("generate.pairwise-coupling"), params.into())]),
         },
     )
 }

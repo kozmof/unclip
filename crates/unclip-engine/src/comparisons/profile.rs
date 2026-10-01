@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    Tracked,
+    SharedParams, Tracked,
 };
 use unclip_measure::{Delta, Measurement};
 use unclip_plugin::{Result, RunPlan};
@@ -138,7 +138,7 @@ pub fn compare_profiles(
         }
     }
     let mut comparators=plan.comparators.iter().map(|plugin| {
-        let descriptor=plugin.descriptor();let params=run.params.get(&descriptor.id).cloned().unwrap_or_else(|| serde_json::json!({}));
+        let descriptor=plugin.descriptor();let params=run.params.get(&descriptor.id).cloned().unwrap_or_else(|| SharedParams::new(serde_json::json!({})));
         (&descriptor.id,serde_json::json!({"id":descriptor.id,"version":descriptor.version,"params":params,"params_hash":hash_params(&params)}))
     }).collect::<Vec<_>>();
     comparators.sort_by(|a, b| a.0.cmp(b.0));
@@ -148,7 +148,7 @@ pub fn compare_profiles(
             profile_id,
             unclip_epistemic::PluginId::new("compare.profile"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             run.timestamp,
         )
         .with_algorithm("explicit_profile_comparison"),

@@ -113,7 +113,7 @@ fn evaluate(
         MeasurementRun {
             id: "null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.existing-motif"), params)]),
+            params: &BTreeMap::from([(PluginId::new("null.existing-motif"), params.into())]),
         },
     )?;
     Ok(outputs.remove(0))

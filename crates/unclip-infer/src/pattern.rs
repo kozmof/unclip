@@ -165,7 +165,8 @@ mod tests {
 
     use unclip_domain::{DomainId, DomainSnapshot, Relation, RelationId, Unit, UnitId, UnitKind};
     use unclip_epistemic::{
-        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId, SourceRef, Timestamp,
+        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId, SharedParams,
+        SourceRef, Timestamp,
     };
     use unclip_plugin::InferenceIo;
 
@@ -225,7 +226,7 @@ mod tests {
             .into_iter()
             .collect(),
         };
-        let params = serde_json::json!({"min_confidence": 0.7});
+        let params = SharedParams::new(serde_json::json!({"min_confidence": 0.7}));
         let source = SourceRef::new("notes/pattern.txt");
         let ctx = InferCtx::new(source.clone(), &domain, &params, &FixtureIo);
         let token = unclip_epistemic::InferenceToken::from_harness(
@@ -233,7 +234,7 @@ mod tests {
                 DerivedId::new("pattern-derived"),
                 PluginId::new("infer.pattern"),
                 Version::new(1, 0, 0),
-                &params,
+                ctx.shared_params(),
                 Timestamp::new("2026-09-18T00:00:00Z"),
             )
             .with_algorithm("pattern")
@@ -273,6 +274,6 @@ mod tests {
             other => panic!("unexpected output: {other:?}"),
         }
         assert_eq!(output.provenance().source.as_ref(), Some(&source));
-        assert_eq!(*output.provenance().params, params);
+        assert_eq!(output.provenance().params, params);
     }
 }

@@ -1,5 +1,7 @@
 //! Anonymous partitions of an explicitly ordered observation sequence.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{ObservationSequence, OrderedObservation};
@@ -8,9 +10,20 @@ use crate::{ObservationSequence, OrderedObservation};
 /// intervals, not a claim that their contents are stationary or semantically
 /// distinct. Boundaries can be selected from change-point evidence by a harness
 /// that records that evidence and the selection parameters in provenance.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "RegimeData", into = "RegimeData")]
-pub struct RegimePartition(RegimeData);
+/// The validated data is shared, for the reason [`ObservationSequence`] is:
+/// a partition carries one entry per observation and is reported as evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RegimeData")]
+pub struct RegimePartition(Arc<RegimeData>);
+
+// Written out rather than declared with `into = "RegimeData"`, which serialized
+// `self.clone()` — copying the starts and, through the inner sequence's own
+// conversion, every coordinate again.
+impl Serialize for RegimePartition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,12 +77,7 @@ impl TryFrom<RegimeData> for RegimePartition {
         {
             return Err(InvalidRegimePartition);
         }
-        Ok(Self(value))
-    }
-}
-impl From<RegimePartition> for RegimeData {
-    fn from(value: RegimePartition) -> Self {
-        value.0
+        Ok(Self(Arc::new(value)))
     }
 }
 
@@ -88,6 +96,49 @@ mod tests {
                 .collect(),
         )
         .unwrap()
+    }
+
+    /// A partition holds one entry per observation and is reported as evidence,
+    /// so copying one shares it and writing one borrows it. The owning shape it
+    /// used to declare serialized `self.clone()`, which copied the starts and —
+    /// through the inner sequence's own conversion — every coordinate again;
+    /// the bytes were the same either way, so only pointer identity catches a
+    /// regression back to it.
+    #[test]
+    fn copying_a_partition_or_its_sequence_shares_one_allocation() {
+        let sequence = sequence();
+        let copied = sequence.clone();
+        assert_eq!(sequence, copied);
+        assert!(std::ptr::eq(sequence.observations(), copied.observations()));
+
+        let partition = RegimePartition::new(sequence.clone(), vec![0, 2]).unwrap();
+        let copied = partition.clone();
+        assert_eq!(partition, copied);
+        assert!(std::ptr::eq(partition.starts(), copied.starts()));
+        assert!(std::ptr::eq(
+            partition.sequence().observations(),
+            copied.sequence().observations()
+        ));
+        // Building a partition shares the sequence it was given rather than
+        // copying its coordinates in.
+        assert!(std::ptr::eq(
+            partition.sequence().observations(),
+            sequence.observations()
+        ));
+        // Writing one is unchanged, and still round-trips into the same value.
+        let json = serde_json::to_string(&partition).unwrap();
+        assert_eq!(
+            json,
+            serde_json::to_string(&serde_json::json!({
+                "sequence": sequence,
+                "starts": [0, 2],
+            }))
+            .unwrap()
+        );
+        assert_eq!(
+            serde_json::from_str::<RegimePartition>(&json).unwrap(),
+            partition
+        );
     }
 
     #[test]

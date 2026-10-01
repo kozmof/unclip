@@ -195,7 +195,7 @@ fn weight_evaluate(
             timestamp: Timestamp::new("now"),
             params: &BTreeMap::from([(
                 unclip_epistemic::PluginId::new("null.weight-change"),
-                params,
+                params.into(),
             )]),
         },
     )

@@ -6,14 +6,11 @@
 
 pub(crate) fn resolved_profile(
     value: &serde_json::Value,
-) -> anyhow::Result<(
-    unclip_plugin::EngineProfile,
-    std::collections::BTreeMap<unclip_epistemic::PluginId, serde_json::Value>,
-)> {
+) -> anyhow::Result<(unclip_plugin::EngineProfile, unclip_epistemic::PluginParams)> {
     fn section(
         value: &serde_json::Value,
         name: &str,
-        params: &mut std::collections::BTreeMap<unclip_epistemic::PluginId, serde_json::Value>,
+        params: &mut unclip_epistemic::PluginParams,
     ) -> anyhow::Result<Vec<unclip_plugin::PluginSelection>> {
         value
             .get(name)
@@ -32,10 +29,12 @@ pub(crate) fn resolved_profile(
                 let id = unclip_epistemic::PluginId::new(id);
                 params.insert(
                     id.clone(),
-                    entry
-                        .get("params")
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!({})),
+                    unclip_epistemic::SharedParams::new(
+                        entry
+                            .get("params")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({})),
+                    ),
                 );
                 Ok(unclip_plugin::PluginSelection {
                     id,

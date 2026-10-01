@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use semver::Version;
 use unclip_epistemic::{Calculated, CalculationToken, PluginId};
@@ -96,12 +99,12 @@ impl Sensor for LehmerSensor {
                                 .map(|tier| frame_positions[&tier[0]])
                                 .collect::<Vec<_>>();
                             Reading::Value {
-                                value: MeasurementValue::Vector(
+                                value: MeasurementValue::Vector(Arc::new(
                                     lehmer_code(&permutation)
                                         .into_iter()
                                         .map(|digit| digit as f64)
                                         .collect(),
-                                ),
+                                )),
                             }
                         },
                     );

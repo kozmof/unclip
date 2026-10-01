@@ -1,6 +1,6 @@
 //! Temporal sensors requiring an explicit, validated observation sequence.
 
-use std::{collections::BTreeMap, num::NonZeroUsize};
+use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
 
 use semver::Version;
 use serde::Deserialize;
@@ -307,14 +307,14 @@ impl Sensor for TemporalSensor {
                             serde_json::json!(result.evaluated_boundaries),
                         );
                         Reading::Value {
-                            value: MeasurementValue::Events(
+                            value: MeasurementValue::Events(Arc::new(
                                 result
                                     .events
                                     .into_iter()
                                     .map(serde_json::to_value)
                                     .collect::<std::result::Result<_, _>>()
                                     .map_err(invalid)?,
-                            ),
+                            )),
                         }
                     }
                     None => {

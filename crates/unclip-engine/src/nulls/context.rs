@@ -152,7 +152,7 @@ impl NullModel for ContextualCooccurrenceNull {
                 assessed += 1;
                 Reading::Value {
                     value: MeasurementValue::Structured(
-                        json!({"expected_overlap":group.left as f64*group.right as f64/n as f64,"upper_tail_probability":crate::nulls::models::overlap_tail(n,group.left,group.right,group.overlap)}),
+                        json!({"expected_overlap":group.left as f64*group.right as f64/n as f64,"upper_tail_probability":crate::nulls::models::overlap_tail(n,group.left,group.right,group.overlap)}).into(),
                     ),
                 }
             };
@@ -164,6 +164,6 @@ impl NullModel for ContextualCooccurrenceNull {
             "assumption":"observations are exchangeable within each recorded stratum",
             "scope":"endpoint co-presence conditional on recorded categories only; no inferred metadata, automatic time bins, or proof of bias removal",
             "selection_adjusted":false,"multiple_testing_adjusted":false,"causal_claim":false
-        }))}))
+        }).into())}))
     }
 }

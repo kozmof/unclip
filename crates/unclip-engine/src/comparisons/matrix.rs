@@ -183,7 +183,9 @@ impl Comparator for PairwiseMatrixComparator {
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(
-                serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
+                serde_json::to_value(result)
+                    .map_err(|e| PluginError::Message(e.to_string()))?
+                    .into(),
             ),
         }))
     }

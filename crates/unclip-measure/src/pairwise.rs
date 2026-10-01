@@ -1,6 +1,6 @@
 //! Labeled pairwise statistics, without reconciling different metrics.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -32,9 +32,26 @@ pub enum MatrixCell {
 
 /// A square symmetric matrix whose row and column axes share stable unit IDs.
 /// Construction and deserialization validate shape, symmetry, and finite values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "MatrixData", into = "MatrixData")]
-pub struct PairwiseMatrix(MatrixData);
+///
+/// The validated data is held behind an [`Arc`]. A matrix is immutable once
+/// built — no method hands out a mutable reference to one — and the same matrix
+/// is routinely carried in a reading, tracked as an input, compared, stored, and
+/// reported within a single run. Owning the rows inline made every one of those
+/// hops copy an n×n cell grid and its unit axis; sharing the allocation makes
+/// copying a matrix a refcount bump.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "MatrixData")]
+pub struct PairwiseMatrix(Arc<MatrixData>);
+
+// Written out rather than declared with `into = "MatrixData"`, which serializes
+// by converting `self.clone()` into the inner data and so copied the whole
+// matrix every time one was written. Borrowing the shared data produces the
+// identical bytes and copies nothing.
+impl Serialize for PairwiseMatrix {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,12 +98,7 @@ impl TryFrom<MatrixData> for PairwiseMatrix {
                 }
             }
         }
-        Ok(Self(data))
-    }
-}
-impl From<PairwiseMatrix> for MatrixData {
-    fn from(value: PairwiseMatrix) -> Self {
-        value.0
+        Ok(Self(Arc::new(data)))
     }
 }
 impl PairwiseMatrix {
@@ -209,6 +221,34 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    /// A matrix is carried in a reading, tracked as an input, compared, stored,
+    /// and reported in one run, so copying one shares the cell grid and writing
+    /// one borrows it. The owning shape it used to declare serialized
+    /// `self.clone()` — an n×n copy per write — for the identical bytes, so
+    /// only pointer identity catches a regression back to it.
+    #[test]
+    fn copying_a_matrix_shares_one_cell_grid() {
+        let matrix = pairwise_matrix(
+            &[ranks("a", &[1, 2, 3]), ranks("b", &[3, 2, 1])],
+            PairwiseMetric::Spearman,
+        )
+        .expect("two aligned trajectories");
+        let copied = matrix.clone();
+        assert_eq!(matrix, copied);
+        assert!(std::ptr::eq(matrix.cells(), copied.cells()));
+        assert!(std::ptr::eq(matrix.units(), copied.units()));
+        // Writing one is unchanged, and still round-trips into the same matrix.
+        let json = serde_json::to_string(&matrix).expect("a matrix serializes");
+        assert_eq!(
+            serde_json::from_str::<PairwiseMatrix>(&json).expect("a matrix deserializes"),
+            matrix
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["units"],
+            serde_json::json!(["a", "b"])
+        );
     }
 
     #[test]

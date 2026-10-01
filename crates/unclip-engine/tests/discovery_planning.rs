@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 use unclip_engine::Engine;
-use unclip_epistemic::{hash_params, PluginId, Timestamp};
+use unclip_epistemic::{hash_params, PluginId, SharedParams, Timestamp};
 use unclip_measure::Reading;
 use unclip_plugin::{
     CandidateGenerator, EngineProfile, Interpreter, NullModel, PluginDescriptor, PluginError,
@@ -170,12 +170,15 @@ fn stored_plans_pin_discovery_versions_parameters_and_hashes_in_canonical_order(
     let params = BTreeMap::from([
         (
             PluginId::new("generate.a"),
-            serde_json::json!({"minimum_samples":4}),
+            SharedParams::new(serde_json::json!({"minimum_samples":4})),
         ),
-        (PluginId::new("null.fixture"), serde_json::json!({"seed":7})),
+        (
+            PluginId::new("null.fixture"),
+            SharedParams::new(serde_json::json!({"seed":7})),
+        ),
         (
             PluginId::new("interpret.fixture"),
-            serde_json::json!({"temperature":0}),
+            SharedParams::new(serde_json::json!({"temperature":0})),
         ),
     ]);
     let record = unclip_engine::run_record(

@@ -156,7 +156,7 @@ impl Interpreter for LlmLabelInterpreter {
 #[cfg(test)]
 mod tests {
     use unclip_epistemic::{
-        DependencyCollector, DerivedId, EmitMetadata, Operation, Timestamp, Tracked,
+        DependencyCollector, DerivedId, EmitMetadata, Operation, SharedParams, Timestamp, Tracked,
     };
     use unclip_plugin::InterpretationIo;
 
@@ -182,12 +182,12 @@ mod tests {
         }
     }
 
-    fn metadata(params: &Value, model: Option<ModelRef>) -> EmitMetadata {
+    fn metadata(params: &SharedParams, model: Option<ModelRef>) -> EmitMetadata {
         EmitMetadata::new(
             DerivedId::new("interpretation/1"),
             PluginId::new("interpret.llm-label"),
             Version::new(1, 0, 0),
-            params,
+            SharedParams::clone(params),
             Timestamp::new("2026-09-23T00:00:00Z"),
         )
         .with_algorithm("llm-label")
@@ -201,7 +201,10 @@ mod tests {
         }
     }
 
-    async fn invoke(params: &Value, io: &dyn InterpretationIo) -> Result<Interpreted<Value>> {
+    async fn invoke(
+        params: &SharedParams,
+        io: &dyn InterpretationIo,
+    ) -> Result<Interpreted<Value>> {
         let interpreter = LlmLabelInterpreter::default();
         let model = interpreter.model_ref(params)?;
         let source = Tracked::from_recorded(DerivedId::new("structure/1"), structure());
@@ -213,12 +216,12 @@ mod tests {
 
     #[tokio::test]
     async fn preserves_primary_structure_while_validating_secondary_label() {
-        let params = json!({
+        let params = SharedParams::new(json!({
             "model": " fixture/model ",
             "model_version": " v2 ",
             "context": "coffee preferences",
             "generation": {"temperature": 0}
-        });
+        }));
         let output = invoke(
             &params,
             &FixtureIo {
@@ -278,7 +281,9 @@ mod tests {
             json!({"model": "fixture/model", "model_version": " "}),
             json!({"model": "fixture/model", "model_version": "v2", "generation": []}),
             json!({"model": "fixture/model", "model_version": "v2", "unknown": true}),
-        ] {
+        ]
+        .map(SharedParams::new)
+        {
             let error = invoke(&params, &UnexpectedIo).await.unwrap_err();
             assert!(error.to_string().contains("llm-label"));
         }
@@ -286,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_unstructured_or_empty_model_output() {
-        let params = json!({"model": "fixture/model", "model_version": "v2"});
+        let params = SharedParams::new(json!({"model": "fixture/model", "model_version": "v2"}));
         for response in [
             json!("plain text"),
             json!({"label": "", "explanation": "missing meaning"}),

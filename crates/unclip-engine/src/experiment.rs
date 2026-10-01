@@ -287,7 +287,7 @@ impl super::Engine {
                 id,
                 PluginId::new("experiment.counterfactual"),
                 semver::Version::new(0, 5, 0),
-                &params,
+                params,
                 timestamp,
             )
             .with_algorithm("held_out_counterfactual_comparison")
@@ -432,7 +432,7 @@ pub fn persistable_experiment(
             id,
             PluginId::new("experiment.persist"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             experiment.evidence.provenance().timestamp.clone(),
         )
         .with_algorithm("completed_counterfactual_bundle")

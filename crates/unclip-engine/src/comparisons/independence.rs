@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{
     hash_params, Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
-    PluginId, Tracked,
+    PluginId, SharedParams, Tracked,
 };
 use unclip_measure::{Delta, Measurement, ProductMeasurementBinding, Reading};
 use unclip_plugin::{Result, RunPlan};
@@ -266,7 +266,7 @@ pub fn compare_product_with_independence(
                 expectation_id,
                 PluginId::new("calculate.independence-baseline"),
                 semver::Version::new(0, 1, 0),
-                &expected_params,
+                expected_params,
                 run.timestamp.clone(),
             )
             .with_algorithm("typed_independence_expectation"),
@@ -350,7 +350,7 @@ pub fn compare_product_with_independence(
                 .params
                 .get(&descriptor.id)
                 .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
+                .unwrap_or_else(|| SharedParams::new(serde_json::json!({})));
             serde_json::json!({
                 "id": &descriptor.id,
                 "version": &descriptor.version,
@@ -383,7 +383,7 @@ pub fn compare_product_with_independence(
             profile_id,
             PluginId::new("compare.product-independence"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             run.timestamp,
         )
         .with_algorithm("explicit_typed_product_independence_comparison"),

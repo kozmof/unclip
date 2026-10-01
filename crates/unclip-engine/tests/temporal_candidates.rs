@@ -31,7 +31,7 @@ fn generate(
         MeasurementRun {
             id: "discovery",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("generate.temporal-coupling"), params)]),
+            params: &BTreeMap::from([(PluginId::new("generate.temporal-coupling"), params.into())]),
         },
     )
 }
@@ -142,7 +142,7 @@ fn malformed_temporal_evidence_is_rejected_even_below_selection_threshold() {
             }
             _ => {
                 value.reading = Reading::Value {
-                    value: MeasurementValue::Vector(vec![0.0]),
+                    value: MeasurementValue::Vector(vec![0.0].into()),
                 }
             }
         }

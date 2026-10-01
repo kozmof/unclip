@@ -33,7 +33,7 @@ fn derived<T, O: OperationKind>(
             DerivedId::new(id),
             PluginId::new(producer),
             "0.1.0".parse().unwrap(),
-            &params,
+            params,
             Timestamp::new("done"),
         )
         .with_algorithm(producer),
@@ -83,7 +83,7 @@ fn experiment(value: ExperimentOutcome) -> unclip_epistemic::Experimental<Experi
 fn deltas() -> Vec<ExperimentDelta> {
     [
         ("scalar", MeasurementValue::Scalar(0.0)),
-        ("vector", MeasurementValue::Vector(vec![1.0, -1.0])),
+        ("vector", MeasurementValue::Vector(vec![1.0, -1.0].into())),
     ]
     .into_iter()
     .map(|(id, value)| {
@@ -397,7 +397,7 @@ async fn invalid_or_duplicate_deltas_roll_back_the_entire_bundle() {
                     &["before-p"],
                     Delta {
                         comparator: PluginId::new("compare.vector"),
-                        value: MeasurementValue::Vector(vec![1.0]),
+                        value: MeasurementValue::Vector(vec![1.0].into()),
                     },
                 )
             }
@@ -408,7 +408,7 @@ async fn invalid_or_duplicate_deltas_roll_back_the_entire_bundle() {
                     &["before-p", "after-p"],
                     Delta {
                         comparator: PluginId::new("compare.vector"),
-                        value: MeasurementValue::Vector(vec![1.0]),
+                        value: MeasurementValue::Vector(vec![1.0].into()),
                     },
                 )
             }
@@ -419,7 +419,7 @@ async fn invalid_or_duplicate_deltas_roll_back_the_entire_bundle() {
                     &["before-p", "after-p"],
                     Delta {
                         comparator: PluginId::new("compare.vector"),
-                        value: MeasurementValue::Vector(vec![f64::NAN]),
+                        value: MeasurementValue::Vector(vec![f64::NAN].into()),
                     },
                 )
             }

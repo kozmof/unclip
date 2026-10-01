@@ -191,7 +191,9 @@ impl Comparator for PartitionRandComparator {
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
             value: MeasurementValue::Structured(
-                serde_json::to_value(result).map_err(|e| PluginError::Message(e.to_string()))?,
+                serde_json::to_value(result)
+                    .map_err(|e| PluginError::Message(e.to_string()))?
+                    .into(),
             ),
         }))
     }
@@ -207,7 +209,7 @@ mod tests {
     #[test]
     fn the_borrowed_payload_writes_what_the_owned_one_reads() {
         let graph = Reading::Value {
-            value: MeasurementValue::Graph(serde_json::json!({"nodes": []})),
+            value: MeasurementValue::Graph(serde_json::json!({"nodes": []}).into()),
         };
         let missing = Reading::NotMeasured;
         let groups = vec![vec!["a".to_owned()], vec!["b".to_owned()]];

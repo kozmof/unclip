@@ -90,10 +90,13 @@ fn weight_null() -> NullEvidence {
         id: DerivedId::new("weight-null"),
         model: PluginId::new("null.weight-change"),
         reading: std::sync::Arc::new(Reading::Value {
-            value: MeasurementValue::Structured(json!({
-                "model": "retain_existing_numeric_property",
-                "within_tolerance": false
-            })),
+            value: MeasurementValue::Structured(
+                json!({
+                    "model": "retain_existing_numeric_property",
+                    "within_tolerance": false
+                })
+                .into(),
+            ),
         }),
     }
 }
@@ -154,7 +157,7 @@ fn fixture(
             DerivedId::new("experiment"),
             PluginId::new("experiment.counterfactual"),
             semver::Version::new(0, 5, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")
@@ -335,11 +338,14 @@ fn existing_relation_null() -> NullEvidence {
         id: DerivedId::new("relation-null"),
         model: PluginId::new("null.existing-relation"),
         reading: std::sync::Arc::new(Reading::Value {
-            value: MeasurementValue::Structured(json!({
-                "model": "existing_domain_exact_match",
-                "match_count": 0,
-                "has_existing_alternative": false
-            })),
+            value: MeasurementValue::Structured(
+                json!({
+                    "model": "existing_domain_exact_match",
+                    "match_count": 0,
+                    "has_existing_alternative": false
+                })
+                .into(),
+            ),
         }),
     }
 }
@@ -410,7 +416,7 @@ fn relation_fixture(
             DerivedId::new("relation-experiment"),
             PluginId::new("experiment.counterfactual"),
             semver::Version::new(0, 5, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")
@@ -622,13 +628,16 @@ fn coupling_zero_null() -> NullEvidence {
         id: DerivedId::new("coupling-null"),
         model: PluginId::new("null.coupling-zero"),
         reading: std::sync::Arc::new(Reading::Value {
-            value: MeasurementValue::Structured(json!({
-                "model": "zero_association_baseline",
-                "observed_value": 0.8,
-                "baseline_value": 0.0,
-                "within_tolerance": false,
-                "causal_claim": false
-            })),
+            value: MeasurementValue::Structured(
+                json!({
+                    "model": "zero_association_baseline",
+                    "observed_value": 0.8,
+                    "baseline_value": 0.0,
+                    "within_tolerance": false,
+                    "causal_claim": false
+                })
+                .into(),
+            ),
         }),
     }
 }
@@ -694,7 +703,7 @@ fn coupling_fixture(
             DerivedId::new("coupling-experiment"),
             PluginId::new("experiment.counterfactual"),
             semver::Version::new(0, 5, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")

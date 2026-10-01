@@ -325,7 +325,7 @@ pub fn derive_cross_domain_deviations(
                 output_id,
                 PluginId::new("calculate.cross-domain-deviation"),
                 semver::Version::new(0, 1, 0),
-                &params,
+                params,
                 timestamp.clone(),
             )
             .with_algorithm("typed_product_independence_deviation"),

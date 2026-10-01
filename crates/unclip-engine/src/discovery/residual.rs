@@ -4,7 +4,8 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
+    SharedParams, Tracked,
 };
 use unclip_measure::{Measurement, MeasurementValue, Reading};
 use unclip_observe::Observation;
@@ -68,7 +69,7 @@ pub(crate) fn residual_evidence(
         let MeasurementValue::Structured(value) = value else {
             return Err(invalid("residual measurement must be structured"));
         };
-        let residual: Residual = serde::Deserialize::deserialize(value).map_err(invalid)?;
+        let residual: Residual = serde::Deserialize::deserialize(&**value).map_err(invalid)?;
         let unique = residual.ids.iter().collect::<BTreeSet<_>>();
         if residual.count != residual.ids.len() || unique.len() != residual.ids.len() {
             return Err(invalid("residual count and unique identities must agree"));
@@ -180,7 +181,7 @@ pub fn generate_candidates(
     let mut generators = plan.candidate_generators.iter().collect::<Vec<_>>();
     generators.sort_by_key(|generator| &generator.descriptor().id);
     let mut results = Vec::new();
-    let empty = serde_json::json!({});
+    let empty = SharedParams::new(serde_json::json!({}));
     for generator in generators {
         let descriptor = generator.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
@@ -197,7 +198,7 @@ pub fn generate_candidates(
             DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
             descriptor.id.clone(),
             descriptor.version.clone(),
-            params,
+            ctx.shared_params(),
             run.timestamp.clone(),
         ));
         results.extend(generator.generate(&ctx, token)?);

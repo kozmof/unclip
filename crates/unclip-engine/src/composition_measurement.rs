@@ -365,7 +365,7 @@ pub fn measure_composition(
             output_id,
             PluginId::new("calculate.composition-profile"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("versioned_composition_measurement_profiles"),

@@ -89,7 +89,7 @@ impl NullModel for ExistingMotifNull {
                 "has_existing_alternative": !matches.is_empty(),
                 "scope": "exact graph-motif pattern identity only; this does not establish semantic equivalence or explanatory adequacy",
                 "decision": "no automatic candidate acceptance or rejection"
-            })),
+            }).into()),
         }))
     }
 }

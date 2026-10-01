@@ -774,7 +774,7 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
                 unclip_epistemic::DerivedId::new(id),
                 unclip_epistemic::PluginId::new("generate.fixture"),
                 "0.1.0".parse().unwrap(),
-                &params,
+                params,
                 unclip_epistemic::Timestamp::new("2026-09-22T00:00:00Z"),
             )
             .with_domain_version(unclip_epistemic::DomainVersion::new("7")),
@@ -2384,7 +2384,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
             candidate_id.clone(),
             PluginId::new("generate.fixture"),
             "0.1.0".parse().unwrap(),
-            &candidate_params,
+            candidate_params,
             Timestamp::new("2026-09-23T00:00:00Z"),
         )
         .with_algorithm("generate.fixture")

@@ -29,7 +29,7 @@ fn generate(
         MeasurementRun {
             id: "discovery",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new(id), params)]),
+            params: &BTreeMap::from([(PluginId::new(id), params.into())]),
         },
     )
 }

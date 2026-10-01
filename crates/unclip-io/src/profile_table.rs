@@ -218,7 +218,7 @@ mod tests {
             "sensor.|\n\u{1b}[31m",
             Reading::Value {
                 value: MeasurementValue::Structured(
-                    serde_json::json!({"note":"<br>|*label*", "values":[0, 1]}),
+                    serde_json::json!({"note":"<br>|*label*", "values":[0, 1]}).into(),
                 ),
             },
         );

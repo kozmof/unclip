@@ -177,7 +177,7 @@ fn movement(
     else {
         panic!("expected structured movement")
     };
-    let movement = serde_json::from_value(value.clone()).unwrap();
+    let movement = serde::Deserialize::deserialize(&**value).unwrap();
     (result, movement)
 }
 
@@ -286,7 +286,7 @@ fn engine_cross_product_transfer_preserves_signed_zero_versions_and_dependencies
     else {
         panic!("expected structured transfer")
     };
-    let transfer: CrossProductTransfer = serde_json::from_value(value.clone()).unwrap();
+    let transfer: CrossProductTransfer = serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(transfer.transfers.len(), 2);
     assert_eq!(transfer.transfers[0].absolute_change, 0.0);
     assert_eq!(transfer.transfers[1].directional_concordance_change, -2.0);

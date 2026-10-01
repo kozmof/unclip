@@ -186,7 +186,7 @@ pub fn materialize_product_domain(
             output_id,
             PluginId::new("calculate.product-domain"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("lazy_observation_driven_product"),
@@ -264,7 +264,7 @@ pub fn create_product_frame(
             output_id,
             PluginId::new("calculate.product-frame"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("explicit_product_interaction_frame"),

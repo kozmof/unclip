@@ -123,7 +123,7 @@ impl CrossProductSensor for CrossProductTransferSensor {
                 let unassessed = transfer.unassessed_transfers;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(reading_value),
+                        value: MeasurementValue::Structured(reading_value.into()),
                     },
                     None,
                     "value",

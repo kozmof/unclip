@@ -54,7 +54,7 @@ fn evaluate(
         MeasurementRun {
             id: "null-run",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.random-cooccurrence"), params)]),
+            params: &BTreeMap::from([(PluginId::new("null.random-cooccurrence"), params.into())]),
         },
     )
 }
@@ -193,7 +193,7 @@ fn evaluate_ranking(
         MeasurementRun {
             id: "ranking-null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.ranking-constraints"), params())]),
+            params: &BTreeMap::from([(PluginId::new("null.ranking-constraints"), params().into())]),
         },
     )
 }
@@ -295,7 +295,10 @@ fn evaluate_context(
         MeasurementRun {
             id: "context-null",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("null.contextual-cooccurrence"), params)]),
+            params: &BTreeMap::from([(
+                PluginId::new("null.contextual-cooccurrence"),
+                params.into(),
+            )]),
         },
     )
 }

@@ -144,7 +144,7 @@ fn mutual_information(
     else {
         panic!("expected structured mutual information")
     };
-    let profile = serde_json::from_value(value.clone()).unwrap();
+    let profile = serde::Deserialize::deserialize(&**value).unwrap();
     (result, profile)
 }
 
@@ -192,7 +192,8 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
     else {
         panic!("expected structured communities")
     };
-    let detection: CrossDomainCommunityDetection = serde_json::from_value(value.clone()).unwrap();
+    let detection: CrossDomainCommunityDetection =
+        serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(
         detection.communities,
         vec![

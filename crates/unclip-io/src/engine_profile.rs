@@ -1,12 +1,12 @@
 //! Engine-profile parsing and validation.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::ensure;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
-use unclip_epistemic::PluginId;
+use unclip_epistemic::{PluginId, PluginParams, SharedParams};
 use unclip_plugin::{EngineProfile, PluginSelection};
 
 use crate::read_text_file;
@@ -22,12 +22,15 @@ pub struct PluginConfig {
     pub id: PluginId,
     #[serde(default = "any_version")]
     pub version: VersionReq,
+    /// Shared from the moment the document is parsed, so resolving a profile
+    /// and then recording provenance for every emission under it alias one tree
+    /// rather than copying it at each hop.
     #[serde(default = "default_params")]
-    pub params: serde_json::Value,
+    pub params: SharedParams,
 }
 
-fn default_params() -> serde_json::Value {
-    serde_json::Value::Object(serde_json::Map::new())
+fn default_params() -> SharedParams {
+    SharedParams::new(serde_json::Value::Object(serde_json::Map::new()))
 }
 
 /// Serializable engine profile used by YAML and JSON configuration.
@@ -69,7 +72,7 @@ enum ProfileIn {
 #[derive(Debug, Clone)]
 pub struct ParsedEngineProfile {
     pub profile: EngineProfile,
-    pub params: BTreeMap<PluginId, serde_json::Value>,
+    pub params: PluginParams,
 }
 
 fn validate(document: &EngineProfileDocument) -> anyhow::Result<()> {
@@ -120,7 +123,7 @@ impl EngineProfileDocument {
             .chain(&self.interpreters)
             .chain(&self.candidate_generators)
             .chain(&self.null_models)
-            .map(|plugin| (plugin.id.clone(), plugin.params.clone()))
+            .map(|plugin| (plugin.id.clone(), SharedParams::clone(&plugin.params)))
             .collect();
         Ok(ParsedEngineProfile {
             profile: EngineProfile {
@@ -183,11 +186,17 @@ comparators: []
             .version
             .matches(&semver::Version::new(1, 3, 0)));
         assert_eq!(
-            parsed.params.get(&PluginId::new("sensor.rbo")),
+            parsed
+                .params
+                .get(&PluginId::new("sensor.rbo"))
+                .map(AsRef::as_ref),
             Some(&json!({"p": 0.9}))
         );
         assert_eq!(
-            parsed.params.get(&PluginId::new("sensor.coverage")),
+            parsed
+                .params
+                .get(&PluginId::new("sensor.coverage"))
+                .map(AsRef::as_ref),
             Some(&json!({}))
         );
     }

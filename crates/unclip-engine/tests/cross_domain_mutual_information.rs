@@ -173,7 +173,7 @@ fn engine_cross_domain_mi_preserves_axes_versions_and_dependencies() {
     else {
         panic!("expected structured cross-domain MI")
     };
-    let analysis: CrossDomainMutualInformation = serde_json::from_value(value.clone()).unwrap();
+    let analysis: CrossDomainMutualInformation = serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(analysis.axes.len(), 2);
     assert_eq!(analysis.axes[0].left, UnitId::new("presentation"));
     assert_eq!(analysis.axes[0].right, UnitId::new("composition"));
@@ -242,7 +242,7 @@ fn engine_cross_domain_mi_keeps_assessed_and_sparse_axes_separate() {
     else {
         panic!("one assessed axis must retain the structured value")
     };
-    let analysis: CrossDomainMutualInformation = serde_json::from_value(value.clone()).unwrap();
+    let analysis: CrossDomainMutualInformation = serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(analysis.axes.len(), 1);
     assert_eq!(analysis.unassessed_axes.len(), 1);
     assert_eq!(analysis.unassessed_axes[0].have, 1);

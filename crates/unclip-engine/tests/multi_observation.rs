@@ -9,7 +9,7 @@ use unclip_engine::{
 };
 use unclip_epistemic::{
     hash_params, DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion,
-    InferenceToken, PluginId, SourceRef, Timestamp, Tracked,
+    InferenceToken, PluginId, PluginParams, SharedParams, SourceRef, Timestamp, Tracked,
 };
 use unclip_measure::{
     MatrixCell, MeasurementProfile, MeasurementValue, RankPosition, RankTrajectory, Reading,
@@ -149,13 +149,24 @@ fn fixture_document(json: serde_json::Value) -> Fixture {
     fixture
 }
 
+/// Overwrite one field of one plugin's fixture parameters, in place.
+///
+/// The map holds the tree shared, so this reaches through the handle rather
+/// than rebuilding the entry.
+fn set_param(params: &mut PluginParams, id: &str, field: &str, value: serde_json::Value) {
+    let entry = params
+        .get_mut(&PluginId::new(id))
+        .expect("fixture configures this sensor");
+    SharedParams::make_mut(entry)[field] = value;
+}
+
 fn metadata(id: &str, producer: &str) -> EmitMetadata {
     let params = serde_json::json!({});
     EmitMetadata::new(
         DerivedId::new(id),
         PluginId::new(producer),
         semver::Version::new(0, 1, 0),
-        &params,
+        params,
         Timestamp::new("2026-09-19T00:00:00Z"),
     )
     .with_source(SourceRef::new("fixture"))
@@ -210,7 +221,7 @@ impl Inputs {
                 .collect(),
         }
     }
-    fn ctx<'a>(&'a self, fixture: &'a Fixture, params: &'a serde_json::Value) -> MeasureCtx<'a> {
+    fn ctx<'a>(&'a self, fixture: &'a Fixture, params: &'a SharedParams) -> MeasureCtx<'a> {
         MeasureCtx::new(
             &fixture.domain,
             &fixture.frame,
@@ -238,7 +249,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
     let inputs = Inputs::new(&fixture);
     let engine = Engine::with_builtins().unwrap();
     let plan = engine.plan(&profile()).unwrap();
-    let params = serde_json::json!({});
+    let params = SharedParams::new(serde_json::json!({}));
     let mut expected = inputs
         .observations
         .iter()
@@ -374,11 +385,11 @@ fn batch_sensors_reject_duplicate_or_unselected_inputs_and_unknown_parameters() 
             "unselected" => fixture.rankings[0].observation = ObservationId::new("not-selected"),
             _ => {}
         }
-        let params = if case == "params" {
+        let params = SharedParams::new(if case == "params" {
             serde_json::json!({"weight":1})
         } else {
             serde_json::json!({})
-        };
+        });
         let inputs = Inputs::new(&fixture);
         for sensor in &plan.sensors {
             let ctx = inputs.ctx(&fixture, &params);
@@ -400,11 +411,7 @@ async fn persisted_batch_profiles_replay_calculations_bit_for_bit() {
     assert_persisted_batch(fixture(), profile(), BTreeMap::new()).await;
 }
 
-async fn assert_persisted_batch(
-    fixture: Fixture,
-    profile: EngineProfile,
-    params: BTreeMap<PluginId, serde_json::Value>,
-) {
+async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params: PluginParams) {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();
     let domains = SeaOrmDomainRepository::new(db.clone());
     let provenance = SeaOrmProvenanceRepository::new(db.clone());
@@ -518,16 +525,14 @@ async fn assert_persisted_batch(
                 engine_run_id: "batch".into(),
                 sensor: result.value().sensor.clone(),
                 sensor_version: result.value().sensor_version.clone(),
-                params: params
-                    .get(&result.value().sensor)
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({})),
-                params_hash: hash_params(
-                    &params
-                        .get(&result.value().sensor)
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!({})),
+                params: params.get(&result.value().sensor).map_or_else(
+                    || SharedParams::new(serde_json::json!({})),
+                    SharedParams::clone,
                 ),
+                params_hash: hash_params(&params.get(&result.value().sensor).map_or_else(
+                    || SharedParams::new(serde_json::json!({})),
+                    SharedParams::clone,
+                )),
                 status: "completed".into(),
                 started_at: "now".into(),
                 completed_at: Some("now".into()),
@@ -610,7 +615,8 @@ async fn assert_persisted_batch(
         ] {
             let candidate_params = BTreeMap::from([(
                 PluginId::new("generate.pairwise-coupling"),
-                serde_json::json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
+                serde_json::json!({"metric":metric,"threshold":threshold,"minimum_samples":2})
+                    .into(),
             )]);
             let discovery_id = format!("batch-candidates/{metric}");
             let calculate = || {
@@ -701,7 +707,7 @@ async fn assert_persisted_batch(
                         })
                         .unwrap();
                     let inputs = [Tracked::from(&structure)];
-                    let params = BTreeMap::from([(PluginId::new(generator), params)]);
+                    let params = BTreeMap::from([(PluginId::new(generator), params.into())]);
                     let id = format!("structure-candidates/{}", structure.id());
                     let calculate = || {
                         generate_candidates(
@@ -784,7 +790,7 @@ async fn assert_persisted_batch(
                 .unwrap();
         let candidate_params = BTreeMap::from([(
             PluginId::new("generate.temporal-coupling"),
-            serde_json::json!({"threshold":0.5,"minimum_samples":2}),
+            serde_json::json!({"threshold":0.5,"minimum_samples":2}).into(),
         )]);
         let selected = results.iter().map(Tracked::from).collect::<Vec<_>>();
         let calculate = || {
@@ -894,17 +900,17 @@ fn selected_profile() -> EngineProfile {
     }
 }
 
-fn selected_params() -> BTreeMap<PluginId, serde_json::Value> {
+fn selected_params() -> PluginParams {
     SELECTED_SENSORS
         .iter()
         .map(|id| {
             (
                 PluginId::new(*id),
-                if *id == "sensor.co-foreground" {
+                SharedParams::new(if *id == "sensor.co-foreground" {
                     serde_json::json!({"left":"a","right":"b","foreground_rank":2})
                 } else {
                     serde_json::json!({"left":"a","right":"b","conditioning_variables":["c"]})
-                },
+                }),
             )
         })
         .collect()
@@ -922,11 +928,11 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
             let mut meta = metadata("selected", plugin.descriptor().id.as_str());
-            meta.params = std::sync::Arc::new(configured.clone());
+            meta.params = SharedParams::clone(configured);
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
             assert_eq!(results[0].provenance().inputs.len(), 12);
-            assert_eq!(*results[0].provenance().params, *configured);
+            assert_eq!(&results[0].provenance().params, configured);
             assert_eq!(results[0].value().sample_count, Some(4));
             let Reading::Value {
                 value: MeasurementValue::Scalar(value),
@@ -961,7 +967,7 @@ fn selected_pair_sensors_conform_and_record_parameters_and_complete_cases() {
                 Reading::InsufficientEvidence { have: 3, need: 4 }
             );
         }
-        let empty_params = serde_json::json!({"left":"a","right":"b"});
+        let empty_params = SharedParams::new(serde_json::json!({"left":"a","right":"b"}));
         if sensor.descriptor().id.as_str() != "sensor.co-foreground" {
             let ctx = inputs.ctx(&fixture, &empty_params);
             conformance::assert_planning(
@@ -993,7 +999,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
     for sensor in &plan.sensors {
         let base = &params[&sensor.descriptor().id];
         for field in ["left", "same", "extra", "invalid-evidence"] {
-            let mut config = base.clone();
+            let mut config = (**base).clone();
             match field {
                 "left" => config["left"] = serde_json::json!("absent"),
                 "same" => config["right"] = config["left"].clone(),
@@ -1003,6 +1009,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
                 }
                 _ => config["conditioning_variables"] = serde_json::json!(["c", "f1"]),
             }
+            let config = SharedParams::new(config);
             let ctx = inputs.ctx(&fixture, &config);
             assert!(sensor
                 .measure(
@@ -1078,9 +1085,12 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
         }
     );
     let mut params = selected_params();
-    params
-        .get_mut(&PluginId::new("sensor.co-foreground"))
-        .unwrap()["foreground_rank"] = serde_json::json!(1);
+    set_param(
+        &mut params,
+        "sensor.co-foreground",
+        "foreground_rank",
+        serde_json::json!(1),
+    );
     let fixture = conditioned_fixture();
     let results = engine
         .measure(
@@ -1132,7 +1142,7 @@ fn temporal_profile() -> EngineProfile {
         ..Default::default()
     }
 }
-fn temporal_params() -> BTreeMap<PluginId, serde_json::Value> {
+fn temporal_params() -> PluginParams {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/temporal_observations.json")).unwrap();
     TEMPORAL_SENSORS
@@ -1146,7 +1156,7 @@ fn temporal_params() -> BTreeMap<PluginId, serde_json::Value> {
                 _ => serde_json::json!({"unit":"a","window":2,"minimum_shift":2.0}),
             };
             value["sequence"] = fixture["sequence"].clone();
-            (PluginId::new(*id), value)
+            (PluginId::new(*id), SharedParams::new(value))
         })
         .collect()
 }
@@ -1165,11 +1175,11 @@ fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
             let configured = &params[&plugin.descriptor().id];
             let ctx = inputs.ctx(&fixture, configured);
             let mut meta = metadata("temporal", plugin.descriptor().id.as_str());
-            meta.params = std::sync::Arc::new(configured.clone());
+            meta.params = SharedParams::clone(configured);
             meta.params_hash = hash_params(configured);
             let results = plugin.measure(&ctx, ctx.calculation_token(meta))?;
             assert_eq!(results[0].provenance().inputs.len(), 12);
-            assert_eq!(*results[0].provenance().params, *configured);
+            assert_eq!(&results[0].provenance().params, configured);
             let value = results[0].value();
             match plugin.descriptor().id.as_str() {
                 "sensor.lagged-dependency" => {
@@ -1261,10 +1271,13 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
     }
     let fixture = temporal_fixture();
     let mut params = temporal_params();
-    params
-        .get_mut(&PluginId::new("sensor.change-points"))
-        .unwrap()["minimum_shift"] = serde_json::json!(3.0);
-    params.get_mut(&PluginId::new("sensor.dtw")).unwrap()["right"] = serde_json::json!("a");
+    set_param(
+        &mut params,
+        "sensor.change-points",
+        "minimum_shift",
+        serde_json::json!(3.0),
+    );
+    set_param(&mut params, "sensor.dtw", "right", serde_json::json!("a"));
     let results = engine
         .measure(
             &plan,
@@ -1295,7 +1308,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
             .value()
             .reading,
         Reading::Value {
-            value: MeasurementValue::Events(vec![])
+            value: MeasurementValue::Events(vec![].into())
         }
     );
     let mut constant = fixture;
@@ -1339,8 +1352,9 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
     let params = temporal_params();
     for sensor in &plan.sensors {
         let base = &params[&sensor.descriptor().id];
-        let mut missing = base.clone();
+        let mut missing = (**base).clone();
         missing.as_object_mut().unwrap().remove("sequence");
+        let missing = SharedParams::new(missing);
         let ctx = inputs.ctx(&fixture, &missing);
         conformance::assert_planning(
             sensor.as_ref(),
@@ -1370,7 +1384,7 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
             "unknown-unit",
             "unknown-field",
         ] {
-            let mut config = base.clone();
+            let mut config = (**base).clone();
             match case {
                 "duplicate" => {
                     config["sequence"][1]["observation"] =
@@ -1396,6 +1410,7 @@ fn temporal_sensors_require_explicit_order_and_reject_invalid_selection_or_param
                 }
                 _ => config["extra"] = serde_json::json!(true),
             }
+            let config = SharedParams::new(config);
             let ctx = inputs.ctx(&fixture, &config);
             assert!(
                 sensor
@@ -1661,7 +1676,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
         let plan = engine.plan(&profile).unwrap();
         let params = BTreeMap::from([(
             PluginId::new("compare.pairwise-matrix"),
-            serde_json::json!({"minimum_samples":2}),
+            serde_json::json!({"minimum_samples":2}).into(),
         )]);
         engine.run_counterfactual_experiment(
             &plan,

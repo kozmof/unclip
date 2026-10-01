@@ -91,7 +91,7 @@ use unclip_domain::{
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, EmitMetadata, ExperimentToken, Experimental,
     FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, ModelRef, PluginId,
-    SourceRef, Tracked,
+    SharedParams, SourceRef, Tracked,
 };
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainMutualInformation, CrossDomainSample, Delta,
@@ -99,6 +99,11 @@ use unclip_measure::{
 };
 use unclip_observe::{Alignment, Observation, PartialRanking};
 
+/// One plugin's parameters, as a context hands them out for reading.
+///
+/// A context holds them as [`SharedParams`] so a provenance record can keep the
+/// configured tree without copying it; `params()` borrows through that handle
+/// and `shared_params()` hands out another.
 pub type Params = serde_json::Value;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -204,7 +209,11 @@ pub enum EvidenceRequirement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Applicability {
     Applicable,
-    NotApplicable { reason: String },
+    /// Shared so the reason can become the recorded [`Reading::NotApplicable`]
+    /// without being copied; every caller already builds one from a literal.
+    NotApplicable {
+        reason: Arc<str>,
+    },
 }
 
 /// Where a sensor runs in the calculation pipeline.
@@ -347,7 +356,7 @@ pub struct MeasureCtx<'a> {
     observations: &'a [Tracked<Observation>],
     alignments: &'a [Tracked<Alignment>],
     rankings: &'a [Tracked<PartialRanking>],
-    params: &'a Params,
+    params: &'a SharedParams,
     dependencies: DependencyCollector,
 }
 
@@ -358,7 +367,7 @@ impl<'a> MeasureCtx<'a> {
         observations: &'a [Tracked<Observation>],
         alignments: &'a [Tracked<Alignment>],
         rankings: &'a [Tracked<PartialRanking>],
-        params: &'a Params,
+        params: &'a SharedParams,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
@@ -382,6 +391,13 @@ impl<'a> MeasureCtx<'a> {
 
     pub fn params(&self) -> &Params {
         self.params
+    }
+
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
     }
 
     pub fn observations(&self) -> &[Tracked<Observation>] {
@@ -532,7 +548,7 @@ pub fn classify_sensor(sensor: &dyn Sensor, ctx: &MeasureCtx<'_>) -> SensorDecis
     // recorded like any other reason a selected sensor produced nothing.
     if let Err(violation) = validate_params(sensor.descriptor().params_schema, ctx.params()) {
         return SensorDecision::Record(Reading::NotApplicable {
-            reason: format!("parameters do not satisfy the declared schema: {violation}"),
+            reason: format!("parameters do not satisfy the declared schema: {violation}").into(),
         });
     }
     if let Applicability::NotApplicable { reason } = sensor.applies_to(ctx) {
@@ -562,7 +578,7 @@ pub fn classify_sensor(sensor: &dyn Sensor, ctx: &MeasureCtx<'_>) -> SensorDecis
 pub struct InferCtx<'a> {
     source: SourceRef,
     domain: &'a DomainSnapshot,
-    params: &'a Params,
+    params: &'a SharedParams,
     io: &'a dyn InferenceIo,
 }
 
@@ -570,7 +586,7 @@ impl<'a> InferCtx<'a> {
     pub fn new(
         source: SourceRef,
         domain: &'a DomainSnapshot,
-        params: &'a Params,
+        params: &'a SharedParams,
         io: &'a dyn InferenceIo,
     ) -> Self {
         Self {
@@ -592,6 +608,13 @@ impl<'a> InferCtx<'a> {
 
     pub fn params(&self) -> &Params {
         self.params
+    }
+
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
     }
 
     /// The model boundary for this stage. Requests made any other way are not
@@ -696,7 +719,7 @@ pub struct ProductMeasureCtx<'a> {
     frame: &'a Tracked<ProductMeasurementFrame>,
     samples: &'a [Tracked<CrossDomainSample>],
     mutual_information: Option<&'a Tracked<CrossDomainMutualInformation>>,
-    params: &'a Params,
+    params: &'a SharedParams,
     dependencies: DependencyCollector,
 }
 
@@ -705,7 +728,7 @@ impl<'a> ProductMeasureCtx<'a> {
         product: &'a Tracked<ProductDomainSnapshot>,
         frame: &'a Tracked<ProductMeasurementFrame>,
         samples: &'a [Tracked<CrossDomainSample>],
-        params: &'a Params,
+        params: &'a SharedParams,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
@@ -722,7 +745,7 @@ impl<'a> ProductMeasureCtx<'a> {
         product: &'a Tracked<ProductDomainSnapshot>,
         frame: &'a Tracked<ProductMeasurementFrame>,
         mutual_information: &'a Tracked<CrossDomainMutualInformation>,
-        params: &'a Params,
+        params: &'a SharedParams,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
@@ -760,6 +783,13 @@ impl<'a> ProductMeasureCtx<'a> {
         self.params
     }
 
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
+    }
+
     pub fn calculation_token(&self, metadata: EmitMetadata) -> CalculationToken {
         CalculationToken::from_harness(metadata, self.dependencies.clone())
     }
@@ -783,7 +813,7 @@ pub struct CrossProductMeasureCtx<'a> {
     target_product: &'a Tracked<ProductDomainSnapshot>,
     target_frame: &'a Tracked<ProductMeasurementFrame>,
     target_movement: &'a Tracked<CrossDomainInteractionMovement>,
-    params: &'a Params,
+    params: &'a SharedParams,
     dependencies: DependencyCollector,
 }
 
@@ -805,7 +835,7 @@ impl<'a> CrossProductMeasureCtx<'a> {
     pub fn new(
         source: CrossProductSide<'a>,
         target: CrossProductSide<'a>,
-        params: &'a Params,
+        params: &'a SharedParams,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
@@ -846,6 +876,13 @@ impl<'a> CrossProductMeasureCtx<'a> {
 
     pub fn params(&self) -> &Params {
         self.params
+    }
+
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
     }
 
     pub fn calculation_token(&self, metadata: EmitMetadata) -> CalculationToken {
@@ -931,7 +968,7 @@ pub trait InterpretationIo: Send + Sync {
 /// Capability-scoped access to one tracked empirical structure and model I/O.
 pub struct InterpretCtx<'a> {
     structure: &'a Tracked<EmpiricalStructure>,
-    params: &'a Params,
+    params: &'a SharedParams,
     io: &'a dyn InterpretationIo,
     dependencies: DependencyCollector,
 }
@@ -939,7 +976,7 @@ pub struct InterpretCtx<'a> {
 impl<'a> InterpretCtx<'a> {
     pub fn new(
         structure: &'a Tracked<EmpiricalStructure>,
-        params: &'a Params,
+        params: &'a SharedParams,
         io: &'a dyn InterpretationIo,
         dependencies: DependencyCollector,
     ) -> Self {
@@ -960,6 +997,13 @@ impl<'a> InterpretCtx<'a> {
 
     pub fn params(&self) -> &Params {
         self.params
+    }
+
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
     }
 
     pub fn io(&self) -> &dyn InterpretationIo {
@@ -1498,18 +1542,27 @@ mod tests {
             axes: vec![],
         };
         for (params, have) in [
-            (serde_json::json!({}), 0),
-            (serde_json::json!({"conditioning_variables": "genre"}), 0),
+            (SharedParams::new(serde_json::json!({})), 0),
             (
-                serde_json::json!({"conditioning_variables": [null, 1, "", " "]}),
+                SharedParams::new(serde_json::json!({"conditioning_variables": "genre"})),
                 0,
             ),
             (
-                serde_json::json!({"conditioning_variables": ["genre", "genre"]}),
+                SharedParams::new(
+                    serde_json::json!({"conditioning_variables": [null, 1, "", " "]}),
+                ),
+                0,
+            ),
+            (
+                SharedParams::new(
+                    serde_json::json!({"conditioning_variables": ["genre", "genre"]}),
+                ),
                 1,
             ),
             (
-                serde_json::json!({"conditioning_variables": ["genre", "source"]}),
+                SharedParams::new(
+                    serde_json::json!({"conditioning_variables": ["genre", "source"]}),
+                ),
                 2,
             ),
         ] {
@@ -1615,7 +1668,7 @@ mod tests {
             "required":["left"],"properties":{"left":{"type":"string","minLength":1}}}"#;
 
         // A key the schema does not declare: recorded, not passed to the sensor.
-        let params = serde_json::json!({"left": "a", "typo": 1});
+        let params: SharedParams = serde_json::json!({"left": "a", "typo": 1}).into();
         let ctx = MeasureCtx::new(
             &domain,
             &frame,
@@ -1633,7 +1686,7 @@ mod tests {
         assert!(reason.contains("unknown key `typo`"), "got: {reason}");
 
         // Satisfying the same schema leaves the decision to run.
-        let params = serde_json::json!({"left": "a"});
+        let params: SharedParams = serde_json::json!({"left": "a"}).into();
         let ctx = MeasureCtx::new(
             &domain,
             &frame,
@@ -1666,7 +1719,7 @@ mod tests {
             version: FrameVersion::new("1"),
             axes: Vec::new(),
         };
-        let params = serde_json::json!({});
+        let params: SharedParams = serde_json::json!({}).into();
         let ctx = MeasureCtx::new(
             &domain,
             &frame,
@@ -1701,7 +1754,7 @@ mod tests {
                     DerivedId::new("measurement-1"),
                     PluginId::new("sensor.stub"),
                     Version::new(0, 1, 0),
-                    &serde_json::json!({}),
+                    serde_json::json!({}),
                     Timestamp::new("2026-09-17T00:00:00Z"),
                 )
                 .with_algorithm("stub"),
@@ -1772,7 +1825,7 @@ mod tests {
             version: FrameVersion::new("1"),
             axes: Vec::new(),
         };
-        let params = serde_json::json!({});
+        let params: SharedParams = serde_json::json!({}).into();
         let ctx = MeasureCtx::new(
             &domain,
             &frame,
@@ -1790,7 +1843,7 @@ mod tests {
                         DerivedId::new("measurement"),
                         PluginId::new("sensor.scalar"),
                         Version::new(0, 1, 0),
-                        &serde_json::json!({}),
+                        serde_json::json!({}),
                         Timestamp::new("2026-09-17T00:00:00Z"),
                     )
                     .with_algorithm("scalar"),
@@ -2028,7 +2081,7 @@ mod tests {
                 )
             })
             .to_vec();
-        let params = serde_json::json!({});
+        let params: SharedParams = serde_json::json!({}).into();
         let ctx = MeasureCtx::new(
             &domain,
             &frame,
@@ -2058,7 +2111,7 @@ mod tests {
                     DerivedId::new("measurement"),
                     PluginId::new("sensor.stub"),
                     Version::new(0, 1, 0),
-                    &params,
+                    ctx.shared_params(),
                     Timestamp::new("2026-09-17T00:00:00Z"),
                 )
                 .with_algorithm("stub"),
@@ -2069,5 +2122,13 @@ mod tests {
             vec![DerivedId::new("kept")],
             "an evidence check must not claim inputs the sensor never used"
         );
+        // The provenance records the configured tree itself. A stage builds one
+        // context and one token per plugin per source, so a copy here would be
+        // a copy of the run's parameters per emission.
+        assert!(std::sync::Arc::ptr_eq(
+            &derived.provenance().params,
+            &params
+        ));
+        assert!(std::ptr::eq(ctx.params(), &*params));
     }
 }

@@ -96,6 +96,7 @@ pub use temporal::{
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -691,19 +692,35 @@ fn relative_rank_position(left: RankPosition, right: RankPosition) -> RelativeRa
     }
 }
 
+/// What one sensor measured, in the kind it measured it in.
+///
+/// Every variant that carries more than a number carries it behind an [`Arc`].
+/// A measured value is immutable once read: it is tracked as an input, compared,
+/// emitted as a baseline, retained as evidence inside a profile, and written to
+/// a row, and the same value is routinely reported by several of those at once.
+/// Owning each payload inline made every one of those hops deep-copy a matrix,
+/// a graph, a ranked state, or an arbitrary structured tree, so a comparison
+/// over N comparators kept N copies of what it compared. Sharing the payload
+/// makes copying a value a refcount bump and keeps one copy of the data.
+///
+/// The variants are shared individually rather than the enum being wrapped as a
+/// whole, so a pattern still reaches the payload directly — matching the `Graph`
+/// arm binds the graph, now as a shared handle that derefs to it. Serde's `rc`
+/// feature is enabled workspace-wide, so the wire form is unchanged: a shared
+/// payload serializes as the bare value it holds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum MeasurementValue {
     Scalar(f64),
-    Vector(Vec<f64>),
-    Matrix(Vec<Vec<f64>>),
+    Vector(Arc<Vec<f64>>),
+    Matrix(Arc<Vec<Vec<f64>>>),
     PairwiseMatrix(PairwiseMatrix),
-    Distribution(Vec<(String, f64)>),
-    Events(Vec<serde_json::Value>),
-    Graph(serde_json::Value),
-    Ranking(RankedState),
-    Partition(Vec<Vec<String>>),
-    Structured(serde_json::Value),
+    Distribution(Arc<Vec<(String, f64)>>),
+    Events(Arc<Vec<serde_json::Value>>),
+    Graph(Arc<serde_json::Value>),
+    Ranking(Arc<RankedState>),
+    Partition(Arc<Vec<Vec<String>>>),
+    Structured(Arc<serde_json::Value>),
 }
 
 impl MeasurementValue {
@@ -722,11 +739,18 @@ impl MeasurementValue {
     }
 }
 
+/// One sensor's result for one coordinate, including the reasons there is no
+/// number.
+///
+/// Every arm is cheap to copy: [`MeasurementValue`] shares its payload and the
+/// `NotApplicable` reason is a shared string, so a reading can be reported in a
+/// comparison entry, emitted as a baseline measurement, and persisted without
+/// any of them duplicating what it says.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Reading {
     Value { value: MeasurementValue },
-    NotApplicable { reason: String },
+    NotApplicable { reason: Arc<str> },
     NotMeasured,
     InsufficientEvidence { have: usize, need: usize },
 }
@@ -1464,6 +1488,107 @@ mod tests {
         assert!(partial_correlation(&x, &y, &sparse).is_err());
     }
 
+    /// A measured value is reported by several records of one run at once: the
+    /// reading a sensor emitted, the baseline a comparison emitted beside it,
+    /// the entry each selected comparator retained, and the row that was
+    /// written. Every payload is therefore shared, and copying a reading copies
+    /// none of it. Nothing else observes the difference — every copy still
+    /// compares equal and serializes to identical bytes — so only pointer
+    /// identity catches a regression that reintroduces the per-copy deep copy.
+    #[test]
+    fn copying_a_reading_shares_every_payload_it_reports() {
+        let matrix: PairwiseMatrix = serde_json::from_value(serde_json::json!({
+            "metric": "spearman",
+            "units": ["a", "b"],
+            "cells": [
+                [{"status":"value","value":1.0,"sample_count":2},
+                 {"status":"value","value":0.5,"sample_count":2}],
+                [{"status":"value","value":0.5,"sample_count":2},
+                 {"status":"value","value":1.0,"sample_count":2}]
+            ]
+        }))
+        .expect("a square symmetric matrix");
+        let ranked = RankedState {
+            tiers: vec![vec![UnitId::new("a")]],
+            unknown: vec![],
+            unresolved: vec![],
+        };
+        for value in [
+            MeasurementValue::Vector(Arc::new(vec![1.0, 2.0])),
+            MeasurementValue::Matrix(Arc::new(vec![vec![1.0]])),
+            MeasurementValue::PairwiseMatrix(matrix),
+            MeasurementValue::Distribution(Arc::new(vec![("a".into(), 1.0)])),
+            MeasurementValue::Events(Arc::new(vec![serde_json::json!({"at": 1})])),
+            MeasurementValue::Graph(Arc::new(serde_json::json!({"nodes": [], "edges": []}))),
+            MeasurementValue::Ranking(Arc::new(ranked)),
+            MeasurementValue::Partition(Arc::new(vec![vec!["a".to_owned()]])),
+            MeasurementValue::Structured(Arc::new(serde_json::json!({"association": 0.5}))),
+        ] {
+            let reading = Reading::Value { value };
+            let copied = reading.clone();
+            assert_eq!(reading, copied);
+            assert_eq!(
+                serde_json::to_string(&reading).expect("a reading serializes"),
+                serde_json::to_string(&copied).expect("a reading serializes"),
+            );
+            let (Reading::Value { value: left }, Reading::Value { value: right }) =
+                (&reading, &copied)
+            else {
+                panic!("both readings hold a value")
+            };
+            assert!(
+                shares_payload(left, right),
+                "copying {left:?} duplicated its payload"
+            );
+        }
+
+        // The reason a sparse arm carries travels the same way.
+        let reason = Reading::NotApplicable {
+            reason: "outside domain".into(),
+        };
+        let (Reading::NotApplicable { reason: left }, Reading::NotApplicable { reason: right }) =
+            (&reason, &reason.clone())
+        else {
+            panic!("both readings are not applicable")
+        };
+        assert!(std::ptr::eq(left.as_ref() as *const str, right.as_ref()));
+    }
+
+    /// Whether two values of the same kind point at one payload allocation.
+    fn shares_payload(left: &MeasurementValue, right: &MeasurementValue) -> bool {
+        match (left, right) {
+            (MeasurementValue::Scalar(left), MeasurementValue::Scalar(right)) => left == right,
+            (MeasurementValue::Vector(left), MeasurementValue::Vector(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Matrix(left), MeasurementValue::Matrix(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::PairwiseMatrix(left), MeasurementValue::PairwiseMatrix(right)) => {
+                std::ptr::eq(left.units(), right.units())
+            }
+            (MeasurementValue::Distribution(left), MeasurementValue::Distribution(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Events(left), MeasurementValue::Events(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Graph(left), MeasurementValue::Graph(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Ranking(left), MeasurementValue::Ranking(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Partition(left), MeasurementValue::Partition(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (MeasurementValue::Structured(left), MeasurementValue::Structured(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            _ => false,
+        }
+    }
+
     #[test]
     fn zero_is_a_value_not_a_sparse_status() {
         let reading = Reading::Value {
@@ -1501,7 +1626,7 @@ mod tests {
     #[test]
     fn kinds_are_explicit() {
         assert_eq!(
-            MeasurementValue::Partition(vec![]).kind(),
+            MeasurementValue::Partition(vec![].into()).kind(),
             MeasurementKind::Partition
         );
     }

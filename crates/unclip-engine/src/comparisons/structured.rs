@@ -115,7 +115,9 @@ impl Comparator for StructuredIdentityComparator {
         };
         Ok(token.emit(Delta {
             comparator: self.descriptor.id.clone(),
-            value: MeasurementValue::Structured(serde_json::to_value(comparison).map_err(invalid)?),
+            value: MeasurementValue::Structured(
+                serde_json::to_value(comparison).map_err(invalid)?.into(),
+            ),
         }))
     }
 }

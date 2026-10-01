@@ -68,7 +68,8 @@ mod tests {
 
     use unclip_domain::{DomainId, DomainSnapshot};
     use unclip_epistemic::{
-        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId, SourceRef, Timestamp,
+        DependencyCollector, DerivedId, DomainVersion, EmitMetadata, PluginId, SharedParams,
+        SourceRef, Timestamp,
     };
     use unclip_observe::ObservationId;
     use unclip_plugin::{InferenceIo, Inferrer};
@@ -101,14 +102,14 @@ mod tests {
             units: BTreeMap::new(),
             relations: BTreeMap::new(),
         };
-        let params = serde_json::json!({"strict": true});
+        let params = SharedParams::new(serde_json::json!({"strict": true}));
         let source = SourceRef::new("observations/manual.yaml");
         let ctx = InferCtx::new(source.clone(), &domain, &params, &FixtureIo);
         let metadata = EmitMetadata::new(
             DerivedId::new("manual-derived"),
             PluginId::new("infer.manual"),
             Version::new(1, 0, 0),
-            &params,
+            ctx.shared_params(),
             Timestamp::new("2026-09-18T00:00:00Z"),
         )
         .with_algorithm("manual")
@@ -136,7 +137,7 @@ mod tests {
             other => panic!("unexpected output: {other:?}"),
         }
         assert_eq!(output.provenance().source.as_ref(), Some(&source));
-        assert_eq!(*output.provenance().params, params);
+        assert_eq!(output.provenance().params, params);
         assert_eq!(
             output.provenance().domain_version.as_ref(),
             Some(&domain.version)

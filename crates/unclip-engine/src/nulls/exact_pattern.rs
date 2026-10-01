@@ -103,16 +103,19 @@ impl ExactPatternNull {
             .map(|unit| &unit.id)
             .collect::<Vec<_>>();
         Ok(token.emit(Reading::Value {
-            value: MeasurementValue::Structured(serde_json::json!({
-                "model": self.model,
-                "domain_version_id": key,
-                "matching": self.matching,
-                "match_count": matches.len(),
-                "matches": matches,
-                "has_existing_alternative": !matches.is_empty(),
-                "scope": self.scope,
-                "decision": "no automatic candidate acceptance or rejection"
-            })),
+            value: MeasurementValue::Structured(
+                serde_json::json!({
+                    "model": self.model,
+                    "domain_version_id": key,
+                    "matching": self.matching,
+                    "match_count": matches.len(),
+                    "matches": matches,
+                    "has_existing_alternative": !matches.is_empty(),
+                    "scope": self.scope,
+                    "decision": "no automatic candidate acceptance or rejection"
+                })
+                .into(),
+            ),
         }))
     }
 }

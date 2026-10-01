@@ -113,7 +113,7 @@ impl Sensor for MultiObservationSensor {
                 value: MeasurementValue::Structured(serde_json::json!({
                     "rank_trajectories": ranks,
                     "relative_rank_trajectories": construct_relative_rank_trajectories(&frame_units, &states),
-                })),
+                }).into()),
             }
         };
         Ok(vec![token.emit(Measurement {

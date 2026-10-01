@@ -241,7 +241,7 @@ pub(crate) async fn run(
             revision_id.clone(),
             PluginId::new("revision.apply"),
             "0.1.0".parse().expect("valid revision producer version"),
-            &params,
+            params,
             Timestamp::new(timestamp),
         )
         .with_algorithm("immutable_candidate_promotion")

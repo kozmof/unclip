@@ -170,7 +170,8 @@ fn engine_interaction_movement_is_order_stable_sparse_versioned_and_tracked() {
     else {
         panic!("expected structured interaction movement")
     };
-    let movement: CrossDomainInteractionMovement = serde_json::from_value(value.clone()).unwrap();
+    let movement: CrossDomainInteractionMovement =
+        serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(movement.axes.len(), 2);
     assert_eq!(movement.axes[0].directional_concordance, 0.0);
     assert_eq!(movement.axes[0].concordant_transitions, 1);
@@ -230,7 +231,8 @@ fn engine_interaction_movement_keeps_partial_and_total_shortfalls_typed() {
     else {
         panic!("one sufficiently observed axis should retain a value")
     };
-    let movement: CrossDomainInteractionMovement = serde_json::from_value(value.clone()).unwrap();
+    let movement: CrossDomainInteractionMovement =
+        serde::Deserialize::deserialize(&**value).unwrap();
     assert_eq!(movement.axes.len(), 1);
     assert_eq!(movement.unassessed_axes.len(), 1);
     assert_eq!(movement.unassessed_axes[0].have, 1);

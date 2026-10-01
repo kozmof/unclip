@@ -122,13 +122,12 @@ pub use revision::{
 };
 pub use transfer_constraint::TransferAssessment;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use unclip_domain::{DomainSnapshot, MeasurementFrame};
 use unclip_epistemic::{
     hash_params, Calculated, DependencyCollector, DerivedId, EmitMetadata, InferenceToken,
-    Inferred, Interpreted, Operation, PluginId, SourceRef, Timestamp, Tracked,
+    Inferred, Interpreted, Operation, PluginParams, SharedParams, SourceRef, Timestamp, Tracked,
 };
 use unclip_measure::{EmpiricalStructure, Measurement, MeasurementContext};
 use unclip_observe::{Alignment, Observation, PartialRanking};
@@ -181,7 +180,7 @@ pub struct InferenceRun<'a> {
     pub id: &'a str,
     pub source: SourceRef,
     pub timestamp: Timestamp,
-    pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+    pub params: &'a PluginParams,
     pub io: &'a dyn unclip_plugin::InferenceIo,
 }
 
@@ -293,14 +292,14 @@ pub struct MeasurementInputs<'a> {
 pub struct MeasurementRun<'a> {
     pub id: &'a str,
     pub timestamp: Timestamp,
-    pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+    pub params: &'a PluginParams,
 }
 
 /// Reproducible inputs controlled by one interpretation stage.
 pub struct InterpretationRun<'a> {
     pub id: &'a str,
     pub timestamp: Timestamp,
-    pub params: &'a BTreeMap<PluginId, serde_json::Value>,
+    pub params: &'a PluginParams,
     pub io: &'a dyn unclip_plugin::InterpretationIo,
 }
 
@@ -460,7 +459,7 @@ impl Engine {
                 .then_with(|| left.id.cmp(&right.id))
         });
 
-        let empty_params = serde_json::json!({});
+        let empty_params = SharedParams::new(serde_json::json!({}));
         let mut measurements = Vec::new();
         for sensor in sensors {
             let descriptor = sensor.descriptor();
@@ -480,7 +479,7 @@ impl Engine {
                 DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 descriptor.id.clone(),
                 descriptor.version.clone(),
-                params,
+                SharedParams::clone(params),
                 run.timestamp.clone(),
             );
             match classify_sensor(sensor.as_ref(), &ctx) {
@@ -510,7 +509,7 @@ impl Engine {
         run: InferenceRun<'_>,
     ) -> Result<InferenceResults> {
         support::require_run_id("inference", run.id)?;
-        let empty_params = serde_json::json!({});
+        let empty_params = SharedParams::new(serde_json::json!({}));
         let mut results = InferenceResults::default();
         for inferrer in &plan.inferrers {
             let descriptor = inferrer.descriptor();
@@ -521,7 +520,7 @@ impl Engine {
                 DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
                 descriptor.id.clone(),
                 descriptor.version.clone(),
-                params,
+                SharedParams::clone(params),
                 run.timestamp.clone(),
             )
             .with_source(run.source.clone())
@@ -575,7 +574,7 @@ impl Engine {
         sources.sort_by_key(|structure| structure.id());
         let mut interpreters = plan.interpreters.iter().collect::<Vec<_>>();
         interpreters.sort_by_key(|interpreter| &interpreter.descriptor().id);
-        let empty_params = serde_json::json!({});
+        let empty_params = SharedParams::new(serde_json::json!({}));
         let mut outputs = Vec::with_capacity(sources.len() * interpreters.len());
         for interpreter in interpreters {
             let descriptor = interpreter.descriptor();
@@ -588,7 +587,7 @@ impl Engine {
                     DerivedId::new(format!("{}/{}/{}", run.id, descriptor.id, source.id())),
                     descriptor.id.clone(),
                     descriptor.version.clone(),
-                    params,
+                    SharedParams::clone(params),
                     run.timestamp.clone(),
                 )
                 .with_model(model.clone());
@@ -606,7 +605,7 @@ impl Engine {
 /// Build a persistable planned-run record from the exact resolved plugins.
 pub fn run_record(
     plan: &RunPlan,
-    params: &BTreeMap<PluginId, serde_json::Value>,
+    params: &PluginParams,
     id: impl Into<String>,
     started_at: Timestamp,
     metadata: serde_json::Value,
@@ -619,7 +618,7 @@ pub fn run_record(
     /// builds, so the two lists had to be kept in step by eye.
     fn entries<T: ?Sized + unclip_plugin::Described>(
         plugins: &[std::sync::Arc<T>],
-        params: &BTreeMap<PluginId, serde_json::Value>,
+        params: &PluginParams,
     ) -> Vec<serde_json::Value> {
         let mut entries = plugins
             .iter()
@@ -628,7 +627,7 @@ pub fn run_record(
                 let values = params
                     .get(id)
                     .cloned()
-                    .unwrap_or_else(|| serde_json::json!({}));
+                    .unwrap_or_else(|| SharedParams::new(serde_json::json!({})));
                 serde_json::json!({
                     "id": id,
                     "version": plugin.plugin_version(),
@@ -684,8 +683,9 @@ mod tests {
     }
 
     use super::*;
+    use std::collections::BTreeMap;
     use unclip_domain::{DomainId, FrameId};
-    use unclip_epistemic::{DomainVersion, FrameVersion};
+    use unclip_epistemic::{DomainVersion, FrameVersion, PluginId};
     use unclip_measure::Reading;
     use unclip_plugin::PluginSelection;
 
@@ -984,7 +984,7 @@ mod tests {
         // `min_confidence` is declared `number, 0.0..=1.0`.
         let inferrer_params = BTreeMap::from([(
             PluginId::new("infer.pattern"),
-            serde_json::json!({"min_confidence": 4}),
+            serde_json::json!({"min_confidence": 4}).into(),
         )]);
         let error = engine
             .infer(
@@ -1009,7 +1009,7 @@ mod tests {
         // `model` and `model_version` are declared required.
         let interpreter_params = BTreeMap::from([(
             PluginId::new("interpret.llm-label"),
-            serde_json::json!({"model": "m"}),
+            serde_json::json!({"model": "m"}).into(),
         )]);
         let structures = [Tracked::from_calculated(
             DerivedId::new("structure/1"),
@@ -1039,7 +1039,7 @@ mod tests {
         // `compare.scalar-difference` declares no parameters at all.
         let comparator_params = BTreeMap::from([(
             PluginId::new("compare.scalar-difference"),
-            serde_json::json!({"tolerance": 0.5}),
+            serde_json::json!({"tolerance": 0.5}).into(),
         )]);
         let measurement = |id: &str| {
             Tracked::from_calculated(
@@ -1174,11 +1174,13 @@ mod tests {
         let params = BTreeMap::from([
             (
                 PluginId::new("infer.pattern"),
-                serde_json::json!({"min_confidence": 0.7}),
+                SharedParams::new(serde_json::json!({"min_confidence": 0.7})),
             ),
             (
                 PluginId::new("infer.rank-pattern"),
-                serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"}),
+                SharedParams::new(
+                    serde_json::json!({"ties": "preserve", "unknown_tail": "preserve"}),
+                ),
             ),
         ]);
         let results = engine
@@ -1335,11 +1337,17 @@ mod tests {
             ..EngineProfile::default()
         };
         let plan = engine.plan(&profile).unwrap();
-        let sensor_params = serde_json::json!({});
-        let inference_params = serde_json::json!({"min_confidence": 0.4});
+        let sensor_params = SharedParams::new(serde_json::json!({}));
+        let inference_params = SharedParams::new(serde_json::json!({"min_confidence": 0.4}));
         let params = BTreeMap::from([
-            (PluginId::new("sensor.coverage"), sensor_params.clone()),
-            (PluginId::new("infer.pattern"), inference_params.clone()),
+            (
+                PluginId::new("sensor.coverage"),
+                SharedParams::clone(&sensor_params),
+            ),
+            (
+                PluginId::new("infer.pattern"),
+                SharedParams::clone(&inference_params),
+            ),
         ]);
 
         let record = run_record(

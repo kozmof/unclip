@@ -100,7 +100,7 @@ impl ProductSensor for CrossDomainInteractionMovementSensor {
                 let unassessed = movement.unassessed_axes;
                 (
                     Reading::Value {
-                        value: MeasurementValue::Structured(reading_value),
+                        value: MeasurementValue::Structured(reading_value.into()),
                     },
                     None,
                     "value",

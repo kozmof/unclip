@@ -200,7 +200,7 @@ impl NullModel for RankingConstraintNull {
             "assumption":"untied endpoint order is independently exchangeable within each observation",
             "scope":"relative endpoint rank only; does not explain relation kind, metric coupling, or temporal dependence",
             "selection_adjusted":false,"causal_claim":false
-        }))}))
+        }).into())}))
     }
 }
 #[cfg(test)]

@@ -4,7 +4,8 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 use unclip_domain::{CandidateKind, CandidateProposal};
 use unclip_epistemic::{
-    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
+    SharedParams, Tracked,
 };
 use unclip_measure::{MeasurementValue, Reading};
 use unclip_observe::Observation;
@@ -134,7 +135,7 @@ impl NullModel for RandomCooccurrenceNull {
             "scope":"endpoint co-presence only; does not explain relation direction or kind",
             "assumption":"selected observations are exchangeable; source, time, genre and extraction bias are not controlled",
             "selection_adjusted":false,"causal_claim":false
-        })) }))
+        }).into()) }))
     }
 }
 /// Explicit evidence available to configured null models.
@@ -154,7 +155,7 @@ pub fn evaluate_null_models_with_inputs(
     let mut models = plan.null_models.iter().collect::<Vec<_>>();
     models.sort_by_key(|model| &model.descriptor().id);
     let mut results = Vec::new();
-    let empty = serde_json::json!({});
+    let empty = SharedParams::new(serde_json::json!({}));
     for model in models {
         let descriptor = model.descriptor();
         let params = run.params.get(&descriptor.id).unwrap_or(&empty);
@@ -171,7 +172,7 @@ pub fn evaluate_null_models_with_inputs(
             DerivedId::new(format!("{}/{}", run.id, descriptor.id)),
             descriptor.id.clone(),
             descriptor.version.clone(),
-            params,
+            ctx.shared_params(),
             run.timestamp.clone(),
         ));
         results.push(model.evaluate(&ctx, token)?);

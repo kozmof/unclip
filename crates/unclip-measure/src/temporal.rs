@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_observe::ObservationId;
@@ -18,9 +19,23 @@ pub struct OrderedObservation {
 }
 
 /// Immutable validated order. Deserialization uses the same validation as `new`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "Vec<OrderedObservation>", into = "Vec<OrderedObservation>")]
-pub struct ObservationSequence(Vec<OrderedObservation>);
+///
+/// The coordinates are held behind an [`Arc`]: a sequence is per-observation
+/// evidence that several calculations read and that transfer payloads report
+/// verbatim, so copying one must not copy a coordinate per observation.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "Vec<OrderedObservation>")]
+pub struct ObservationSequence(Arc<Vec<OrderedObservation>>);
+
+// Written out rather than declared with `into = "Vec<OrderedObservation>"`,
+// which serializes by converting `self.clone()` into the inner vector and so
+// copied every coordinate each time a sequence was written. Borrowing produces
+// the identical bytes and copies nothing.
+impl Serialize for ObservationSequence {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TemporalError {
@@ -45,7 +60,7 @@ impl ObservationSequence {
                 return Err(TemporalError::NonIncreasingPosition { index });
             }
         }
-        Ok(Self(observations))
+        Ok(Self(Arc::new(observations)))
     }
 
     pub fn observations(&self) -> &[OrderedObservation] {
@@ -71,12 +86,6 @@ impl TryFrom<Vec<OrderedObservation>> for ObservationSequence {
     type Error = TemporalError;
     fn try_from(value: Vec<OrderedObservation>) -> Result<Self, Self::Error> {
         Self::new(value)
-    }
-}
-
-impl From<ObservationSequence> for Vec<OrderedObservation> {
-    fn from(value: ObservationSequence) -> Self {
-        value.0
     }
 }
 

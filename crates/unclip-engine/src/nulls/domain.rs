@@ -89,7 +89,7 @@ fn evaluate(
             == Some(matching);
     let Some(pattern) = pattern.filter(|_| applicable) else {
         return Ok(token.emit(Reading::NotApplicable {
-            reason: format!("requires {matching} candidate evidence"),
+            reason: format!("requires {matching} candidate evidence").into(),
         }));
     };
     // Validate supported candidate shapes even when the baseline is unavailable.
@@ -138,5 +138,5 @@ fn evaluate(
         "match_count":matches.len(),"matches":matches,"has_existing_alternative":!matches.is_empty(),
         "scope":"case-sensitive label and kind matching only; does not establish semantic equivalence or explanatory adequacy",
         "decision":"no automatic candidate acceptance or rejection"
-    }))}))
+    }).into())}))
 }

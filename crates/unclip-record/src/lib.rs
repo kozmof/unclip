@@ -85,7 +85,9 @@ pub struct SensorRunRecord {
     pub engine_run_id: String,
     pub sensor: PluginId,
     pub sensor_version: semver::Version,
-    pub params: serde_json::Value,
+    /// Shared with the run configuration this sensor ran under, so recording a
+    /// run per sensor does not copy the parameter tree once per record.
+    pub params: unclip_epistemic::SharedParams,
     pub params_hash: ParameterHash,
     pub status: String,
     pub started_at: String,

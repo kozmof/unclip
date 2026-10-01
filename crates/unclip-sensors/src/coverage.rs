@@ -87,7 +87,7 @@ impl CoverageSensor {
     fn measurement(&self, metric: &str, value: Option<f64>, sample_count: usize) -> Measurement {
         let reading = value.map_or_else(
             || Reading::NotApplicable {
-                reason: format!("{metric} requires at least one observed item"),
+                reason: format!("{metric} requires at least one observed item").into(),
             },
             |value| Reading::Value {
                 value: MeasurementValue::Scalar(value),
@@ -120,7 +120,7 @@ mod tests {
     };
     use unclip_epistemic::{
         DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion, InferenceToken,
-        ParameterHash, SourceRef, Timestamp, Tracked,
+        ParameterHash, SharedParams, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{
         Alignment, AlignmentCandidate, Observation, ObservationId, ObservedRelation,
@@ -131,12 +131,11 @@ mod tests {
     use super::*;
 
     fn metadata(id: &str, producer: &str) -> EmitMetadata {
-        let params = serde_json::json!({});
         EmitMetadata::new(
             DerivedId::new(id),
             PluginId::new(producer),
             Version::new(0, 1, 0),
-            &params,
+            serde_json::json!({}),
             Timestamp::new("2026-09-17T00:00:00Z"),
         )
     }
@@ -252,7 +251,7 @@ mod tests {
         .emit(alignment);
         let observations = vec![Tracked::from(&inferred_observation)];
         let alignments = vec![Tracked::from(&inferred_alignment)];
-        let params = serde_json::json!({});
+        let params = SharedParams::new(serde_json::json!({}));
         let ctx = MeasureCtx::new(
             &domain,
             &frame,

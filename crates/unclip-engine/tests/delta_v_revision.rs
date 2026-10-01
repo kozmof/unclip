@@ -77,7 +77,7 @@ fn prior(outcome: RevisionTestOutcome, step: RevisionStep) -> Experimental<Revis
             DerivedId::new("structural-ladder/revision/structural"),
             PluginId::new("experiment.revision-ladder"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("minimal_revision_structural")
@@ -104,12 +104,15 @@ fn existing_unit_null() -> NullEvidence {
         id: DerivedId::new("unit-null"),
         model: PluginId::new("null.existing-unit"),
         reading: std::sync::Arc::new(Reading::Value {
-            value: MeasurementValue::Structured(json!({
-                "model": "existing_domain_exact_match",
-                "matching": "exact_observed_label",
-                "match_count": 0,
-                "has_existing_alternative": false
-            })),
+            value: MeasurementValue::Structured(
+                json!({
+                    "model": "existing_domain_exact_match",
+                    "matching": "exact_observed_label",
+                    "match_count": 0,
+                    "has_existing_alternative": false
+                })
+                .into(),
+            ),
         }),
     }
 }
@@ -198,7 +201,7 @@ fn fixture(
             DerivedId::new("atomic-experiment"),
             PluginId::new("experiment.counterfactual"),
             semver::Version::new(0, 5, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")

@@ -216,7 +216,7 @@ fn product_frame_requires_valid_calculated_product_evidence() {
             DerivedId::new("inferred-product"),
             PluginId::new("infer.fixture"),
             "0.1.0".parse().unwrap(),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("fixture"),

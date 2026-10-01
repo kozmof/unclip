@@ -159,7 +159,7 @@ pub fn compare_pareto(
             output,
             PluginId::new("compare.pareto"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("explicit_scalar_pareto"),

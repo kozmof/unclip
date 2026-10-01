@@ -129,7 +129,7 @@ pub fn select_observations(
             output_id,
             PluginId::new("experiment.select-observations"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("explicit_observation_split"),

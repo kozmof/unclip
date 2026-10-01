@@ -385,7 +385,7 @@ fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
             timestamp: Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.community"),
-                json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}),
+                json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}).into(),
             )]),
         },
     )
@@ -483,7 +483,7 @@ fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
             timestamp: Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.latent-axis"),
-                template.value["selection"].clone(),
+                template.value["selection"].clone().into(),
             )]),
         },
     )
@@ -603,7 +603,7 @@ fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
                 timestamp: Timestamp::new("now"),
                 params: &BTreeMap::from([(
                     PluginId::new("generate.pairwise-coupling"),
-                    json!({"metric":metric,"threshold":threshold,"minimum_samples":2}),
+                    json!({"metric":metric,"threshold":threshold,"minimum_samples":2}).into(),
                 )]),
             },
         )
@@ -715,7 +715,7 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
             timestamp: Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.temporal-coupling"),
-                template.value["selection"].clone(),
+                template.value["selection"].clone().into(),
             )]),
         },
     )

@@ -1,5 +1,7 @@
 //! Tracked inputs for calculation-only candidate generation.
-use unclip_epistemic::{CalculationToken, DependencyCollector, EmitMetadata, Tracked};
+use unclip_epistemic::{
+    CalculationToken, DependencyCollector, EmitMetadata, SharedParams, Tracked,
+};
 use unclip_measure::{EmpiricalStructure, Measurement};
 use unclip_observe::Observation;
 
@@ -8,7 +10,7 @@ pub struct CandidateCtx<'a> {
     measurements: &'a [Tracked<Measurement>],
     observations: &'a [Tracked<Observation>],
     structures: &'a [Tracked<EmpiricalStructure>],
-    params: &'a serde_json::Value,
+    params: &'a SharedParams,
     dependencies: DependencyCollector,
 }
 impl<'a> CandidateCtx<'a> {
@@ -16,7 +18,7 @@ impl<'a> CandidateCtx<'a> {
         domain_version_id: &'a str,
         measurements: &'a [Tracked<Measurement>],
         observations: &'a [Tracked<Observation>],
-        params: &'a serde_json::Value,
+        params: &'a SharedParams,
         dependencies: DependencyCollector,
     ) -> Self {
         Self {
@@ -47,6 +49,13 @@ impl<'a> CandidateCtx<'a> {
     }
     pub fn params(&self) -> &serde_json::Value {
         self.params
+    }
+
+    /// The same parameters as a shared handle, for an [`EmitMetadata`] that
+    /// keeps them: a provenance record aliases the run's configured tree
+    /// instead of copying it.
+    pub fn shared_params(&self) -> SharedParams {
+        SharedParams::clone(self.params)
     }
     pub fn read<'b, T>(&self, input: &'b Tracked<T>) -> &'b T {
         self.dependencies.read(input)

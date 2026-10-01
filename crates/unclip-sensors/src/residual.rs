@@ -78,14 +78,17 @@ impl ResidualSensor {
     fn measurement(&self, kind: &str, observed: usize, ids: &[String]) -> Measurement {
         let reading = if observed == 0 {
             Reading::NotApplicable {
-                reason: format!("{kind} requires at least one observed item"),
+                reason: format!("{kind} requires at least one observed item").into(),
             }
         } else {
             Reading::Value {
-                value: MeasurementValue::Structured(serde_json::json!({
-                    "count": ids.len(),
-                    "ids": ids,
-                })),
+                value: MeasurementValue::Structured(
+                    serde_json::json!({
+                        "count": ids.len(),
+                        "ids": ids,
+                    })
+                    .into(),
+                ),
             }
         };
         Measurement {
@@ -108,7 +111,7 @@ mod tests {
     use unclip_domain::{DomainId, DomainSnapshot, FrameId, MeasurementFrame};
     use unclip_epistemic::{
         DependencyCollector, DerivedId, DomainVersion, EmitMetadata, FrameVersion, InferenceToken,
-        SourceRef, Timestamp, Tracked,
+        SharedParams, SourceRef, Timestamp, Tracked,
     };
     use unclip_observe::{Alignment, Observation, ObservationId, ObservedUnit, ObservedUnitId};
     use unclip_plugin::conformance;
@@ -116,12 +119,11 @@ mod tests {
     use super::*;
 
     fn metadata(id: &str, producer: &str) -> EmitMetadata {
-        let params = serde_json::json!({});
         EmitMetadata::new(
             DerivedId::new(id),
             PluginId::new(producer),
             Version::new(0, 1, 0),
-            &params,
+            serde_json::json!({}),
             Timestamp::new("2026-09-17T00:00:00Z"),
         )
     }
@@ -169,7 +171,7 @@ mod tests {
         .emit(alignment);
         let observations = vec![Tracked::from(&inferred_observation)];
         let alignments = vec![Tracked::from(&inferred_alignment)];
-        let params = serde_json::json!({});
+        let params = SharedParams::new(serde_json::json!({}));
         let ctx = MeasureCtx::new(
             &domain,
             &frame,

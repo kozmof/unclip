@@ -140,6 +140,6 @@ impl NullModel for WeightChangeNull {
             "difference":difference,"absolute_tolerance":params.absolute_tolerance,"within_tolerance":difference.abs()<=params.absolute_tolerance,
             "scope":"numeric distance from retained baseline only; explanatory improvement requires held-out experiments",
             "decision":"no automatic candidate acceptance or rejection"
-        }))}))
+        }).into())}))
     }
 }

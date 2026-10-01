@@ -1,5 +1,5 @@
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use unclip_engine::{compare_measurements, run_record, Engine, MeasurementRun, ScalarDifference};
 use unclip_epistemic::{Calculated, DerivedId, PluginId, Timestamp, Tracked};
 use unclip_measure::{Delta, Measurement, MeasurementContext, MeasurementValue, Reading};
@@ -38,7 +38,7 @@ fn compare(
         MeasurementRun {
             id: "compare",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("compare.scalar-difference"), params)]),
+            params: &BTreeMap::from([(PluginId::new("compare.scalar-difference"), params.into())]),
         },
     )
 }
@@ -46,7 +46,7 @@ fn payload(result: &[Calculated<Delta>]) -> ScalarDifference {
     let MeasurementValue::Structured(value) = &result[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn signed_differences_and_zero_replay_with_both_dependencies() {
@@ -99,7 +99,7 @@ fn unavailable_readings_are_preserved_and_structures_are_not_subtracted() {
     }
     let result = compare(
         measurement(Reading::Value {
-            value: MeasurementValue::Structured(json!({"score":1})),
+            value: MeasurementValue::Structured(json!({"score":1}).into()),
         }),
         measurement(scalar(2.0)),
         json!({}),
@@ -174,17 +174,20 @@ fn explicit_selection_enforces_versions_and_records_comparator_configuration() {
 
 fn ranking(units: &[&str], unknown: &[&str]) -> Reading {
     Reading::Value {
-        value: MeasurementValue::Ranking(unclip_measure::RankedState {
-            tiers: units
-                .iter()
-                .map(|id| vec![unclip_domain::UnitId::new(*id)])
-                .collect(),
-            unknown: unknown
-                .iter()
-                .map(|id| unclip_domain::UnitId::new(*id))
-                .collect(),
-            unresolved: vec![],
-        }),
+        value: MeasurementValue::Ranking(
+            unclip_measure::RankedState {
+                tiers: units
+                    .iter()
+                    .map(|id| vec![unclip_domain::UnitId::new(*id)])
+                    .collect(),
+                unknown: unknown
+                    .iter()
+                    .map(|id| unclip_domain::UnitId::new(*id))
+                    .collect(),
+                unresolved: vec![],
+            }
+            .into(),
+        ),
     }
 }
 fn compare_rank(
@@ -207,7 +210,7 @@ fn compare_rank(
         MeasurementRun {
             id: "ranks",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new(id), params)]),
+            params: &BTreeMap::from([(PluginId::new(id), params.into())]),
         },
     )
 }
@@ -215,7 +218,7 @@ fn ranking_payload(results: &[Calculated<Delta>]) -> unclip_engine::RankingCompa
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn kendall_counts_inversions_while_rbo_measures_prefix_agreement() {
@@ -292,14 +295,17 @@ fn kendall_counts_inversions_while_rbo_measures_prefix_agreement() {
 fn ranking_comparators_preserve_sparse_and_unsupported_shapes() {
     use unclip_engine::RankingComparison;
     let tied = Reading::Value {
-        value: MeasurementValue::Ranking(unclip_measure::RankedState {
-            tiers: vec![vec![
-                unclip_domain::UnitId::new("a"),
-                unclip_domain::UnitId::new("b"),
-            ]],
-            unknown: vec![],
-            unresolved: vec![],
-        }),
+        value: MeasurementValue::Ranking(
+            unclip_measure::RankedState {
+                tiers: vec![vec![
+                    unclip_domain::UnitId::new("a"),
+                    unclip_domain::UnitId::new("b"),
+                ]],
+                unknown: vec![],
+                unresolved: vec![],
+            }
+            .into(),
+        ),
     };
     for (id, params) in [
         ("compare.kendall", json!({})),
@@ -383,19 +389,19 @@ fn ranking_comparators_preserve_sparse_and_unsupported_shapes() {
 
 fn distribution(values: &[(&str, f64)]) -> Reading {
     Reading::Value {
-        value: MeasurementValue::Distribution(
+        value: MeasurementValue::Distribution(Arc::new(
             values
                 .iter()
                 .map(|(name, value)| ((*name).into(), *value))
                 .collect(),
-        ),
+        )),
     }
 }
 fn distribution_payload(results: &[Calculated<Delta>]) -> unclip_engine::DistributionComparison {
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn jensen_shannon_retains_categories_and_explicit_normalization() {
@@ -581,7 +587,7 @@ fn matrix_payload(results: &[Calculated<Delta>]) -> unclip_engine::MatrixCompari
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn matrix_deltas_preserve_signed_cells_and_per_cell_evidence() {
@@ -712,7 +718,7 @@ fn matrix_missing_cells_remain_distinct_and_incompatible_axes_are_rejected() {
         .is_err());
     }
     let raw = Reading::Value {
-        value: MeasurementValue::Matrix(vec![vec![1.0]]),
+        value: MeasurementValue::Matrix(vec![vec![1.0]].into()),
     };
     let result = compare_rank(
         "compare.pairwise-matrix",
@@ -752,7 +758,7 @@ fn spectral_payload(results: &[Calculated<Delta>]) -> unclip_engine::SpectralCom
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 fn spectral_params() -> serde_json::Value {
     json!({"minimum_samples":2,"tolerance":1e-12,"max_sweeps":100})
@@ -911,19 +917,19 @@ fn spectrum_never_returns_an_unconverged_partial_result() {
 
 fn partition(groups: &[&[&str]]) -> Reading {
     Reading::Value {
-        value: MeasurementValue::Partition(
+        value: MeasurementValue::Partition(Arc::new(
             groups
                 .iter()
                 .map(|group| group.iter().map(|s| (*s).into()).collect())
                 .collect(),
-        ),
+        )),
     }
 }
 fn partition_payload(results: &[Calculated<Delta>]) -> unclip_engine::PartitionComparison {
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn partition_similarity_retains_directional_counts_and_ignores_group_order() {
@@ -1071,20 +1077,25 @@ fn align_events(
         MeasurementRun {
             id: "events",
             timestamp: Timestamp::new("now"),
-            params: &BTreeMap::from([(PluginId::new("compare.change-point-alignment"), params)]),
+            params: &BTreeMap::from([(
+                PluginId::new("compare.change-point-alignment"),
+                params.into(),
+            )]),
         },
     )
 }
 fn event_reading(indices: &[usize]) -> Reading {
     Reading::Value {
-        value: MeasurementValue::Events(indices.iter().map(|i| change_event(*i)).collect()),
+        value: MeasurementValue::Events(Arc::new(
+            indices.iter().map(|i| change_event(*i)).collect(),
+        )),
     }
 }
 fn event_payload(results: &[Calculated<Delta>]) -> unclip_engine::EventComparison {
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn event_alignment_is_one_to_one_and_uses_steps_not_coordinate_gaps() {
@@ -1169,7 +1180,7 @@ fn event_empty_results_are_distinct_from_unmeasured_and_invalid_events_fail() {
         assert!(align_events(
             empty.clone(),
             event_measurement(Reading::Value {
-                value: MeasurementValue::Events(vec![event])
+                value: MeasurementValue::Events(vec![event].into())
             }),
             json!({"max_shift_steps":1})
         )
@@ -1196,7 +1207,7 @@ fn event_empty_results_are_distinct_from_unmeasured_and_invalid_events_fail() {
 fn graph_reading(nodes: &[&str], edges: &[(&str, &str, &str)]) -> Reading {
     Reading::Value {
         value: MeasurementValue::Graph(
-            json!({"nodes":nodes,"edges":edges.iter().map(|(s,t,k)| json!({"source":s,"target":t,"kind":k})).collect::<Vec<_>>()}),
+            json!({"nodes":nodes,"edges":edges.iter().map(|(s,t,k)| json!({"source":s,"target":t,"kind":k})).collect::<Vec<_>>()}).into(),
         ),
     }
 }
@@ -1204,7 +1215,7 @@ fn graph_payload(results: &[Calculated<Delta>]) -> unclip_engine::GraphCompariso
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!()
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 #[test]
 fn graph_distances_preserve_identity_direction_kind_and_separate_dimensions() {
@@ -1299,7 +1310,9 @@ fn graph_validation_rejects_ambiguity_and_preserves_empty_vs_missing() {
         graph_reading(&["a"], &[("a", "a", "")]),
         graph_reading(&["a"], &[("a", "a", "near"), ("a", "a", "near")]),
         Reading::Value {
-            value: MeasurementValue::Graph(json!({"nodes":["a"],"edges":[],"directed":false})),
+            value: MeasurementValue::Graph(
+                json!({"nodes":["a"],"edges":[],"directed":false}).into(),
+            ),
         },
     ] {
         assert!(compare_rank("compare.graph-identity", empty.clone(), bad, json!({})).is_err());
@@ -1319,7 +1332,7 @@ fn structured_payload(
     let MeasurementValue::Structured(value) = &results[0].value().value else {
         panic!("expected structured comparison payload")
     };
-    serde_json::from_value(value.clone()).unwrap()
+    serde::Deserialize::deserialize(&**value).unwrap()
 }
 
 #[test]
@@ -1327,7 +1340,9 @@ fn structured_identity_comparison_preserves_exact_values_and_sparse_states() {
     use unclip_engine::StructuredIdentityComparison;
 
     let expected = Reading::Value {
-        value: MeasurementValue::Structured(json!({"axis": [1, 2], "status": "independent"})),
+        value: MeasurementValue::Structured(
+            json!({"axis": [1, 2], "status": "independent"}).into(),
+        ),
     };
     let same = compare_rank(
         "compare.structured-identity",
@@ -1348,7 +1363,9 @@ fn structured_identity_comparison_preserves_exact_values_and_sparse_states() {
         "compare.structured-identity",
         expected.clone(),
         Reading::Value {
-            value: MeasurementValue::Structured(json!({"axis": [1, 3], "status": "dependent"})),
+            value: MeasurementValue::Structured(
+                json!({"axis": [1, 3], "status": "dependent"}).into(),
+            ),
         },
         json!({}),
     )

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use unclip_engine::{Engine, InterpretationRun};
 use unclip_epistemic::{
     hash_params, DependencyCollector, DerivedId, EmitMetadata, InterpretationToken, ModelRef,
-    Operation, PluginId, Provenance, Timestamp, Tracked,
+    Operation, PluginId, Provenance, SharedParams, Timestamp, Tracked,
 };
 use unclip_measure::EmpiricalStructure;
 use unclip_plugin::{
@@ -55,13 +55,13 @@ fn source_provenance(id: &DerivedId) -> StoredProvenance {
     }
 }
 
-fn interpreter_params() -> Value {
-    json!({
+fn interpreter_params() -> SharedParams {
+    SharedParams::new(json!({
         "model": "fixture/semantic-labeler",
         "model_version": "2026-09-23",
         "context": "coffee preparation",
         "generation": {"temperature": 0, "seed": 7}
-    })
+    }))
 }
 
 #[tokio::test]
@@ -133,7 +133,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
         PluginId::new("interpret.llm-label")
     );
     assert_eq!(output.provenance().version, semver::Version::new(1, 0, 0));
-    assert_eq!(*output.provenance().params, interpreter_params());
+    assert_eq!(output.provenance().params, interpreter_params());
     assert_eq!(
         output.provenance().params_hash,
         hash_params(&interpreter_params())
@@ -227,7 +227,7 @@ async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
             DerivedId::new("interpreted/structure"),
             PluginId::new("interpret.fixture"),
             semver::Version::new(1, 0, 0),
-            &params,
+            SharedParams::clone(&params),
             Timestamp::new("now"),
         )
         .with_algorithm("interpret.fixture")
@@ -249,7 +249,7 @@ async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
             ..EngineProfile::default()
         })
         .unwrap();
-    let plugin_params = [(PluginId::new("interpret.llm-label"), params)]
+    let plugin_params = [(PluginId::new("interpret.llm-label"), params.clone())]
         .into_iter()
         .collect::<BTreeMap<_, _>>();
 

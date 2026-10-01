@@ -1,6 +1,6 @@
 //! Explicit typed expectations for behavior under an independence assumption.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use crate::{MeasurementKind, MeasurementValue, PairwiseMatrix, RankedState, Read
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "representation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IndependentMatrix {
-    Dense { values: Vec<Vec<f64>> },
+    Dense { values: Arc<Vec<Vec<f64>>> },
     Pairwise { matrix: PairwiseMatrix },
 }
 
@@ -18,6 +18,11 @@ pub enum IndependentMatrix {
 ///
 /// No variant supplies a conventional default. `Undefined` records that a rule is
 /// unavailable for a kind instead of silently treating missing structure as zero.
+///
+/// Each payload is shared in the same shape [`MeasurementValue`] holds it, so
+/// [`Self::reading`] hands out the declared expectation rather than copying it.
+/// One expectation is read once per selected comparator, and what it declares is
+/// a whole matrix, ranked state, or structured tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExpectedIndependentBehavior {
@@ -25,32 +30,32 @@ pub enum ExpectedIndependentBehavior {
         value: f64,
     },
     Vector {
-        values: Vec<f64>,
+        values: Arc<Vec<f64>>,
     },
     Matrix {
         value: IndependentMatrix,
     },
     Distribution {
-        values: Vec<(String, f64)>,
+        values: Arc<Vec<(String, f64)>>,
     },
     Events {
-        values: Vec<serde_json::Value>,
+        values: Arc<Vec<serde_json::Value>>,
     },
     Graph {
-        value: serde_json::Value,
+        value: Arc<serde_json::Value>,
     },
     Ranking {
-        value: RankedState,
+        value: Arc<RankedState>,
     },
     Partition {
-        groups: Vec<Vec<String>>,
+        groups: Arc<Vec<Vec<String>>>,
     },
     Structured {
-        value: serde_json::Value,
+        value: Arc<serde_json::Value>,
     },
     Undefined {
         measurement_kind: MeasurementKind,
-        reason: String,
+        reason: Arc<str>,
     },
 }
 
@@ -126,22 +131,22 @@ impl ExpectedIndependentBehavior {
     pub fn reading(&self) -> Reading {
         let value = match self {
             Self::Scalar { value } => MeasurementValue::Scalar(*value),
-            Self::Vector { values } => MeasurementValue::Vector(values.clone()),
+            Self::Vector { values } => MeasurementValue::Vector(Arc::clone(values)),
             Self::Matrix {
                 value: IndependentMatrix::Dense { values },
-            } => MeasurementValue::Matrix(values.clone()),
+            } => MeasurementValue::Matrix(Arc::clone(values)),
             Self::Matrix {
                 value: IndependentMatrix::Pairwise { matrix },
             } => MeasurementValue::PairwiseMatrix(matrix.clone()),
-            Self::Distribution { values } => MeasurementValue::Distribution(values.clone()),
-            Self::Events { values } => MeasurementValue::Events(values.clone()),
-            Self::Graph { value } => MeasurementValue::Graph(value.clone()),
-            Self::Ranking { value } => MeasurementValue::Ranking(value.clone()),
-            Self::Partition { groups } => MeasurementValue::Partition(groups.clone()),
-            Self::Structured { value } => MeasurementValue::Structured(value.clone()),
+            Self::Distribution { values } => MeasurementValue::Distribution(Arc::clone(values)),
+            Self::Events { values } => MeasurementValue::Events(Arc::clone(values)),
+            Self::Graph { value } => MeasurementValue::Graph(Arc::clone(value)),
+            Self::Ranking { value } => MeasurementValue::Ranking(Arc::clone(value)),
+            Self::Partition { groups } => MeasurementValue::Partition(Arc::clone(groups)),
+            Self::Structured { value } => MeasurementValue::Structured(Arc::clone(value)),
             Self::Undefined { reason, .. } => {
                 return Reading::NotApplicable {
-                    reason: reason.clone(),
+                    reason: Arc::clone(reason),
                 };
             }
         };
@@ -158,31 +163,36 @@ mod tests {
     fn every_measurement_kind_has_an_explicit_behavior_without_coercion() {
         let values = vec![
             ExpectedIndependentBehavior::Scalar { value: 0.0 },
-            ExpectedIndependentBehavior::Vector { values: vec![1.0] },
+            ExpectedIndependentBehavior::Vector {
+                values: vec![1.0].into(),
+            },
             ExpectedIndependentBehavior::Matrix {
                 value: IndependentMatrix::Dense {
-                    values: vec![vec![1.0]],
+                    values: vec![vec![1.0]].into(),
                 },
             },
             ExpectedIndependentBehavior::Distribution {
-                values: vec![("a".into(), 1.0)],
+                values: vec![("a".into(), 1.0)].into(),
             },
-            ExpectedIndependentBehavior::Events { values: vec![] },
+            ExpectedIndependentBehavior::Events {
+                values: vec![].into(),
+            },
             ExpectedIndependentBehavior::Graph {
-                value: serde_json::json!({"nodes": [], "edges": []}),
+                value: serde_json::json!({"nodes": [], "edges": []}).into(),
             },
             ExpectedIndependentBehavior::Ranking {
                 value: RankedState {
                     tiers: vec![vec![UnitId::new("a")]],
                     unknown: vec![],
                     unresolved: vec![],
-                },
+                }
+                .into(),
             },
             ExpectedIndependentBehavior::Partition {
-                groups: vec![vec!["a".into()]],
+                groups: vec![vec!["a".into()]].into(),
             },
             ExpectedIndependentBehavior::Structured {
-                value: serde_json::json!({"association": 0.0}),
+                value: serde_json::json!({"association": 0.0}).into(),
             },
         ];
         let kinds = values
@@ -212,6 +222,53 @@ mod tests {
         }
     }
 
+    /// One expectation is read once per selected comparator, and what it
+    /// declares is a whole matrix, ranked state, or structured tree. So
+    /// `reading` hands out the declared payload rather than copying it. Only
+    /// pointer identity catches a regression: a copy compares equal.
+    #[test]
+    fn reading_an_expectation_shares_the_payload_it_declares() {
+        let graph = Arc::new(serde_json::json!({"nodes": [], "edges": []}));
+        let Reading::Value {
+            value: MeasurementValue::Graph(reported),
+        } = (ExpectedIndependentBehavior::Graph {
+            value: Arc::clone(&graph),
+        })
+        .reading()
+        else {
+            panic!("a graph expectation reads as a graph")
+        };
+        assert!(Arc::ptr_eq(&graph, &reported));
+
+        let ranked = Arc::new(RankedState {
+            tiers: vec![vec![UnitId::new("a")]],
+            unknown: vec![],
+            unresolved: vec![],
+        });
+        let Reading::Value {
+            value: MeasurementValue::Ranking(reported),
+        } = (ExpectedIndependentBehavior::Ranking {
+            value: Arc::clone(&ranked),
+        })
+        .reading()
+        else {
+            panic!("a ranking expectation reads as a ranking")
+        };
+        assert!(Arc::ptr_eq(&ranked, &reported));
+
+        let reason: Arc<str> = Arc::from("no rule was selected");
+        let Reading::NotApplicable { reason: reported } =
+            (ExpectedIndependentBehavior::Undefined {
+                measurement_kind: MeasurementKind::Ranking,
+                reason: Arc::clone(&reason),
+            })
+            .reading()
+        else {
+            panic!("an undefined expectation reads as not applicable")
+        };
+        assert!(Arc::ptr_eq(&reason, &reported));
+    }
+
     #[test]
     fn undefined_and_invalid_expectations_remain_explicit() {
         let undefined = ExpectedIndependentBehavior::Undefined {
@@ -232,7 +289,7 @@ mod tests {
         assert_eq!(
             ExpectedIndependentBehavior::Matrix {
                 value: IndependentMatrix::Dense {
-                    values: vec![vec![1.0], vec![]]
+                    values: vec![vec![1.0], vec![]].into()
                 }
             }
             .validate(),
@@ -240,7 +297,7 @@ mod tests {
         );
         assert_eq!(
             ExpectedIndependentBehavior::Distribution {
-                values: vec![("a".into(), 0.5), ("a".into(), 0.5)]
+                values: vec![("a".into(), 0.5), ("a".into(), 0.5)].into()
             }
             .validate(),
             Err(InvalidIndependentBehavior::InvalidDistribution)

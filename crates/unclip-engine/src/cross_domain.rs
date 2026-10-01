@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use crate::support::invalid;
 use unclip_domain::{ProductDomainSnapshot, ProductMeasurementFrame, UnitId};
 use unclip_epistemic::{
-    Calculated, DependencyCollector, DerivedId, EmitMetadata, Operation, PluginId, Timestamp,
-    Tracked,
+    Calculated, DependencyCollector, DerivedId, EmitMetadata, Operation, PluginId, SharedParams,
+    Timestamp, Tracked,
 };
 use unclip_measure::{
     CanonicalCorrelationConfig, CrossDomainCommunityConfig, CrossDomainInteractionMovementConfig,
@@ -185,7 +185,7 @@ impl crate::Engine {
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
         let (left_units, right_units) = frame_units(frame_value);
-        let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        let sensor_params = SharedParams::new(serde_json::to_value(config).map_err(invalid)?);
         validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
@@ -206,7 +206,7 @@ impl crate::Engine {
             output_id,
             descriptor.id.clone(),
             descriptor.version.clone(),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("regularized_canonical_correlation");
@@ -272,7 +272,7 @@ impl crate::Engine {
         crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
-        let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        let sensor_params = SharedParams::new(serde_json::to_value(config).map_err(invalid)?);
         validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
@@ -290,7 +290,7 @@ impl crate::Engine {
             output_id,
             descriptor.id.clone(),
             descriptor.version.clone(),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("equal_width_cross_domain_mutual_information");
@@ -350,7 +350,7 @@ impl crate::Engine {
         crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
-        let sensor_params = serde_json::to_value(config).map_err(invalid)?;
+        let sensor_params = SharedParams::new(serde_json::to_value(config).map_err(invalid)?);
         validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
@@ -368,7 +368,7 @@ impl crate::Engine {
             output_id,
             descriptor.id.clone(),
             descriptor.version.clone(),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("thresholded_bipartite_mutual_information_communities");
@@ -439,7 +439,7 @@ impl crate::Engine {
         crate::product_domain::validate_product_snapshot(product_value)?;
         let frame_value = dependencies.read(frame);
         validate_frame(product_value, frame_value)?;
-        let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        let sensor_params = SharedParams::new(serde_json::to_value(&config).map_err(invalid)?);
         validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "product": product.id(),
@@ -457,7 +457,7 @@ impl crate::Engine {
             output_id,
             descriptor.id.clone(),
             descriptor.version.clone(),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("signed_consecutive_cross_domain_movement");
@@ -541,7 +541,7 @@ impl crate::Engine {
         crate::product_domain::validate_product_snapshot(target_product_value)?;
         let target_frame_value = dependencies.read(target_frame);
         validate_frame(target_product_value, target_frame_value)?;
-        let sensor_params = serde_json::to_value(&config).map_err(invalid)?;
+        let sensor_params = SharedParams::new(serde_json::to_value(&config).map_err(invalid)?);
         validate_sensor_params(descriptor, &sensor_params)?;
         let params = serde_json::json!({
             "source_product": source_product.id(),
@@ -567,7 +567,7 @@ impl crate::Engine {
             output_id,
             descriptor.id.clone(),
             descriptor.version.clone(),
-            &params,
+            params,
             timestamp,
         )
         .with_algorithm("mapped_cross_product_movement_transfer");

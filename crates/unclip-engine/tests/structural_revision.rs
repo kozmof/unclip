@@ -91,7 +91,7 @@ fn prior(outcome: RevisionTestOutcome, step: RevisionStep) -> Experimental<Revis
             DerivedId::new("coupling-ladder/revision/dynamic-coupling"),
             PluginId::new("experiment.revision-ladder"),
             semver::Version::new(0, 1, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("minimal_revision_dynamic_coupling")
@@ -118,11 +118,14 @@ fn motif_null() -> NullEvidence {
         id: DerivedId::new("motif-null"),
         model: PluginId::new("null.existing-motif"),
         reading: std::sync::Arc::new(Reading::Value {
-            value: MeasurementValue::Structured(json!({
-                "model": "existing_motif_exact_pattern",
-                "match_count": 0,
-                "has_existing_alternative": false
-            })),
+            value: MeasurementValue::Structured(
+                json!({
+                    "model": "existing_motif_exact_pattern",
+                    "match_count": 0,
+                    "has_existing_alternative": false
+                })
+                .into(),
+            ),
         }),
     }
 }
@@ -202,7 +205,7 @@ fn fixture(
             DerivedId::new("motif-experiment"),
             PluginId::new("experiment.counterfactual"),
             semver::Version::new(0, 5, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("held_out_counterfactual_comparison")

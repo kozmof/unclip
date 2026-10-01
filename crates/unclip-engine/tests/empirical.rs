@@ -177,7 +177,7 @@ fn interpreted_measurements_cannot_be_reused_as_empirical_evidence() {
             DerivedId::new("interpreted/measurement"),
             PluginId::new("interpret.fixture"),
             semver::Version::new(1, 0, 0),
-            &params,
+            params,
             Timestamp::new("now"),
         )
         .with_algorithm("interpret.fixture")
