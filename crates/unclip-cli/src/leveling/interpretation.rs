@@ -121,7 +121,7 @@ pub(crate) async fn run(
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
     let timestamp = unclip_store::now();
-    let run_id = format!("interpret-{timestamp}");
+    let run_id = super::run_id("interpret", &timestamp);
     let run = unclip_engine::run_record(
         &plan,
         &parsed.params,

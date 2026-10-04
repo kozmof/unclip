@@ -103,7 +103,7 @@ pub(crate) async fn measure(
         "engine profile must select at least one sensor"
     );
     let timestamp = unclip_store::now();
-    let run_id = format!("measure-{timestamp}");
+    let run_id = super::run_id("measure", &timestamp);
     let profile_id = format!("{run_id}/profile");
     let run_record = unclip_engine::run_record(
         &plan,

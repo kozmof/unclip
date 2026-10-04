@@ -21,6 +21,17 @@ pub(crate) mod measurement;
 pub(crate) use inspection::{explain, profile_show, provenance, verify};
 pub(crate) use measurement::measure;
 
+/// Mint an engine run id as `{kind}-{timestamp}-{random}`.
+///
+/// The timestamp keeps ids readable and roughly sortable, but it has only
+/// millisecond precision, and `engine_runs.id` is a primary key: two runs
+/// started in the same millisecond (a script, a parallel shell) would collide
+/// and the second insert would fail. The random suffix makes that negligible.
+pub(crate) fn run_id(kind: &str, timestamp: &str) -> String {
+    use rand::Rng;
+    format!("{kind}-{timestamp}-{:08x}", rand::thread_rng().gen::<u32>())
+}
+
 /// Reads a recorded model response from a file instead of calling a provider.
 ///
 /// Inference is the one stage that leaves the process, so the boundary is a
@@ -77,7 +88,7 @@ pub(crate) async fn observe(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("inference source path must be valid UTF-8"))?;
     let timestamp = unclip_store::now();
-    let run_id = format!("observe-{timestamp}");
+    let run_id = run_id("observe", &timestamp);
     let record = unclip_engine::run_record(
         &plan,
         &parsed.params,

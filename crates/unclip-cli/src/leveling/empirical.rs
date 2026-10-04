@@ -85,7 +85,7 @@ pub(crate) async fn derive(
     }
     let timestamp = unclip_store::now();
     let mut run = EngineRunRecord {
-        id: format!("empirical-{timestamp}"),
+        id: super::run_id("empirical", &timestamp),
         resolved_plan: serde_json::to_value(method)?,
         status: EngineRunStatus::Planned,
         started_at: timestamp,

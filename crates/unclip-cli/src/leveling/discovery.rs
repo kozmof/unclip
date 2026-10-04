@@ -189,7 +189,7 @@ pub(crate) async fn discover(
     let engine = unclip_engine::Engine::with_builtins()?;
     let plan = engine.plan(&parsed.profile)?;
     let timestamp = unclip_store::now();
-    let run_id = format!("discover-{timestamp}");
+    let run_id = super::run_id("discover", &timestamp);
     let domain_key = serde_json::to_string(&(domain.as_str(), version.as_str()))?;
     let outputs = unclip_engine::generate_candidates(
         &plan,

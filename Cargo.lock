@@ -2562,6 +2562,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "rand",
  "sea-orm",
  "serde",
  "serde_json",
