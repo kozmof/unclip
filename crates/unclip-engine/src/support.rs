@@ -36,10 +36,13 @@ pub(crate) fn invalid_params(error: serde_json::Error) -> PluginError {
 
 /// Hold a plugin to its own declared `params_schema` before invoking it.
 ///
-/// `classify_sensor` does this for the [`Sensor`] family, and it was the only
-/// family it was done for: inferrers, comparators, interpreters, candidate
+/// Every family goes through this, sensors included. Sensors were once held to
+/// their schema only by `classify_sensor`, which records a violation as a
+/// `NotApplicable` reading, so a typo in a profile surfaced as a plausible
+/// sparse result rather than an error; `classify_sensor` keeps its check for
+/// callers outside the engine. Inferrers, comparators, interpreters, candidate
 /// generators and null models all declare a `params_schema`, have it checked
-/// for *wellformedness* when they register, and were then never held to it. A
+/// for *wellformedness* when they register, and were once never held to it. A
 /// schema nothing enforces has the standing of a comment — which is the state
 /// `unclip_plugin::schema` was written to end — and it leaves a third-party
 /// plugin registered under one of these families answerable to nothing.

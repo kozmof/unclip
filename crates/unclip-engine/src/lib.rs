@@ -411,10 +411,16 @@ impl Engine {
         let mut residuals = Vec::new();
         let mut measurements = Vec::new();
         for value in calculated {
-            let stage = stages
-                .get(&value.value().sensor)
-                .copied()
-                .unwrap_or_default();
+            // Keyed by the provenance producer, which `measure` stamps from the
+            // invoking sensor's descriptor, rather than by the payload's
+            // self-reported `sensor` field, which a plugin writes itself.
+            let producer = &value.provenance().producer;
+            let stage = stages.get(producer).copied().ok_or_else(|| {
+                unclip_plugin::PluginError::Message(format!(
+                    "measurement {} was produced by {producer}, which is not in the run plan",
+                    value.id()
+                ))
+            })?;
             match stage {
                 SensorStage::Explanation => explanations.push(value),
                 SensorStage::Residual => residuals.push(value),
@@ -464,6 +470,9 @@ impl Engine {
         for sensor in sensors {
             let descriptor = sensor.descriptor();
             let params = run.params.get(&descriptor.id).unwrap_or(&empty_params);
+            // Checked before `classify_sensor`, which would record a violation
+            // as a `NotApplicable` reading. See `require_declared_params`.
+            support::require_declared_params(&descriptor.id, descriptor.params_schema, params)?;
             let dependencies = DependencyCollector::default();
             seed(&dependencies);
             let ctx = MeasureCtx::new(
@@ -861,6 +870,56 @@ mod tests {
             assert!(measurement.provenance().inputs.is_empty());
         }
     }
+
+    /// A sensor handed parameters its schema rejects fails the run, as every
+    /// other family does, instead of recording a `NotApplicable` reading.
+    #[test]
+    fn measurement_refuses_parameters_a_sensor_schema_rejects() {
+        let engine = Engine::with_builtins().unwrap();
+        let profile = EngineProfile {
+            sensors: vec![PluginSelection::any("sensor.coverage")],
+            ..EngineProfile::default()
+        };
+        let plan = engine.plan(&profile).unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("frame-1"),
+            axes: Vec::new(),
+        };
+        let params = BTreeMap::from([(
+            PluginId::new("sensor.coverage"),
+            serde_json::json!({"typo": 1}).into(),
+        )]);
+        let error = engine
+            .measure(
+                &plan,
+                MeasurementInputs {
+                    domain: &domain,
+                    frame: &frame,
+                    observations: &[],
+                    alignments: &[],
+                    rankings: &[],
+                },
+                MeasurementRun {
+                    id: "run-schema",
+                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    params: &params,
+                },
+            )
+            .expect_err("a sensor must be held to its declared schema");
+        assert!(
+            matches!(error, unclip_plugin::PluginError::InvalidParams(_)),
+            "got: {error:?}"
+        );
+        assert!(error.to_string().contains("typo"), "got: {error}");
+    }
+
     /// Every stage mints `{run_id}/{plugin_id}`, so every stage must refuse a
     /// run id that is blank — including one that is whitespace rather than
     /// empty. `measure` rejected both, `interpret` only the empty case, and
