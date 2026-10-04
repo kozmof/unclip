@@ -57,7 +57,7 @@ mod generated_fixups {
     /// Every auto-increment key is a 64-bit rowid, not just `branches`.
     ///
     /// `branches::id` was the only one asserted, so a regeneration could narrow
-    /// the other four to `i32` and still compile and pass. A rowid reaches
+    /// the other five to `i32` and still compile and pass. A rowid reaches
     /// 2^31 through insert-and-delete churn alone, without the table ever
     /// holding that many rows, and the truncation is silent.
     #[test]
@@ -87,6 +87,12 @@ mod generated_fixups {
             command: None,
             context: None,
             packet_id: None,
+        }
+        .id;
+        let _: i64 = super::frames::Model {
+            id: 1,
+            name: String::new(),
+            description: None,
         }
         .id;
         let _: i64 = super::frame_slots::Model {

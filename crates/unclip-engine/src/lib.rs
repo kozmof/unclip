@@ -493,7 +493,22 @@ impl Engine {
             );
             match classify_sensor(sensor.as_ref(), &ctx) {
                 SensorDecision::Run => {
-                    measurements.extend(sensor.measure(&ctx, ctx.calculation_token(metadata))?);
+                    let emitted = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+                    // A sensor can mint its own token rather than use the one
+                    // it was handed, so check here, where `verify` passes too,
+                    // that every value names the sensor that was invoked.
+                    if let Some(foreign) = emitted
+                        .iter()
+                        .find(|value| value.provenance().producer != descriptor.id)
+                    {
+                        return Err(unclip_plugin::PluginError::Message(format!(
+                            "sensor {} returned measurement {} produced by {}",
+                            descriptor.id,
+                            foreign.id(),
+                            foreign.provenance().producer
+                        )));
+                    }
+                    measurements.extend(emitted);
                 }
                 SensorDecision::Record(reading) => {
                     measurements.push(ctx.calculation_token(metadata).emit(Measurement {
@@ -918,6 +933,113 @@ mod tests {
             "got: {error:?}"
         );
         assert!(error.to_string().contains("typo"), "got: {error}");
+    }
+
+    /// A sensor that ignores its token and mints one naming another producer
+    /// fails the run instead of having its measurement filed under that name.
+    #[test]
+    fn measurement_rejects_values_attributed_to_another_producer() {
+        use std::sync::Arc;
+        use unclip_epistemic::{
+            Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata,
+        };
+        use unclip_measure::{Measurement, MeasurementContext};
+        use unclip_plugin::{
+            Applicability, MeasureCtx, Registry, Sensor, SensorDescriptor, SensorStage,
+        };
+
+        struct ImpostorSensor(SensorDescriptor);
+
+        impl Sensor for ImpostorSensor {
+            fn descriptor(&self) -> &SensorDescriptor {
+                &self.0
+            }
+
+            fn applies_to(&self, _ctx: &MeasureCtx<'_>) -> Applicability {
+                Applicability::Applicable
+            }
+
+            fn measure(
+                &self,
+                _ctx: &MeasureCtx<'_>,
+                _token: CalculationToken,
+            ) -> unclip_plugin::Result<Vec<Calculated<Measurement>>> {
+                let forged = CalculationToken::from_harness(
+                    EmitMetadata::new(
+                        DerivedId::new("forged"),
+                        PluginId::new("sensor.kendall"),
+                        self.0.version.clone(),
+                        serde_json::json!({}),
+                        Timestamp::new("2026-09-17T00:00:00Z"),
+                    ),
+                    DependencyCollector::default(),
+                );
+                Ok(vec![forged.emit(Measurement {
+                    sensor: PluginId::new("sensor.kendall"),
+                    sensor_version: self.0.version.clone(),
+                    reading: Reading::NotApplicable {
+                        reason: "forged".into(),
+                    },
+                    confidence: None,
+                    sample_count: None,
+                    context: MeasurementContext::default(),
+                })])
+            }
+        }
+
+        let mut registry = Registry::default();
+        registry
+            .register_sensor(Arc::new(ImpostorSensor(SensorDescriptor {
+                id: PluginId::new("sensor.impostor"),
+                version: semver::Version::new(0, 1, 0),
+                stage: SensorStage::Measurement,
+                applicability: &[],
+                evidence: &[],
+                produces: &[],
+                params_schema: "{}",
+            })))
+            .unwrap();
+        let engine = Engine::new(registry);
+        let plan = engine
+            .plan(&EngineProfile {
+                sensors: vec![PluginSelection::any("sensor.impostor")],
+                ..EngineProfile::default()
+            })
+            .unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("test.general"),
+            version: FrameVersion::new("frame-1"),
+            axes: Vec::new(),
+        };
+        let params = BTreeMap::new();
+        let error = engine
+            .measure(
+                &plan,
+                MeasurementInputs {
+                    domain: &domain,
+                    frame: &frame,
+                    observations: &[],
+                    alignments: &[],
+                    rankings: &[],
+                },
+                MeasurementRun {
+                    id: "run-impostor",
+                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    params: &params,
+                },
+            )
+            .expect_err("a value naming another producer must not be accepted");
+        assert!(
+            error.to_string().contains("sensor.impostor"),
+            "got: {error}"
+        );
+        assert!(error.to_string().contains("sensor.kendall"), "got: {error}");
     }
 
     /// Every stage mints `{run_id}/{plugin_id}`, so every stage must refuse a

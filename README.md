@@ -136,6 +136,16 @@ Matching.
 - `suggest-o2m` — propose o2m values mentioned in a branch but not yet set.
 - `pattern`, `patterns` — manage the user-defined pattern dictionary.
 
+Leveling, all under `level`. See [Output and reproducibility](#output-and-reproducibility).
+
+- `domain`, `frame` — import and show semantic-domain and measurement-frame versions.
+- `observe`, `explain` — infer and persist observations, and inspect one.
+- `measure`, `profile`, `verify` — calculate a profile, show it, and re-run a stored run.
+- `derive`, `structure` — calculate anonymous structures from profiles and show one.
+- `discover`, `candidates` — calculate candidates from stored evidence and list them.
+- `experiment`, `interpret`, `apply` — test a candidate, store an interpretation, and record the revision.
+- `provenance`, `plugins` — trace derived evidence and list the compiled-in plugins.
+
 Run `unclip <command> --help` for the full options of any command.
 
 ## Output and reproducibility
