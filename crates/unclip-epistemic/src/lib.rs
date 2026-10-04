@@ -648,6 +648,19 @@ impl DependencyCollector {
         self.guard().iter().cloned().collect()
     }
 
+    /// Whether `id` has been recorded as an input, without copying the set.
+    pub fn contains(&self, id: &DerivedId) -> bool {
+        self.guard().contains(id)
+    }
+
+    /// Copy the recorded inputs as a set.
+    ///
+    /// For a caller that needs set semantics over the inputs; collecting
+    /// [`Self::snapshot`] into a set would copy every identity twice.
+    pub fn to_set(&self) -> BTreeSet<DerivedId> {
+        self.guard().clone()
+    }
+
     pub fn take(&self) -> Vec<DerivedId> {
         std::mem::take(&mut *self.guard()).into_iter().collect()
     }
@@ -1128,6 +1141,19 @@ mod tests {
         assert_eq!(
             collector.snapshot(),
             vec![DerivedId::new("a"), DerivedId::new("b")]
+        );
+    }
+
+    #[test]
+    fn membership_and_set_views_match_the_snapshot() {
+        let collector = DependencyCollector::default();
+        collector.read(&Tracked::from_recorded(DerivedId::new("b"), 2));
+        collector.read(&Tracked::from_recorded(DerivedId::new("a"), 1));
+        assert!(collector.contains(&DerivedId::new("a")));
+        assert!(!collector.contains(&DerivedId::new("c")));
+        assert_eq!(
+            collector.to_set().into_iter().collect::<Vec<_>>(),
+            collector.snapshot()
         );
     }
 }

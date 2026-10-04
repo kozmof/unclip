@@ -78,7 +78,9 @@ mod tests {
                         ("note".into(), PropertyValue::Text("stable".into())),
                         (
                             "metadata".into(),
-                            PropertyValue::Structured(json!({"tags": ["a", "b"]})),
+                            PropertyValue::Structured(std::sync::Arc::new(
+                                json!({"tags": ["a", "b"]}),
+                            )),
                         ),
                     ]
                     .into_iter()
@@ -96,6 +98,7 @@ mod tests {
             ),
         ]
         .into_iter()
+        .map(|(id, value)| (id, std::sync::Arc::new(value)))
         .collect();
         let relation_id = RelationId::new("connects");
         let relations = [(
@@ -109,6 +112,7 @@ mod tests {
             },
         )]
         .into_iter()
+        .map(|(id, value)| (id, std::sync::Arc::new(value)))
         .collect();
         DomainSnapshot {
             id: DomainId::new("example"),

@@ -11,7 +11,7 @@ use unclip_epistemic::{
 use unclip_measure::{Delta, Measurement, ProductMeasurementBinding, Reading};
 use unclip_plugin::{Result, RunPlan};
 
-use crate::comparisons::scalar::compare_measurements;
+use crate::comparisons::scalar::compare_with_comparators;
 use crate::support::invalid;
 use crate::{CompositionMeasurementProfile, IndependenceExpectationProfile, MeasurementRun};
 
@@ -286,22 +286,14 @@ pub fn compare_product_with_independence(
         for comparator in compatible {
             let descriptor = comparator.descriptor();
             used_comparators.insert(&descriptor.id);
-            let subplan = RunPlan {
-                sensors: vec![],
-                inferrers: vec![],
-                comparators: vec![(*comparator).clone()],
-                interpreters: vec![],
-                candidate_generators: vec![],
-                null_models: vec![],
-            };
             let comparison_id = format!("{}/comparisons/{index}", run.id);
-            let mut results = compare_measurements(
-                &subplan,
+            let mut results = compare_with_comparators(
+                std::slice::from_ref(comparator),
                 &baseline_tracked,
                 &observed_tracked,
                 MeasurementRun {
                     id: &comparison_id,
-                    timestamp: run.timestamp.clone(),
+                    timestamp: run.timestamp,
                     params: run.params,
                 },
             )?;
@@ -384,7 +376,7 @@ pub fn compare_product_with_independence(
             PluginId::new("compare.product-independence"),
             semver::Version::new(0, 1, 0),
             params,
-            run.timestamp,
+            run.timestamp.clone(),
         )
         .with_algorithm("explicit_typed_product_independence_comparison"),
         aggregate_dependencies,

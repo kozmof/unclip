@@ -135,7 +135,7 @@ pub(crate) async fn observe(
         &plan,
         &parsed.params,
         &run_id,
-        unclip_epistemic::Timestamp::new(timestamp.clone()),
+        &unclip_epistemic::Timestamp::new(&timestamp),
         serde_json::json!({
             "source": source,
             "profile": profile_path,
@@ -158,8 +158,8 @@ pub(crate) async fn observe(
                 &domain,
                 unclip_engine::InferenceRun {
                     id: &run_id,
-                    source: unclip_epistemic::SourceRef::new(source),
-                    timestamp: unclip_epistemic::Timestamp::new(timestamp),
+                    source: &unclip_epistemic::SourceRef::new(source),
+                    timestamp: &unclip_epistemic::Timestamp::new(timestamp),
                     params: &parsed.params,
                     io: &FileInferenceIo,
                 },
@@ -209,7 +209,7 @@ async fn persist_inference(
     let mut alignments = Vec::new();
     let mut rankings = Vec::new();
     for output in &results.outputs {
-        let provenance_id = output.id().clone();
+        let provenance_id = output.id();
         unclip_store::ProvenanceRepository::insert_provenance(
             &repositories.provenance,
             unclip_store::StoredProvenance {
@@ -251,19 +251,16 @@ async fn persist_inference(
             ),
         };
         for observation in obs {
-            observations.insert(
-                observation.id.to_string(),
-                (observation.clone(), provenance_id.clone()),
-            );
+            observations.insert(&observation.id, (observation, provenance_id));
         }
-        alignments.extend(aligns.iter().cloned().map(|v| (v, provenance_id.clone())));
-        rankings.extend(ranks.iter().cloned().map(|v| (v, provenance_id.clone())));
+        alignments.extend(aligns.iter().map(|v| (v, provenance_id)));
+        rankings.extend(ranks.iter().map(|v| (v, provenance_id)));
     }
-    for (_, (observation, provenance)) in observations {
+    for (observation, provenance) in observations.into_values() {
         unclip_store::ObservationRepository::insert_observation(
             &repositories.observations,
-            &observation,
-            &provenance,
+            observation,
+            provenance,
         )
         .await?;
     }
@@ -272,10 +269,10 @@ async fn persist_inference(
         unclip_store::ObservationRepository::insert_alignment(
             &repositories.observations,
             &id,
-            &alignment,
+            alignment,
             domain_id,
             domain_version,
-            &provenance,
+            provenance,
         )
         .await?;
     }
@@ -284,8 +281,8 @@ async fn persist_inference(
         unclip_store::ObservationRepository::insert_ranking(
             &repositories.observations,
             &id,
-            &ranking,
-            &provenance,
+            ranking,
+            provenance,
         )
         .await?;
     }

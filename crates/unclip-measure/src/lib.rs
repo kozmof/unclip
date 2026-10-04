@@ -755,10 +755,25 @@ pub enum Reading {
     InsufficientEvidence { have: usize, need: usize },
 }
 
+/// Free-form context a sensor records alongside its reading.
+///
+/// The map is held behind an [`Arc`] for the same reason [`MeasurementValue`]
+/// holds its payloads that way: a measurement is immutable once emitted, and
+/// deriving one measurement from another — an independence baseline mirrors the
+/// observed measurement's context — used to copy every key and JSON value.
+/// It serializes exactly as the bare map does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeasurementContext {
     #[serde(default)]
-    pub values: BTreeMap<String, serde_json::Value>,
+    pub values: Arc<BTreeMap<String, serde_json::Value>>,
+}
+
+impl MeasurementContext {
+    pub fn new(values: BTreeMap<String, serde_json::Value>) -> Self {
+        Self {
+            values: Arc::new(values),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -57,6 +57,7 @@ pub struct CompositionMeasurementProfile {
 }
 
 /// Already calculated measurements selected for each side of a composition.
+#[derive(Clone, Copy)]
 pub struct CompositionMeasurementInputs<'a> {
     pub left: &'a [Calculated<Measurement>],
     pub right: &'a [Calculated<Measurement>],
@@ -220,6 +221,7 @@ fn product_measurements(
 /// references used to be positional, with `left_domain`/`right_domain` sharing a
 /// type and `left_frame`/`right_frame` sharing another, so a transposed pair
 /// compiled and bound each side's measurements to the other side's frame.
+#[derive(Clone, Copy)]
 pub struct CompositionSide<'a> {
     pub domain: &'a Tracked<DomainSnapshot>,
     pub frame: &'a Tracked<MeasurementFrame>,

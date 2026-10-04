@@ -68,6 +68,7 @@ fn fixture_document(json: serde_json::Value) -> Fixture {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
     };
     let frame = MeasurementFrame {
@@ -304,7 +305,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
             inputs.engine_inputs(&fixture),
             MeasurementRun {
                 id: "batch",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -364,7 +365,7 @@ fn batch_sensors_conform_track_every_input_and_preserve_sparse_states() {
                 Inputs::new(&reversed).engine_inputs(&reversed),
                 MeasurementRun {
                     id: "batch",
-                    timestamp: Timestamp::new("now"),
+                    timestamp: &Timestamp::new("now"),
                     params: &params
                 }
             )
@@ -437,7 +438,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
         &plan,
         &params,
         "batch",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
         serde_json::json!({}),
     ))
     .await
@@ -504,7 +505,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
             inputs.engine_inputs(&fixture),
             MeasurementRun {
                 id: "batch",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -630,7 +631,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
                     },
                     MeasurementRun {
                         id: &discovery_id,
-                        timestamp: Timestamp::new("now"),
+                        timestamp: &Timestamp::new("now"),
                         params: &candidate_params,
                     },
                 )
@@ -678,7 +679,8 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
             },
         ] {
             let outputs =
-                derive_empirical(&matrix_inputs, method, "batch-g", Timestamp::new("now")).unwrap();
+                derive_empirical(&matrix_inputs, method, "batch-g", &Timestamp::new("now"))
+                    .unwrap();
             for output in outputs {
                 if let Some(structure) = output.structure {
                     measurements
@@ -720,7 +722,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
                             },
                             MeasurementRun {
                                 id: &id,
-                                timestamp: Timestamp::new("now"),
+                                timestamp: &Timestamp::new("now"),
                                 params: &params,
                             },
                         )
@@ -804,7 +806,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
                 },
                 MeasurementRun {
                     id: "temporal-candidates",
-                    timestamp: Timestamp::new("now"),
+                    timestamp: &Timestamp::new("now"),
                     params: &candidate_params,
                 },
             )
@@ -847,7 +849,7 @@ async fn assert_persisted_batch(fixture: Fixture, profile: EngineProfile, params
             &replay,
             MeasurementRun {
                 id: "batch",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1031,7 +1033,7 @@ fn selected_pair_sensors_reject_invalid_parameters_and_preserve_undefined_varian
             Inputs::new(&constant).engine_inputs(&constant),
             MeasurementRun {
                 id: "constant",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1069,7 +1071,7 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
             Inputs::new(&fixture).engine_inputs(&fixture),
             MeasurementRun {
                 id: "xor",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1098,7 +1100,7 @@ fn conditional_information_detects_xor_and_zero_foreground_is_measured() {
             Inputs::new(&fixture).engine_inputs(&fixture),
             MeasurementRun {
                 id: "zero",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1227,7 +1229,7 @@ fn temporal_sensors_conform_use_explicit_order_and_keep_noncausal_evidence() {
                 Inputs::new(fixture).engine_inputs(fixture),
                 MeasurementRun {
                     id: "stable",
-                    timestamp: Timestamp::new("now"),
+                    timestamp: &Timestamp::new("now"),
                     params: &params,
                 },
             )
@@ -1256,7 +1258,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
             Inputs::new(&fixture).engine_inputs(&fixture),
             MeasurementRun {
                 id: "sparse-time",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1284,7 +1286,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
             Inputs::new(&fixture).engine_inputs(&fixture),
             MeasurementRun {
                 id: "zero-time",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1323,7 +1325,7 @@ fn temporal_sensors_preserve_gaps_and_distinguish_no_event_from_missing_evidence
             Inputs::new(&constant).engine_inputs(&constant),
             MeasurementRun {
                 id: "constant-time",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1466,9 +1468,10 @@ fn held_out_baseline_matches_explicit_subset_and_tracks_snapshot_dependencies() 
         .retain(|r| held_out.contains(&r.observation));
     let inputs = Inputs::new(&subset);
     let params = BTreeMap::new();
+    let timestamp = Timestamp::new("now");
     let run = || MeasurementRun {
         id: "baseline-run",
-        timestamp: Timestamp::new("now"),
+        timestamp: &timestamp,
         params: &params,
     };
     let result = engine
@@ -1605,7 +1608,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             },
             MeasurementRun {
                 id: "paired",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )
@@ -1652,12 +1655,10 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
                 },
                 confidence: None,
                 sample_count: Some(2),
-                context: unclip_measure::MeasurementContext {
-                    values: BTreeMap::from([(
-                        "observations".into(),
-                        serde_json::json!(observations),
-                    )]),
-                },
+                context: unclip_measure::MeasurementContext::new(BTreeMap::from([(
+                    "observations".into(),
+                    serde_json::json!(observations),
+                )])),
             },
         )
     });
@@ -1722,7 +1723,7 @@ fn counterfactual_measurement_uses_one_split_and_retains_each_domain_provenance(
             },
             MeasurementRun {
                 id: "paired",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &params,
             },
         )

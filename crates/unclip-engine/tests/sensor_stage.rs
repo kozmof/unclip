@@ -121,14 +121,14 @@ fn run_ordered_pair(explanation_stage: SensorStage) -> Vec<String> {
         .register_sensor(StageSensor::registered(
             "sensor.zzz",
             explanation_stage,
-            calls.clone(),
+            Arc::clone(&calls),
         ))
         .unwrap();
     registry
         .register_sensor(StageSensor::registered(
             "sensor.aaa",
             SensorStage::Measurement,
-            calls.clone(),
+            Arc::clone(&calls),
         ))
         .unwrap();
 
@@ -161,7 +161,7 @@ fn run_ordered_pair(explanation_stage: SensorStage) -> Vec<String> {
             },
             MeasurementRun {
                 id: run_metadata().id.as_str(),
-                timestamp: Timestamp::new("2026-09-19T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-19T00:00:00Z"),
                 params: &params,
             },
         )

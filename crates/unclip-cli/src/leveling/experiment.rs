@@ -317,6 +317,7 @@ pub(crate) async fn run(
         transfer.extend(records.into_iter().map(|record| record.into_tracked()));
     }
     let timestamp = unclip_store::now();
+    let shared_timestamp = Timestamp::new(&timestamp);
     let baseline_id = DerivedId::new(format!("{}/baseline", request.run_id));
     let frame_snapshot_id = DerivedId::new(format!("{}/frame", request.run_id));
     // The run tracks the same snapshot and frame it goes on to read versions
@@ -330,7 +331,7 @@ pub(crate) async fn run(
         &request.training,
         &request.held_out,
         &request.run_id,
-        Timestamp::new(timestamp.clone()),
+        shared_timestamp.clone(),
     )?;
     let held_out_inference_products = alignments
         .iter()
@@ -350,7 +351,7 @@ pub(crate) async fn run(
         &candidate,
         request.relation_bindings.as_ref(),
         &application_id,
-        Timestamp::new(timestamp.clone()),
+        shared_timestamp.clone(),
     )?;
     let pair = ComparisonPair {
         before: DerivedId::new(format!(
@@ -385,7 +386,7 @@ pub(crate) async fn run(
         },
         unclip_engine::MeasurementRun {
             id: &request.run_id,
-            timestamp: Timestamp::new(timestamp.clone()),
+            timestamp: &shared_timestamp,
             params: &parsed.params,
         },
     )?;
@@ -530,7 +531,7 @@ pub(crate) async fn run(
         &plan,
         &parsed.params,
         &request.run_id,
-        Timestamp::new(timestamp.clone()),
+        &shared_timestamp,
         serde_json::json!({
             "stage":"experiment",
             "profile":profile_path,

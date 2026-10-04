@@ -356,7 +356,7 @@ impl TemporalSensor {
             reading,
             confidence: None,
             sample_count: Some(count),
-            context: MeasurementContext { values },
+            context: MeasurementContext::new(values),
         }
     }
 }

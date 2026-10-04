@@ -6,11 +6,18 @@ use unclip_domain::{
 };
 use unclip_engine::{generate_candidates, Engine};
 use unclip_epistemic::{DependencyCollector, DerivedId, DomainVersion, Timestamp, Tracked};
+/// The JSON object a proposal holds, taken by value rather than cloned out.
+fn object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => map,
+        other => panic!("proposal fixtures are JSON objects, got {other}"),
+    }
+}
 fn domain() -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units: BTreeMap::from([(
+        units: unclip_domain::shared_map([(
             UnitId::new("existing"),
             Unit {
                 id: UnitId::new("existing"),
@@ -23,7 +30,13 @@ fn domain() -> DomainSnapshot {
     }
 }
 fn proposal() -> CandidateProposal {
-    CandidateProposal {domain_version_id:serde_json::to_string(&("d","1")).unwrap(),kind:CandidateKind::AtomicMeaning,value:json!({"pattern":{"matching":"exact_observed_label","observed_label":"new evidence"},"observation_count":2,"examples":[{"observation":"o1"},{"observation":"o2"}]}).as_object().unwrap().clone()}
+    CandidateProposal {
+        domain_version_id: serde_json::to_string(&("d", "1")).unwrap(),
+        kind: CandidateKind::AtomicMeaning,
+        value: object(
+            json!({"pattern":{"matching":"exact_observed_label","observed_label":"new evidence"},"observation_count":2,"examples":[{"observation":"o1"},{"observation":"o2"}]}),
+        ),
+    }
 }
 fn apply(
     domain: DomainSnapshot,
@@ -59,11 +72,13 @@ fn atomic_application_is_anonymous_tracked_replayable_and_leaves_baseline_intact
     assert_eq!(added.label, None);
     assert_eq!(
         added.properties["candidate_pattern"],
-        PropertyValue::Structured(proposal().value["pattern"].clone())
+        PropertyValue::Structured(std::sync::Arc::new(proposal().value["pattern"].clone()))
     );
     assert_eq!(
         added.properties["candidate_evidence"],
-        PropertyValue::Structured(serde_json::Value::Object(proposal().value))
+        PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
+            proposal().value
+        )))
     );
     assert_eq!(
         result.provenance().inputs,
@@ -97,12 +112,12 @@ fn wrong_baselines_unsupported_kinds_invalid_patterns_and_collisions_are_errors(
     let id = UnitId::new("candidate:proposal");
     collision.units.insert(
         id.clone(),
-        Unit {
+        std::sync::Arc::new(Unit {
             id,
             kind: UnitKind::AtomicMeaning,
             label: None,
             properties: BTreeMap::new(),
-        },
+        }),
     );
     assert!(apply(collision, proposal()).is_err());
     let baseline = Tracked::from_recorded(DerivedId::new("trial/counterfactual"), domain());
@@ -121,19 +136,20 @@ fn weighted_domain() -> DomainSnapshot {
     let mut d = domain();
     d.units
         .get_mut(&UnitId::new("existing"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties
         .insert("weight".into(), PropertyValue::Integer(2));
     let id = unclip_domain::RelationId::new("r");
     d.relations.insert(
         id.clone(),
-        unclip_domain::Relation {
+        std::sync::Arc::new(unclip_domain::Relation {
             id,
             source: UnitId::new("existing"),
             target: UnitId::new("existing"),
             kind: "self".into(),
             properties: BTreeMap::from([("weight".into(), PropertyValue::Number(0.5))]),
-        },
+        }),
     );
     d
 }
@@ -210,6 +226,7 @@ fn weight_application_rejects_missing_or_invalid_numeric_evidence() {
     invalid
         .units
         .get_mut(&UnitId::new("existing"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties
         .insert("weight".into(), PropertyValue::Number(f64::NAN));
@@ -221,12 +238,12 @@ fn relation_domain() -> DomainSnapshot {
     let id = UnitId::new("target");
     d.units.insert(
         id.clone(),
-        Unit {
+        std::sync::Arc::new(Unit {
             id,
             kind: UnitKind::AtomicMeaning,
             label: Some("destination".into()),
             properties: BTreeMap::new(),
-        },
+        }),
     );
     d
 }
@@ -286,7 +303,9 @@ fn relation_application_records_explicit_endpoints_and_preserves_baseline() {
     assert_eq!(relation.kind, "near");
     assert_eq!(
         relation.properties["candidate_evidence"],
-        PropertyValue::Structured(serde_json::Value::Object(relation_proposal().value))
+        PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
+            relation_proposal().value
+        )))
     );
     assert_eq!(
         result.provenance().params["relation_bindings"],
@@ -308,18 +327,19 @@ fn relation_application_requires_valid_bindings_and_rejects_existing_edges() {
     let id = unclip_domain::RelationId::new("existing-edge");
     duplicate.relations.insert(
         id.clone(),
-        unclip_domain::Relation {
+        std::sync::Arc::new(unclip_domain::Relation {
             id,
             source: UnitId::new("existing"),
             target: UnitId::new("target"),
             kind: "near".into(),
             properties: BTreeMap::new(),
-        },
+        }),
     );
     assert!(apply_relation(duplicate.clone(), relation_proposal(), "existing", "target").is_err());
     duplicate
         .relations
         .get_mut(&unclip_domain::RelationId::new("existing-edge"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .kind = "other".into();
     assert!(apply_relation(duplicate, relation_proposal(), "existing", "target").is_ok());
@@ -327,12 +347,12 @@ fn relation_application_requires_valid_bindings_and_rejects_existing_edges() {
     let id = UnitId::new("other-source");
     ambiguous.units.insert(
         id.clone(),
-        Unit {
+        std::sync::Arc::new(Unit {
             id,
             kind: UnitKind::AtomicMeaning,
             label: Some("known".into()),
             properties: BTreeMap::new(),
-        },
+        }),
     );
     let result = apply_relation(ambiguous, relation_proposal(), "other-source", "target").unwrap();
     assert_eq!(
@@ -345,11 +365,11 @@ fn relation_application_requires_valid_bindings_and_rejects_existing_edges() {
 fn community_proposal() -> CandidateProposal {
     let mut c = proposal();
     c.kind = CandidateKind::CompositeMeaning;
-    c.value=json!({
+    c.value = object(json!({
         "pattern":{"matching":"empirical_community","members":["existing","target"]},
         "evidence":{"structure":"community-result","community_index":0,"result":{"metric":"spearman","threshold":0.8,"minimum_samples":2,"communities":[["existing","target"]],"assessed_pairs":1,"qualifying_pairs":1,"unassessed":[]}},
         "selection":{"metric":"spearman","minimum_samples":2,"minimum_members":2}
-    }).as_object().unwrap().clone();
+    }));
     c
 }
 #[test]
@@ -382,7 +402,7 @@ fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
         },
         MeasurementRun {
             id: "generation",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.community"),
                 json!({"metric":"spearman","minimum_samples":2,"minimum_members":2}).into(),
@@ -406,13 +426,13 @@ fn generated_community_applies_as_anonymous_composite_with_explicit_members() {
     assert_eq!(unit.label, None);
     assert_eq!(
         unit.properties["members"],
-        PropertyValue::Structured(json!(["existing", "target"]))
+        PropertyValue::Structured(std::sync::Arc::new(json!(["existing", "target"])))
     );
     assert_eq!(
         unit.properties["candidate_evidence"],
-        PropertyValue::Structured(serde_json::Value::Object(
+        PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
             candidates[0].value().value.clone()
-        ))
+        )))
     );
     assert!(result.value().added_relations.is_empty());
     assert!(result.value().property_changes.is_empty());
@@ -447,7 +467,9 @@ fn latent_proposal() -> CandidateProposal {
     let mut c = proposal();
     c.kind = CandidateKind::LatentAxis;
     let q = std::f64::consts::FRAC_1_SQRT_2;
-    c.value=json!({"pattern":{"matching":"empirical_spectral_axis","units":["existing","target"],"eigenvalue":-1.0,"loadings":[q,-q]},"evidence":{"structure":"spectrum","eigenpair_index":1,"result":{"metric":"relative_rank_variance","units":["existing","target"],"eigenpairs":[{"eigenvalue":1.0,"loadings":[q,q]},{"eigenvalue":-1.0,"loadings":[q,-q]}],"minimum_cell_samples":4,"tolerance":1e-12,"sweeps":1}},"selection":{"metric":"relative_rank_variance","minimum_samples":2,"minimum_absolute_eigenvalue":0.5}}).as_object().unwrap().clone();
+    c.value = object(
+        json!({"pattern":{"matching":"empirical_spectral_axis","units":["existing","target"],"eigenvalue":-1.0,"loadings":[q,-q]},"evidence":{"structure":"spectrum","eigenpair_index":1,"result":{"metric":"relative_rank_variance","units":["existing","target"],"eigenpairs":[{"eigenvalue":1.0,"loadings":[q,q]},{"eigenvalue":-1.0,"loadings":[q,-q]}],"minimum_cell_samples":4,"tolerance":1e-12,"sweeps":1}},"selection":{"metric":"relative_rank_variance","minimum_samples":2,"minimum_absolute_eigenvalue":0.5}}),
+    );
     c
 }
 #[test]
@@ -480,7 +502,7 @@ fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
         },
         MeasurementRun {
             id: "generation",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.latent-axis"),
                 template.value["selection"].clone().into(),
@@ -508,11 +530,15 @@ fn generated_latent_axes_retain_signed_spectral_evidence_without_mutation() {
         );
         assert_eq!(
             unit.properties["loadings"],
-            PropertyValue::Structured(generated.value().value["pattern"]["loadings"].clone())
+            PropertyValue::Structured(std::sync::Arc::new(
+                generated.value().value["pattern"]["loadings"].clone()
+            ))
         );
         assert_eq!(
             unit.properties["candidate_evidence"],
-            PropertyValue::Structured(serde_json::Value::Object(generated.value().value.clone()))
+            PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
+                generated.value().value.clone()
+            )))
         );
         assert_eq!(
             DependencyCollector::default().read(&baseline),
@@ -552,7 +578,9 @@ fn latent_application_requires_existing_units_and_consistent_spectral_evidence()
 fn coupling_proposal() -> CandidateProposal {
     let mut c = proposal();
     c.kind = CandidateKind::DynamicCoupling;
-    c.value=json!({"pattern":{"matching":"thresholded_pairwise_association","metric":"spearman","units":["existing","target"]},"evidence":{"measurement":"matrix","sensor":"sensor.spearman","sensor_version":"0.1.0","context":{"values":{}},"cell":{"status":"value","value":0.9,"sample_count":4}},"selection":{"threshold":0.8,"minimum_samples":2},"causal_claim":false}).as_object().unwrap().clone();
+    c.value = object(
+        json!({"pattern":{"matching":"thresholded_pairwise_association","metric":"spearman","units":["existing","target"]},"evidence":{"measurement":"matrix","sensor":"sensor.spearman","sensor_version":"0.1.0","context":{"values":{}},"cell":{"status":"value","value":0.9,"sample_count":4}},"selection":{"threshold":0.8,"minimum_samples":2},"causal_claim":false}),
+    );
     c
 }
 #[test]
@@ -600,7 +628,7 @@ fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
             },
             MeasurementRun {
                 id: metric,
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &BTreeMap::from([(
                     PluginId::new("generate.pairwise-coupling"),
                     json!({"metric":metric,"threshold":threshold,"minimum_samples":2}).into(),
@@ -623,9 +651,9 @@ fn generated_pairwise_couplings_apply_with_metric_specific_evidence() {
         );
         assert_eq!(
             unit.properties["candidate_evidence"],
-            PropertyValue::Structured(serde_json::Value::Object(
+            PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
                 candidates[0].value().value.clone()
-            ))
+            )))
         );
         assert_eq!(
             DependencyCollector::default().read(&baseline),
@@ -672,7 +700,9 @@ fn temporal_proposal() -> CandidateProposal {
     let mut c = proposal();
     c.kind = CandidateKind::DynamicCoupling;
     let sequence = json!([{"observation":"z","position":0},{"observation":"a","position":10},{"observation":"m","position":30},{"observation":"b","position":40}]);
-    c.value=json!({"pattern":{"matching":"lagged_directional_association","source":"existing","target":"target","lag_steps":1,"sequence":sequence},"evidence":{"measurement":"lagged","sensor":"sensor.lagged-dependency","sensor_version":"0.1.0","coefficient":-0.5,"sample_count":3,"context":{"values":{"source":"existing","target":"target","lag_steps":1,"sequence":sequence}}},"selection":{"threshold":-0.6,"minimum_samples":2},"causal_claim":false}).as_object().unwrap().clone();
+    c.value = object(
+        json!({"pattern":{"matching":"lagged_directional_association","source":"existing","target":"target","lag_steps":1,"sequence":sequence},"evidence":{"measurement":"lagged","sensor":"sensor.lagged-dependency","sensor_version":"0.1.0","coefficient":-0.5,"sample_count":3,"context":{"values":{"source":"existing","target":"target","lag_steps":1,"sequence":sequence}}},"selection":{"threshold":-0.6,"minimum_samples":2},"causal_claim":false}),
+    );
     c
 }
 #[test]
@@ -712,7 +742,7 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
         },
         MeasurementRun {
             id: "temporal",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("generate.temporal-coupling"),
                 template.value["selection"].clone().into(),
@@ -731,11 +761,11 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
     assert_eq!(unit.label, None);
     assert_eq!(
         unit.properties["units"],
-        PropertyValue::Structured(json!(["existing", "target"]))
+        PropertyValue::Structured(std::sync::Arc::new(json!(["existing", "target"])))
     );
     assert_eq!(
         unit.properties["candidate_pattern"],
-        PropertyValue::Structured(template.value["pattern"].clone())
+        PropertyValue::Structured(std::sync::Arc::new(template.value["pattern"].clone()))
     );
     assert_eq!(
         unit.properties["causal_claim"],
@@ -743,9 +773,9 @@ fn generated_temporal_coupling_preserves_direction_lag_order_and_signed_evidence
     );
     assert_eq!(
         unit.properties["candidate_evidence"],
-        PropertyValue::Structured(serde_json::Value::Object(
+        PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
             candidates[0].value().value.clone()
-        ))
+        )))
     );
     assert_eq!(
         DependencyCollector::default().read(&baseline),
@@ -781,4 +811,78 @@ fn temporal_application_rejects_inconsistent_order_lag_counts_and_direction() {
     let mut c = temporal_proposal();
     c.value["evidence"]["context"]["values"]["sequence"][1]["observation"] = json!("different");
     assert!(apply(relation_domain(), c).is_err());
+}
+#[test]
+fn applications_share_untouched_entries_and_copy_only_what_they_change() {
+    let baseline = Tracked::from_recorded(DerivedId::new("baseline"), weighted_domain());
+    let candidate = Tracked::from_recorded(
+        DerivedId::new("proposal"),
+        weight_proposal("relation", "r", json!(0.0)),
+    );
+    let result = Engine::with_builtins()
+        .unwrap()
+        .apply_candidate(&baseline, &candidate, "trial", Timestamp::new("now"))
+        .unwrap();
+    let before = DependencyCollector::default().read(&baseline);
+    let after = &result.value().domain;
+    let unit = UnitId::new("existing");
+    let relation = unclip_domain::RelationId::new("r");
+    // The unit the revision does not touch is the baseline's own allocation.
+    assert!(std::sync::Arc::ptr_eq(
+        &before.units[&unit],
+        &after.units[&unit]
+    ));
+    // The revised relation was copied on write, leaving the baseline unchanged.
+    assert!(!std::sync::Arc::ptr_eq(
+        &before.relations[&relation],
+        &after.relations[&relation]
+    ));
+    assert_eq!(
+        before.relations[&relation].properties["weight"],
+        PropertyValue::Number(0.5)
+    );
+}
+
+#[test]
+fn a_pattern_recorded_under_two_names_is_one_shared_tree() {
+    let mut candidate = proposal();
+    candidate.kind = CandidateKind::GraphMotif;
+    candidate.value = json!({
+        "pattern": {
+            "matching": "exact_directed_two_edge_path",
+            "nodes": [
+                {"position": 0, "observed_label": "a"},
+                {"position": 1, "observed_label": "b"},
+                {"position": 2, "observed_label": "c"}
+            ],
+            "edges": [
+                {"source": 0, "target": 1, "kind": "x"},
+                {"source": 1, "target": 2, "kind": "y"}
+            ]
+        },
+        "observations": ["o1", "o2"],
+        "observation_count": 2,
+        "examples": [
+            {"observation": "o1", "units": ["u1", "u2", "u3"], "edges": [
+                {"relation": "r1", "uncertainty": null, "measurements": ["m1"]},
+                {"relation": "r2", "uncertainty": null, "measurements": ["m2"]}
+            ]},
+            {"observation": "o2", "units": ["u4", "u5", "u6"], "edges": [
+                {"relation": "r3", "uncertainty": null, "measurements": ["m3"]},
+                {"relation": "r4", "uncertainty": null, "measurements": ["m4"]}
+            ]}
+        ]
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    let result = apply(domain(), candidate).unwrap();
+    let unit = &result.value().domain.units[&UnitId::new("candidate:proposal")];
+    let (PropertyValue::Structured(recorded), PropertyValue::Structured(graph)) = (
+        &unit.properties["candidate_pattern"],
+        &unit.properties["graph_pattern"],
+    ) else {
+        panic!("motif patterns are recorded as structured properties");
+    };
+    assert!(std::sync::Arc::ptr_eq(recorded, graph));
 }

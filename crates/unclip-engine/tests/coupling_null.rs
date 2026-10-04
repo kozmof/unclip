@@ -26,6 +26,7 @@ fn domain() -> DomainSnapshot {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -118,7 +119,7 @@ fn evaluate(
         },
         MeasurementRun {
             id: "null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("null.coupling-zero"), params.into())]),
         },
     )?;

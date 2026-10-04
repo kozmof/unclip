@@ -49,7 +49,7 @@ pub struct NullEvidence {
     pub reading: Arc<unclip_measure::Reading>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct ExperimentConstraints<'a> {
     pub requirements: &'a [super::ExperimentConstraint],
     pub transfer_measurements: &'a [Tracked<unclip_measure::Measurement>],
@@ -141,13 +141,7 @@ impl super::Engine {
         let domain_version = baseline.version.clone();
         let frame_version = frame.version.clone();
         let timestamp = run.timestamp.clone();
-        let record = run_record(
-            plan,
-            run.params,
-            run.id,
-            timestamp.clone(),
-            serde_json::json!({}),
-        );
+        let record = run_record(plan, run.params, run.id, &timestamp, serde_json::json!({}));
         let observations = split
             .held_out
             .iter()
@@ -162,7 +156,7 @@ impl super::Engine {
         let constraint_run_id = run.id.to_string();
         let null_run = super::MeasurementRun {
             id: &null_id,
-            timestamp: timestamp.clone(),
+            timestamp: &timestamp,
             params: run.params,
         };
         let execution = self.compare_counterfactual(plan, inputs, pairs, run)?;
@@ -184,7 +178,7 @@ impl super::Engine {
         evidence.comparison = profile.id().clone();
         evidence.delta_profile = dependencies.read_derived_shared(profile);
         for result in &null_results {
-            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+            if dependencies.contains(result.id()) || result.id() == &id {
                 return Err(PluginError::Message(
                     "null output identity collides with experimental evidence".into(),
                 ));
@@ -204,7 +198,7 @@ impl super::Engine {
             let used = constraints.iter().any(|constraint| matches!(constraint, super::ExperimentConstraint::ScalarTransfer { source, target, .. } if source == input.id() || target == input.id()));
             if !used
                 || input.id().trim().is_empty()
-                || dependencies.snapshot().contains(input.id())
+                || dependencies.contains(input.id())
                 || input.id() == &id
             {
                 return Err(PluginError::Message("transfer inputs must be used by explicit transfer requirements and have unique noncolliding identities".into()));
@@ -235,7 +229,7 @@ impl super::Engine {
                 &constraint_run_id,
                 timestamp.clone(),
             )?;
-            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+            if dependencies.contains(result.id()) || result.id() == &id {
                 return Err(PluginError::Message(
                     "Pareto output identity collides with experimental evidence".into(),
                 ));
@@ -267,7 +261,7 @@ impl super::Engine {
                 &constraint_run_id,
                 timestamp.clone(),
             )?;
-            if dependencies.snapshot().contains(result.id()) || result.id() == &id {
+            if dependencies.contains(result.id()) || result.id() == &id {
                 return Err(PluginError::Message(
                     "constraint output identity collides with experimental evidence".into(),
                 ));
@@ -276,12 +270,15 @@ impl super::Engine {
             evidence.constraints = dependencies.read_derived_shared(&result);
             Some(result)
         };
-        if dependencies.snapshot().contains(&id) || evidence.candidate == id {
+        if dependencies.contains(&id) || evidence.candidate == id {
             return Err(PluginError::Message(
                 "experimental output identity collides with an input or intermediate result".into(),
             ));
         }
-        let params = serde_json::json!({"plan":record.resolved_plan,"pairs":evidence.delta_profile.pairs,"constraints":constraints,"transfer_measurements":evidence.transfer_measurements,"pareto_dimensions":pareto_dimensions});
+        let mut params = serde_json::json!({"pairs":evidence.delta_profile.pairs,"constraints":constraints,"transfer_measurements":evidence.transfer_measurements,"pareto_dimensions":pareto_dimensions});
+        // Moved in rather than listed in `json!`, which serializes each value
+        // through a reference and so would copy a plan nothing else reads.
+        params["plan"] = record.resolved_plan;
         let token = ExperimentToken::from_harness(
             EmitMetadata::new(
                 id,
@@ -313,6 +310,7 @@ impl super::Engine {
 /// particular decide which profile a recorded delta is measured *from*. The
 /// only check that could ever have caught a swap is that the two profile ids
 /// differ, which a swap preserves.
+#[derive(Clone, Copy)]
 pub struct ExperimentStorageIds<'a> {
     pub domain_version_id: &'a str,
     pub frame_version_id: &'a str,
@@ -393,11 +391,11 @@ pub fn persistable_experiment(
         .and_then(serde_json::Value::as_object)
         .cloned()
         .ok_or_else(|| invalid("experimental evidence has no resolved plan"))?;
-    let result = serde_json::to_value(evidence)
-        .map_err(|error| invalid(&error.to_string()))?
-        .as_object()
-        .cloned()
-        .ok_or_else(|| invalid("experimental evidence must serialize as an object"))?;
+    let result =
+        match serde_json::to_value(evidence).map_err(|error| invalid(&error.to_string()))? {
+            serde_json::Value::Object(result) => result,
+            _ => return Err(invalid("experimental evidence must serialize as an object")),
+        };
     let value = unclip_record::ExperimentOutcome {
         candidate_id: candidate.id().clone(),
         domain_version_id: domain_version_id.into(),
@@ -422,7 +420,7 @@ pub fn persistable_experiment(
         "after_profile": after_profile_id,
     });
     let id = DerivedId::new(format!("{}/completed", experiment.evidence.id()));
-    if dependencies.snapshot().contains(&id) {
+    if dependencies.contains(&id) {
         return Err(invalid(
             "persisted experiment identity collides with an evidence input",
         ));

@@ -183,7 +183,7 @@ impl ProductSensor for CanonicalCorrelationSensor {
             reading,
             confidence: None,
             sample_count: Some(sample_count),
-            context: MeasurementContext { values: context },
+            context: MeasurementContext::new(context),
         }))
     }
 }

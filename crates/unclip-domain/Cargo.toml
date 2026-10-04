@@ -13,3 +13,6 @@ description = "Versioned semantic domains and measurement frames for Unclip."
 serde.workspace = true
 serde_json.workspace = true
 unclip-epistemic.workspace = true
+
+[lints]
+workspace = true

@@ -672,9 +672,7 @@ pub fn record_dynamic_coupling_test(
             .properties
             .get("candidate_evidence")
             .and_then(|value| match value {
-                unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
-                    Some(value)
-                }
+                unclip_domain::PropertyValue::Structured(value) => value.as_object(),
                 _ => None,
             })
             != Some(&proposal.value)
@@ -732,9 +730,7 @@ pub fn record_structural_test(
         .properties
         .get("candidate_evidence")
         .and_then(|value| match value {
-            unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
-                Some(value)
-            }
+            unclip_domain::PropertyValue::Structured(value) => value.as_object(),
             _ => None,
         })
         == Some(&proposal.value);
@@ -746,7 +742,7 @@ pub fn record_structural_test(
                     .properties
                     .get("graph_pattern")
                     .and_then(|value| match value {
-                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                         _ => None,
                     })
                     != Some(pattern)
@@ -774,7 +770,7 @@ pub fn record_structural_test(
                     .properties
                     .get("role_pattern")
                     .and_then(|value| match value {
-                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                         _ => None,
                     })
                     != Some(pattern)
@@ -802,7 +798,7 @@ pub fn record_structural_test(
                     .properties
                     .get("transformation_pattern")
                     .and_then(|value| match value {
-                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                         _ => None,
                     })
                     != Some(pattern)
@@ -893,7 +889,7 @@ pub fn record_delta_v_test(
             .properties
             .get("candidate_pattern")
             .and_then(|value| match value {
-                unclip_domain::PropertyValue::Structured(value) => Some(value),
+                unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                 _ => None,
             })
             != Some(pattern)
@@ -901,9 +897,7 @@ pub fn record_delta_v_test(
             .properties
             .get("candidate_evidence")
             .and_then(|value| match value {
-                unclip_domain::PropertyValue::Structured(serde_json::Value::Object(value)) => {
-                    Some(value)
-                }
+                unclip_domain::PropertyValue::Structured(value) => value.as_object(),
                 _ => None,
             })
             != Some(&proposal.value)

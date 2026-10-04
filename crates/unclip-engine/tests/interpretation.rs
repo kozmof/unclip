@@ -20,16 +20,16 @@ struct FixtureIo;
 
 #[async_trait]
 impl InterpretationIo for FixtureIo {
-    async fn request(&self, request: &InterpretationRequest) -> Result<Value> {
+    async fn request(&self, request: &InterpretationRequest) -> Result<std::sync::Arc<Value>> {
         assert_eq!(request.model, "fixture/semantic-labeler");
         assert_eq!(request.model_version, "2026-09-23");
         assert_eq!(request.parameters, json!({"temperature": 0, "seed": 7}));
         assert_eq!(request.structure.kind, "communities");
         assert_eq!(request.structure.value["members"], json!(["a", "b"]));
-        Ok(json!({
+        Ok(std::sync::Arc::new(json!({
             "label": "shared ritual",
             "explanation": "the detected community repeats a preparation pattern"
-        }))
+        })))
     }
 }
 
@@ -112,7 +112,7 @@ async fn versioned_model_parameters_and_stored_source_dependency_round_trip() {
             &[tracked],
             InterpretationRun {
                 id: "interpret-run",
-                timestamp: Timestamp::new("2026-09-23T01:02:03Z"),
+                timestamp: &Timestamp::new("2026-09-23T01:02:03Z"),
                 params: &params,
                 io: &FixtureIo,
             },
@@ -171,7 +171,7 @@ struct UnexpectedIo;
 
 #[async_trait]
 impl InterpretationIo for UnexpectedIo {
-    async fn request(&self, _: &InterpretationRequest) -> Result<Value> {
+    async fn request(&self, _: &InterpretationRequest) -> Result<std::sync::Arc<Value>> {
         panic!("invalid interpretation inputs must fail before model I/O")
     }
 }
@@ -188,9 +188,10 @@ async fn rejects_missing_run_or_sources_and_duplicate_source_ids() {
     let params = [(PluginId::new("interpret.llm-label"), interpreter_params())]
         .into_iter()
         .collect::<BTreeMap<_, _>>();
+    let timestamp = Timestamp::new("now");
     let run = |id| InterpretationRun {
         id,
-        timestamp: Timestamp::new("now"),
+        timestamp: &timestamp,
         params: &params,
         io: &UnexpectedIo,
     };
@@ -249,9 +250,12 @@ async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
             ..EngineProfile::default()
         })
         .unwrap();
-    let plugin_params = [(PluginId::new("interpret.llm-label"), params.clone())]
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
+    let plugin_params = [(
+        PluginId::new("interpret.llm-label"),
+        std::sync::Arc::clone(&params),
+    )]
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
 
     let error = engine
         .interpret(
@@ -259,7 +263,7 @@ async fn interpreted_structures_cannot_be_reused_as_measurement_evidence() {
             &[source],
             InterpretationRun {
                 id: "run",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &plugin_params,
                 io: &UnexpectedIo,
             },

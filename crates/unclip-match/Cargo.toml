@@ -16,3 +16,6 @@ description = "Pattern dictionary types and multi-pattern text matching for uncl
 serde.workspace = true
 anyhow.workspace = true
 daachorse.workspace = true
+
+[lints]
+workspace = true

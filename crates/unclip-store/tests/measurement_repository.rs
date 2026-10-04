@@ -78,11 +78,11 @@ fn value_record(id: &str, value: f64) -> MeasurementRecord {
             },
             confidence: Some(0.9),
             sample_count: Some(3),
-            context: MeasurementContext {
-                values: [("axis".into(), json!(UnitId::new("x")))]
+            context: MeasurementContext::new(
+                [("axis".into(), json!(UnitId::new("x")))]
                     .into_iter()
                     .collect(),
-            },
+            ),
         }),
     }
 }

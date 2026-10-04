@@ -54,7 +54,7 @@ fn compare(
         pairs,
         MeasurementRun {
             id: "comparison",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::new(),
         },
     )
@@ -157,7 +157,7 @@ fn invalid_or_ambiguous_pairings_fail_without_partial_profiles() {
         &[],
         MeasurementRun {
             id: "empty",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::new()
         }
     )

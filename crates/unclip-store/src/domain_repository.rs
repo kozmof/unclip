@@ -1,6 +1,6 @@
 //! Immutable persistence for versioned semantic domains.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use sea_orm::{
@@ -213,7 +213,10 @@ pub(crate) async fn insert_snapshot(
     .exec(txn)
     .await?;
 
-    for (_, unit) in snapshot.units {
+    for unit in snapshot.units.into_values() {
+        // The caller owns the snapshot, so this moves each unit out unless
+        // another snapshot still shares it.
+        let unit = Arc::unwrap_or_clone(unit);
         let unit_id = unit.id.as_str();
         units::Entity::insert(units::ActiveModel {
             domain_version_id: Set(key.clone()),
@@ -241,7 +244,8 @@ pub(crate) async fn insert_snapshot(
         }
     }
 
-    for (_, relation) in snapshot.relations {
+    for relation in snapshot.relations.into_values() {
+        let relation = Arc::unwrap_or_clone(relation);
         let relation_id = relation.id.as_str();
         relations::Entity::insert(relations::ActiveModel {
             domain_version_id: Set(key.clone()),
@@ -409,14 +413,14 @@ impl DomainReader for SeaOrmDomainRepository {
             let id = UnitId::new(row.id);
             hydrated_units.insert(
                 id.clone(),
-                Unit {
+                Arc::new(Unit {
                     properties: unit_properties_by_id
                         .remove(id.as_str())
                         .unwrap_or_default(),
                     id,
                     kind: parse_unit_kind(&row.kind)?,
                     label: row.label,
-                },
+                }),
             );
         }
 
@@ -442,7 +446,7 @@ impl DomainReader for SeaOrmDomainRepository {
             let id = RelationId::new(row.id);
             hydrated_relations.insert(
                 id.clone(),
-                Relation {
+                Arc::new(Relation {
                     properties: relation_properties_by_id
                         .remove(id.as_str())
                         .unwrap_or_default(),
@@ -450,7 +454,7 @@ impl DomainReader for SeaOrmDomainRepository {
                     source: UnitId::new(row.source_unit_id),
                     target: UnitId::new(row.target_unit_id),
                     kind: row.kind,
-                },
+                }),
             );
         }
 

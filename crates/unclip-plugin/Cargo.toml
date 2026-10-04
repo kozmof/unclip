@@ -21,3 +21,6 @@ unclip-observe.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
+
+[lints]
+workspace = true

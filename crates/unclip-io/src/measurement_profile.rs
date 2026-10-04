@@ -86,9 +86,9 @@ mod tests {
                     },
                     confidence: Some(0.9),
                     sample_count: Some(4),
-                    context: MeasurementContext {
-                        values: [("axis".into(), json!("source"))].into_iter().collect(),
-                    },
+                    context: MeasurementContext::new(
+                        [("axis".into(), json!("source"))].into_iter().collect(),
+                    ),
                 },
                 Measurement {
                     sensor: PluginId::new("sensor.ranking"),
@@ -96,9 +96,7 @@ mod tests {
                     reading: Reading::InsufficientEvidence { have: 2, need: 5 },
                     confidence: None,
                     sample_count: Some(2),
-                    context: MeasurementContext {
-                        values: BTreeMap::new(),
-                    },
+                    context: MeasurementContext::new(BTreeMap::new()),
                 },
                 Measurement {
                     sensor: PluginId::new("sensor.optional"),

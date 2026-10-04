@@ -11,7 +11,7 @@ pub use product::{
     ProductMeasurementFrame,
 };
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use unclip_epistemic::{string_id, DomainVersion, FrameVersion};
@@ -67,7 +67,10 @@ pub enum PropertyValue {
     Integer(i64),
     Number(f64),
     Text(String),
-    Structured(serde_json::Value),
+    /// Shared rather than owned: a domain is copied whole for every
+    /// counterfactual, and one candidate routinely records the same pattern
+    /// under more than one property. It serializes as the bare JSON value.
+    Structured(Arc<serde_json::Value>),
 }
 
 impl PropertyValue {
@@ -85,10 +88,23 @@ impl PropertyValue {
                 // produce the non-finite value `serialize` refuses.
                 None => match number.as_f64() {
                     Some(value) => Self::Number(value),
-                    None => Self::Structured(serde_json::Value::Number(number)),
+                    None => Self::Structured(Arc::new(serde_json::Value::Number(number))),
                 },
             },
-            composite => Self::Structured(composite),
+            composite => Self::Structured(Arc::new(composite)),
+        }
+    }
+
+    /// Build a property from JSON that is already shared, in canonical form.
+    ///
+    /// A composite payload is kept as the same allocation; only a scalar, which
+    /// becomes its own variant, is taken out of it.
+    pub fn structured_shared(value: Arc<serde_json::Value>) -> Self {
+        match &*value {
+            serde_json::Value::Bool(_)
+            | serde_json::Value::String(_)
+            | serde_json::Value::Number(_) => Self::structured(Arc::unwrap_or_clone(value)),
+            _ => Self::Structured(value),
         }
     }
 
@@ -96,7 +112,7 @@ impl PropertyValue {
     #[must_use]
     pub fn canonical(self) -> Self {
         match self {
-            Self::Structured(value) => Self::structured(value),
+            Self::Structured(value) => Self::structured_shared(value),
             scalar => scalar,
         }
     }
@@ -156,13 +172,30 @@ pub struct Relation {
     pub properties: BTreeMap<String, PropertyValue>,
 }
 
+/// One immutable version of a domain.
+///
+/// Units and relations are held behind [`Arc`]. A snapshot is copied whole
+/// whenever a counterfactual is built from it, and a candidate application
+/// changes at most a handful of entries; sharing the untouched ones turns that
+/// copy into one refcount bump per entry instead of a deep copy of every label
+/// and property map. Change one entry with [`Arc::make_mut`]. Both maps
+/// serialize exactly as maps of bare units and relations do.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DomainSnapshot {
     pub id: DomainId,
     pub version: DomainVersion,
-    pub units: BTreeMap<UnitId, Unit>,
-    pub relations: BTreeMap<RelationId, Relation>,
+    pub units: BTreeMap<UnitId, Arc<Unit>>,
+    pub relations: BTreeMap<RelationId, Arc<Relation>>,
+}
+
+/// Collect owned units or relations into the shared map a [`DomainSnapshot`]
+/// holds.
+pub fn shared_map<K: Ord, V>(entries: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, Arc<V>> {
+    entries
+        .into_iter()
+        .map(|(key, value)| (key, Arc::new(value)))
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,9 +235,9 @@ mod tests {
             PropertyValue::Number(-0.25),
             PropertyValue::Text(String::new()),
             PropertyValue::Text("stable".into()),
-            PropertyValue::Structured(serde_json::json!({"tags": ["a", "b"]})),
-            PropertyValue::Structured(serde_json::json!([1, 2, 3])),
-            PropertyValue::Structured(serde_json::Value::Null),
+            PropertyValue::Structured(Arc::new(serde_json::json!({"tags": ["a", "b"]}))),
+            PropertyValue::Structured(Arc::new(serde_json::json!([1, 2, 3]))),
+            PropertyValue::Structured(Arc::new(serde_json::Value::Null)),
         ] {
             let encoded = serde_json::to_string(&value).expect("canonical values serialize");
             let decoded: PropertyValue =
@@ -229,7 +262,7 @@ mod tests {
         ] {
             assert_eq!(PropertyValue::structured(wrapped.clone()), canonical);
             assert_eq!(
-                PropertyValue::Structured(wrapped.clone()).canonical(),
+                PropertyValue::Structured(Arc::new(wrapped.clone())).canonical(),
                 canonical
             );
             // Which is also what the wire form decodes to, so an uncanonical
@@ -244,7 +277,7 @@ mod tests {
         let composite = serde_json::json!({"a": 1});
         assert_eq!(
             PropertyValue::structured(composite.clone()),
-            PropertyValue::Structured(composite)
+            PropertyValue::Structured(Arc::new(composite))
         );
     }
 

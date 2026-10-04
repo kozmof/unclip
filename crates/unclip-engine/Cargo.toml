@@ -29,3 +29,6 @@ async-trait.workspace = true
 # output persists and replays; the library itself performs no persistence.
 unclip-store.workspace = true
 tokio.workspace = true
+
+[lints]
+workspace = true

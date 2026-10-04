@@ -27,6 +27,7 @@ fn domain() -> DomainSnapshot {
             },
         )
     })
+    .map(|(id, value)| (id, std::sync::Arc::new(value)))
     .collect();
     let relations = [
         ("r1", "a", "b", "near"),
@@ -47,6 +48,7 @@ fn domain() -> DomainSnapshot {
             },
         )
     })
+    .map(|(id, value)| (id, std::sync::Arc::new(value)))
     .collect();
     DomainSnapshot {
         id: DomainId::new("d"),
@@ -80,7 +82,7 @@ fn evaluate(
         },
         MeasurementRun {
             id: "null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::new(),
         },
     )
@@ -144,7 +146,12 @@ fn rejects_wrong_versions_dangling_endpoints_and_inconsistent_keys() {
     let mut dangling = domain();
     dangling.units.remove(&UnitId::new("b"));
     let mut inconsistent = domain();
-    inconsistent.units.get_mut(&UnitId::new("a")).unwrap().id = UnitId::new("wrong");
+    inconsistent
+        .units
+        .get_mut(&UnitId::new("a"))
+        .map(std::sync::Arc::make_mut)
+        .unwrap()
+        .id = UnitId::new("wrong");
     for domain in [wrong, dangling, inconsistent] {
         assert!(evaluate("null.existing-relation", candidate(true), Some(domain)).is_err());
     }
@@ -160,11 +167,13 @@ fn weight_domain(value: unclip_domain::PropertyValue) -> DomainSnapshot {
     let mut d = domain();
     d.units
         .get_mut(&UnitId::new("a"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties
         .insert("weight".into(), value.clone());
     d.relations
         .get_mut(&RelationId::new("r1"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties
         .insert("weight".into(), value);
@@ -192,7 +201,7 @@ fn weight_evaluate(
         },
         MeasurementRun {
             id: "weight-null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 unclip_epistemic::PluginId::new("null.weight-change"),
                 params.into(),

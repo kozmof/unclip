@@ -99,9 +99,10 @@ impl CoverageSensor {
             reading,
             confidence: None,
             sample_count: Some(sample_count),
-            context: MeasurementContext {
-                values: BTreeMap::from([("metric".into(), serde_json::json!(metric))]),
-            },
+            context: MeasurementContext::new(BTreeMap::from([(
+                "metric".into(),
+                serde_json::json!(metric),
+            )])),
         }
     }
 }
@@ -147,7 +148,7 @@ mod tests {
         let domain = DomainSnapshot {
             id: DomainId::new("coffee"),
             version: DomainVersion::new("1"),
-            units: BTreeMap::from([
+            units: unclip_domain::shared_map([
                 (
                     sensory.clone(),
                     Unit {
@@ -167,7 +168,7 @@ mod tests {
                     },
                 ),
             ]),
-            relations: BTreeMap::from([(
+            relations: unclip_domain::shared_map([(
                 RelationId::new("sensory-social"),
                 Relation {
                     id: RelationId::new("sensory-social"),

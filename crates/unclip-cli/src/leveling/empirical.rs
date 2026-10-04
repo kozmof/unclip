@@ -35,7 +35,7 @@ fn calculate(run: &EngineRunRecord, snapshot: &Snapshot) -> anyhow::Result<Vec<E
         &inputs,
         method,
         &run.id,
-        Timestamp::new(run.started_at.clone()),
+        &Timestamp::new(&run.started_at),
     )?)
 }
 
@@ -154,10 +154,9 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
         "empirical run is not completed: {}",
         run.id
     );
-    let snapshot: Snapshot = serde_json::from_value(
+    let snapshot: Snapshot = serde::Deserialize::deserialize(
         run.metadata
             .get("snapshot")
-            .cloned()
             .context("empirical run has no input snapshot")?,
     )?;
     let outputs = calculate(run, &snapshot)?;

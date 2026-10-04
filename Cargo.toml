@@ -30,6 +30,14 @@ repository = "https://github.com/kozmof/unclip"
 readme = "README.md"
 keywords = ["cli", "llm", "sampling", "sqlite"]
 
+# Clone hygiene, enforced in CI by `cargo clippy -- -D warnings`. Payloads in
+# this workspace are shared behind `Arc`, so a copy should be either a visible
+# refcount bump (`Arc::clone`) or a deliberate deep copy.
+[workspace.lints.clippy]
+redundant_clone = "warn"
+assigning_clones = "warn"
+clone_on_ref_ptr = "warn"
+
 [workspace.dependencies]
 # Internal crates. An explicit `version` (matching workspace.package.version)
 # keeps these path deps publishable to crates.io and avoids an implicit `*`

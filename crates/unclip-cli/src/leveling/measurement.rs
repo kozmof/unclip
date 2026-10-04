@@ -103,13 +103,14 @@ pub(crate) async fn measure(
         "engine profile must select at least one sensor"
     );
     let timestamp = unclip_store::now();
+    let shared_timestamp = unclip_epistemic::Timestamp::new(&timestamp);
     let run_id = super::run_id("measure", &timestamp);
     let profile_id = format!("{run_id}/profile");
     let run_record = unclip_engine::run_record(
         &plan,
         &parsed.params,
         &run_id,
-        unclip_epistemic::Timestamp::new(timestamp.clone()),
+        &shared_timestamp,
         serde_json::json!({
             "observations": observation_ids,
             "measurement_inputs": snapshot,
@@ -138,7 +139,7 @@ pub(crate) async fn measure(
             },
             unclip_engine::MeasurementRun {
                 id: &run_id,
-                timestamp: unclip_epistemic::Timestamp::new(timestamp.clone()),
+                timestamp: &shared_timestamp,
                 params: &parsed.params,
             },
         )?;
@@ -184,7 +185,7 @@ pub(crate) async fn measure(
                 engine_run_id: run_id.clone(),
                 sensor: measurement.sensor.clone(),
                 sensor_version: measurement.sensor_version.clone(),
-                params: params.clone(),
+                params: std::sync::Arc::clone(&params),
                 params_hash: unclip_epistemic::hash_params(&params),
                 status: "completed".into(),
                 started_at: timestamp.clone(),

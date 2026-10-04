@@ -37,7 +37,7 @@ fn compare(
         &Tracked::from_recorded(DerivedId::new("after"), after),
         MeasurementRun {
             id: "compare",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("compare.scalar-difference"), params.into())]),
         },
     )
@@ -118,7 +118,7 @@ fn mismatched_semantics_invalid_configuration_and_nonfinite_results_fail() {
     let mut version = before.clone();
     version.sensor_version = "2.0.0".parse().unwrap();
     let mut context = before.clone();
-    context.context.values.insert("unit".into(), json!("other"));
+    std::sync::Arc::make_mut(&mut context.context.values).insert("unit".into(), json!("other"));
     for after in [sensor, version, context] {
         assert!(compare(before.clone(), after, json!({})).is_err());
     }
@@ -153,7 +153,7 @@ fn explicit_selection_enforces_versions_and_records_comparator_configuration() {
         &plan,
         &BTreeMap::new(),
         "comparison",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
         json!({}),
     );
     assert_eq!(
@@ -209,7 +209,7 @@ fn compare_rank(
         &Tracked::from_recorded(DerivedId::new("after"), measurement(b)),
         MeasurementRun {
             id: "ranks",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new(id), params.into())]),
         },
     )
@@ -1076,7 +1076,7 @@ fn align_events(
         &Tracked::from_recorded(DerivedId::new("after"), after),
         MeasurementRun {
             id: "events",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("compare.change-point-alignment"),
                 params.into(),
@@ -1193,7 +1193,7 @@ fn event_empty_results_are_distinct_from_unmeasured_and_invalid_events_fail() {
     )
     .is_err());
     let mut missing = empty.clone();
-    missing.context.values.remove("sequence");
+    std::sync::Arc::make_mut(&mut missing.context.values).remove("sequence");
     assert!(align_events(missing.clone(), missing, json!({"max_shift_steps":0})).is_err());
     for params in [
         json!({}),

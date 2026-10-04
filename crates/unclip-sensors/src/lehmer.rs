@@ -114,12 +114,10 @@ impl Sensor for LehmerSensor {
                     reading,
                     confidence: None,
                     sample_count: Some(frame_units.len()),
-                    context: MeasurementContext {
-                        values: BTreeMap::from([(
-                            "observation".into(),
-                            serde_json::json!(ranking.observation.as_str()),
-                        )]),
-                    },
+                    context: MeasurementContext::new(BTreeMap::from([(
+                        "observation".into(),
+                        serde_json::json!(ranking.observation.as_str()),
+                    )])),
                 })
             })
             .collect())

@@ -17,3 +17,6 @@ thiserror.workspace = true
 unclip-epistemic.workspace = true
 unclip-measure.workspace = true
 unclip-observe.workspace = true
+
+[lints]
+workspace = true

@@ -122,12 +122,10 @@ impl Sensor for MultiObservationSensor {
             reading,
             confidence: None,
             sample_count: Some(states.len()),
-            context: MeasurementContext {
-                values: BTreeMap::from([(
-                    "observations".into(),
-                    serde_json::json!(states.iter().map(|(id, _)| id).collect::<Vec<_>>()),
-                )]),
-            },
+            context: MeasurementContext::new(BTreeMap::from([(
+                "observations".into(),
+                serde_json::json!(states.iter().map(|(id, _)| id).collect::<Vec<_>>()),
+            )])),
         })])
     }
 }

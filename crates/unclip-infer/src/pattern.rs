@@ -212,6 +212,7 @@ mod tests {
                 (UnitId::new("u3"), unit("u3")),
             ]
             .into_iter()
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
             relations: [(
                 RelationId::new("r1"),
@@ -224,6 +225,7 @@ mod tests {
                 },
             )]
             .into_iter()
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         };
         let params = SharedParams::new(serde_json::json!({"min_confidence": 0.7}));

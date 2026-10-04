@@ -2087,6 +2087,7 @@ async fn level_measure_derive_interpret_and_verify_workflow() {
                 )
             })
             .into_iter()
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
     };
     let frame = MeasurementFrame {

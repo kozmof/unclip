@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use unclip_epistemic::{InterpretationToken, Interpreted, ModelRef, PluginId};
 use unclip_measure::EmpiricalStructure;
 use unclip_plugin::{
@@ -49,7 +50,7 @@ pub struct LlmLabel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LabeledStructure {
-    pub structure: EmpiricalStructure,
+    pub structure: Arc<EmpiricalStructure>,
     pub interpretation: LlmLabel,
 }
 
@@ -67,6 +68,18 @@ impl Default for LlmLabelInterpreter {
             },
         }
     }
+}
+
+/// Strip surrounding whitespace without reallocating the string.
+fn trim_in_place(text: &mut String) {
+    text.truncate(text.trim_end().len());
+    let leading = text.len() - text.trim_start().len();
+    text.drain(..leading);
+}
+
+fn trimmed(mut text: String) -> String {
+    trim_in_place(&mut text);
+    text
 }
 
 fn parse_params(params: &Params) -> Result<InterpreterParams> {
@@ -122,21 +135,21 @@ impl Interpreter for LlmLabelInterpreter {
         } else {
             format!("{INSTRUCTIONS}\n\nAdditional context:\n{}", params.context)
         };
-        let structure = ctx.structure().clone();
+        let structure = ctx.structure_shared();
         let request = InterpretationRequest {
-            model: params.model.trim().to_owned(),
-            model_version: params.model_version.trim().to_owned(),
+            model: trimmed(params.model),
+            model_version: trimmed(params.model_version),
             instructions,
             structure,
             parameters: params.generation,
             response_schema: response_schema(),
         };
         let response = ctx.io().request(&request).await?;
-        let mut label: LlmLabel = serde_json::from_value(response).map_err(|error| {
+        let mut label = LlmLabel::deserialize(&*response).map_err(|error| {
             PluginError::Message(format!("invalid llm-label response: {error}"))
         })?;
-        label.label = label.label.trim().to_owned();
-        label.explanation = label.explanation.trim().to_owned();
+        trim_in_place(&mut label.label);
+        trim_in_place(&mut label.explanation);
         if label.label.is_empty() || label.explanation.is_empty() {
             return Err(PluginError::Message(
                 "llm-label response requires a non-empty label and explanation".into(),
@@ -163,12 +176,12 @@ mod tests {
     use super::*;
 
     struct FixtureIo {
-        response: Value,
+        response: Arc<Value>,
     }
 
     #[async_trait]
     impl InterpretationIo for FixtureIo {
-        async fn request(&self, request: &InterpretationRequest) -> Result<Value> {
+        async fn request(&self, request: &InterpretationRequest) -> Result<Arc<Value>> {
             assert_eq!(request.model, "fixture/model");
             assert_eq!(request.model_version, "v2");
             assert_eq!(request.structure.kind, "communities");
@@ -178,7 +191,7 @@ mod tests {
             assert!(request.instructions.contains("secondary annotation"));
             assert!(request.instructions.contains("coffee preferences"));
             assert_eq!(request.response_schema["additionalProperties"], false);
-            Ok(self.response.clone())
+            Ok(Arc::clone(&self.response))
         }
     }
 
@@ -225,10 +238,10 @@ mod tests {
         let output = invoke(
             &params,
             &FixtureIo {
-                response: json!({
+                response: Arc::new(json!({
                     "label": " shared ritual ",
                     "explanation": " recurring choices align around preparation "
-                }),
+                })),
             },
         )
         .await
@@ -246,7 +259,7 @@ mod tests {
             vec![DerivedId::new("structure/1")]
         );
         let value: LabeledStructure = serde_json::from_value(output.value().clone()).unwrap();
-        assert_eq!(value.structure, structure());
+        assert_eq!(*value.structure, structure());
         assert_eq!(value.interpretation.label, "shared ritual");
         assert_eq!(
             value.interpretation.explanation,
@@ -254,12 +267,12 @@ mod tests {
         );
     }
 
-    struct ResponseIo(Value);
+    struct ResponseIo(Arc<Value>);
 
     #[async_trait]
     impl InterpretationIo for ResponseIo {
-        async fn request(&self, _: &InterpretationRequest) -> Result<Value> {
-            Ok(self.0.clone())
+        async fn request(&self, _: &InterpretationRequest) -> Result<Arc<Value>> {
+            Ok(Arc::clone(&self.0))
         }
     }
 
@@ -267,7 +280,7 @@ mod tests {
 
     #[async_trait]
     impl InterpretationIo for UnexpectedIo {
-        async fn request(&self, _: &InterpretationRequest) -> Result<Value> {
+        async fn request(&self, _: &InterpretationRequest) -> Result<Arc<Value>> {
             panic!("invalid parameters must be rejected before model I/O")
         }
     }
@@ -289,6 +302,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn trims_in_place_across_multibyte_whitespace() {
+        for (input, expected) in [
+            ("  shared ritual \n", "shared ritual"),
+            ("\u{3000}名前\u{3000}", "名前"),
+            ("   ", ""),
+            ("", ""),
+        ] {
+            let mut text = input.to_owned();
+            trim_in_place(&mut text);
+            assert_eq!(text, expected);
+        }
+    }
+
     #[tokio::test]
     async fn rejects_unstructured_or_empty_model_output() {
         let params = SharedParams::new(json!({"model": "fixture/model", "model_version": "v2"}));
@@ -298,7 +325,9 @@ mod tests {
             json!({"label": "name", "explanation": ""}),
             json!({"label": "name", "explanation": "meaning", "structure": {"kind": "invented"}}),
         ] {
-            let error = invoke(&params, &ResponseIo(response)).await.unwrap_err();
+            let error = invoke(&params, &ResponseIo(Arc::new(response)))
+                .await
+                .unwrap_err();
             assert!(error.to_string().contains("llm-label response"));
         }
     }

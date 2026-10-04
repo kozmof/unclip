@@ -44,10 +44,9 @@ pub(crate) fn validate(proposal: &CandidateProposal) -> Result<()> {
         proposal
             .value
             .get(key)
-            .cloned()
             .ok_or_else(|| invalid(format!("motif candidate requires {key}")))
     };
-    let pattern: Pattern = serde_json::from_value(field("pattern")?).map_err(invalid)?;
+    let pattern: Pattern = Deserialize::deserialize(field("pattern")?).map_err(invalid)?;
     if pattern.matching != "exact_directed_two_edge_path"
         || pattern.nodes.len() != 3
         || pattern.edges.len() != 2
@@ -67,8 +66,8 @@ pub(crate) fn validate(proposal: &CandidateProposal) -> Result<()> {
         ));
     }
     let observations: Vec<String> =
-        serde_json::from_value(field("observations")?).map_err(invalid)?;
-    let count: usize = serde_json::from_value(field("observation_count")?).map_err(invalid)?;
+        Deserialize::deserialize(field("observations")?).map_err(invalid)?;
+    let count: usize = Deserialize::deserialize(field("observation_count")?).map_err(invalid)?;
     let unique = observations.iter().collect::<BTreeSet<_>>();
     if count < 2
         || count != observations.len()
@@ -79,7 +78,7 @@ pub(crate) fn validate(proposal: &CandidateProposal) -> Result<()> {
             "motif support requires at least two distinct nonempty observation identities",
         ));
     }
-    let examples: Vec<Example> = serde_json::from_value(field("examples")?).map_err(invalid)?;
+    let examples: Vec<Example> = Deserialize::deserialize(field("examples")?).map_err(invalid)?;
     let mut supported = BTreeSet::new();
     for example in &examples {
         if !unique.contains(&example.observation)

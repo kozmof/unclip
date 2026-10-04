@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::{
@@ -53,7 +54,8 @@ pub struct CrossDomainAxisMutualInformation {
     /// Interior equal-width boundaries; empty means the retained side is constant.
     pub left_boundaries: Vec<f64>,
     pub right_boundaries: Vec<f64>,
-    pub excluded_observations: Vec<ObservationId>,
+    /// Shared: cross-domain community detection reports this list verbatim.
+    pub excluded_observations: Arc<[ObservationId]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +65,7 @@ pub struct UnassessedCrossDomainAxis {
     pub right: UnitId,
     pub have: usize,
     pub need: usize,
-    pub excluded_observations: Vec<ObservationId>,
+    pub excluded_observations: Arc<[ObservationId]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,7 +232,7 @@ pub fn cross_domain_mutual_information_iter<'a>(
                 right: axis.right.clone(),
                 have: pairs.len(),
                 need: config.minimum_samples.get(),
-                excluded_observations,
+                excluded_observations: excluded_observations.into(),
             });
             continue;
         }
@@ -258,7 +260,7 @@ pub fn cross_domain_mutual_information_iter<'a>(
             sample_count: pairs.len(),
             left_boundaries,
             right_boundaries,
-            excluded_observations,
+            excluded_observations: excluded_observations.into(),
         });
     }
 
@@ -443,7 +445,7 @@ mod tests {
         assert_eq!(analysis.unassessed_axes[0].have, 1);
         assert_eq!(
             analysis.unassessed_axes[0].excluded_observations,
-            vec![ObservationId::new("b")]
+            vec![ObservationId::new("b")].into()
         );
     }
 

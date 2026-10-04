@@ -159,6 +159,7 @@ impl CandidateGenerator for PersistentResidualGenerator {
 
 /// Evidence must come from the explicitly selected baseline domain version.
 /// The harness supplies already-calculated residuals and their source observations.
+#[derive(Clone, Copy)]
 pub struct CandidateInputs<'a> {
     pub domain_version_id: &'a str,
     pub measurements: &'a [Tracked<Measurement>],

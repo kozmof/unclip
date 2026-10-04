@@ -50,7 +50,9 @@ fn domain(existing_role: bool) -> DomainSnapshot {
                 label: Some("prior interpretation is ignored".into()),
                 properties: BTreeMap::from([(
                     "role_pattern".into(),
-                    PropertyValue::Structured(proposal().value["pattern"].clone()),
+                    PropertyValue::Structured(std::sync::Arc::new(
+                        proposal().value["pattern"].clone(),
+                    )),
                 )]),
             },
         );
@@ -58,7 +60,7 @@ fn domain(existing_role: bool) -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units,
+        units: unclip_domain::shared_map(units),
         relations: [
             relation("in-a", "source", "a", "supports"),
             relation("in-b", "source", "b", "supports"),
@@ -67,6 +69,7 @@ fn domain(existing_role: bool) -> DomainSnapshot {
         ]
         .into_iter()
         .map(|relation| (relation.id.clone(), relation))
+        .map(|(id, value)| (id, std::sync::Arc::new(value)))
         .collect(),
     }
 }
@@ -123,7 +126,7 @@ fn evaluate_null(
         },
         MeasurementRun {
             id: "role-null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("null.existing-role"), params.into())]),
         },
     )?;
@@ -155,11 +158,11 @@ fn semantic_role_application_is_anonymous_exact_and_replayable() {
     assert_eq!(role.label, None);
     assert_eq!(
         role.properties["role_pattern"],
-        PropertyValue::Structured(proposal().value["pattern"].clone())
+        PropertyValue::Structured(std::sync::Arc::new(proposal().value["pattern"].clone()))
     );
     assert_eq!(
         role.properties["candidate_evidence"],
-        PropertyValue::Structured(Value::Object(proposal().value))
+        PropertyValue::Structured(std::sync::Arc::new(Value::Object(proposal().value)))
     );
     assert_eq!(
         result.provenance().inputs,

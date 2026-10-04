@@ -98,11 +98,10 @@ fn events(
     values: &[serde_json::Value],
 ) -> Result<(ObservationSequence, Vec<ChangePoint>)> {
     let context = &measurement.context.values;
-    let sequence: ObservationSequence = serde_json::from_value(
+    let sequence: ObservationSequence = Deserialize::deserialize(
         context
             .get("sequence")
-            .ok_or_else(|| invalid("change-point comparison requires explicit sequence"))?
-            .clone(),
+            .ok_or_else(|| invalid("change-point comparison requires explicit sequence"))?,
     )
     .map_err(invalid)?;
     if sequence

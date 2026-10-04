@@ -44,10 +44,9 @@ pub(crate) fn validate(
         proposal
             .value
             .get(key)
-            .cloned()
             .ok_or_else(|| invalid(format!("coupling candidate requires {key}")))
     };
-    let pattern: Pattern = serde_json::from_value(field("pattern")?).map_err(invalid)?;
+    let pattern: Pattern = Deserialize::deserialize(field("pattern")?).map_err(invalid)?;
     if pattern.matching != "thresholded_pairwise_association"
         || pattern.units.len() != 2
         || pattern.units[0] >= pattern.units[1]
@@ -60,8 +59,8 @@ pub(crate) fn validate(
             "pairwise coupling requires two ordered distinct existing baseline units",
         ));
     }
-    let evidence: Evidence = serde_json::from_value(field("evidence")?).map_err(invalid)?;
-    let selection: Selection = serde_json::from_value(field("selection")?).map_err(invalid)?;
+    let evidence: Evidence = Deserialize::deserialize(field("evidence")?).map_err(invalid)?;
+    let selection: Selection = Deserialize::deserialize(field("selection")?).map_err(invalid)?;
     if evidence.measurement.is_empty()
         || evidence.sensor.is_empty()
         || proposal.value.get("causal_claim") != Some(&serde_json::Value::Bool(false))
@@ -138,12 +137,12 @@ fn validate_temporal(proposal: &CandidateProposal, domain: &DomainSnapshot) -> R
         proposal
             .value
             .get(key)
-            .cloned()
             .ok_or_else(|| invalid(format!("temporal candidate requires {key}")))
     };
-    let pattern: TemporalPattern = serde_json::from_value(field("pattern")?).map_err(invalid)?;
-    let evidence: TemporalEvidence = serde_json::from_value(field("evidence")?).map_err(invalid)?;
-    let selection: Selection = serde_json::from_value(field("selection")?).map_err(invalid)?;
+    let pattern: TemporalPattern = Deserialize::deserialize(field("pattern")?).map_err(invalid)?;
+    let evidence: TemporalEvidence =
+        Deserialize::deserialize(field("evidence")?).map_err(invalid)?;
+    let selection: Selection = Deserialize::deserialize(field("selection")?).map_err(invalid)?;
     let context: TemporalContext =
         serde_json::from_value(serde_json::json!(evidence.context.values)).map_err(invalid)?;
     if pattern.matching != "lagged_directional_association"

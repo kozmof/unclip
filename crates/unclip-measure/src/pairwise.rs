@@ -22,7 +22,7 @@ pub enum PairwiseMetric {
 }
 
 /// Undefined correlation (constant ranks) is distinct from too few samples.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MatrixCell {
     Value { value: f64, sample_count: usize },
@@ -57,7 +57,7 @@ impl Serialize for PairwiseMatrix {
 #[serde(deny_unknown_fields)]
 struct MatrixData {
     metric: PairwiseMetric,
-    units: Vec<UnitId>,
+    units: Arc<[UnitId]>,
     cells: Vec<Vec<MatrixCell>>,
 }
 
@@ -107,6 +107,10 @@ impl PairwiseMatrix {
     }
     pub fn units(&self) -> &[UnitId] {
         &self.0.units
+    }
+    /// The unit axis as a shared handle, for a result that reports it.
+    pub fn units_shared(&self) -> Arc<[UnitId]> {
+        Arc::clone(&self.0.units)
     }
     pub fn cells(&self) -> &[Vec<MatrixCell>] {
         &self.0.cells
@@ -189,7 +193,7 @@ pub fn pairwise_matrix(
                     }
                 })
             };
-            cells[i][j] = cell.clone();
+            cells[i][j] = cell;
             cells[j][i] = cell;
         }
     }

@@ -97,9 +97,10 @@ impl ResidualSensor {
             reading,
             confidence: None,
             sample_count: Some(observed),
-            context: MeasurementContext {
-                values: BTreeMap::from([("residual_kind".into(), serde_json::json!(kind))]),
-            },
+            context: MeasurementContext::new(BTreeMap::from([(
+                "residual_kind".into(),
+                serde_json::json!(kind),
+            )])),
         }
     }
 }

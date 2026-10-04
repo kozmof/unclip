@@ -117,15 +117,13 @@ impl Sensor for RboSensor {
                     reading,
                     confidence: None,
                     sample_count: Some(known),
-                    context: MeasurementContext {
-                        values: BTreeMap::from([
-                            (
-                                "observation".into(),
-                                serde_json::json!(ranking.observation.as_str()),
-                            ),
-                            ("p".into(), serde_json::json!(p)),
-                        ]),
-                    },
+                    context: MeasurementContext::new(BTreeMap::from([
+                        (
+                            "observation".into(),
+                            serde_json::json!(ranking.observation.as_str()),
+                        ),
+                        ("p".into(), serde_json::json!(p)),
+                    ])),
                 })
             })
             .collect())

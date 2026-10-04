@@ -80,7 +80,7 @@ fn calculate(
         },
         unclip_engine::MeasurementRun {
             id: &run.id,
-            timestamp: Timestamp::new(run.started_at.clone()),
+            timestamp: &Timestamp::new(&run.started_at),
             params: &params,
         },
     )?)
@@ -201,7 +201,7 @@ pub(crate) async fn discover(
         },
         unclip_engine::MeasurementRun {
             id: &run_id,
-            timestamp: Timestamp::new(timestamp.clone()),
+            timestamp: &Timestamp::new(&timestamp),
             params: &parsed.params,
         },
     )?;
@@ -209,7 +209,7 @@ pub(crate) async fn discover(
         &plan,
         &parsed.params,
         &run_id,
-        Timestamp::new(timestamp),
+        &Timestamp::new(timestamp),
         serde_json::json!({"stage":"discovery","snapshot":snapshot,"outputs":outputs.iter().map(|c| c.id()).collect::<Vec<_>>()}),
     );
     repos.engine_runs.insert_run(record).await?;
@@ -248,10 +248,9 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
     // One typed read replaces five field lookups: the snapshot's shape is
     // stated once, by the struct `discover` wrote, and a snapshot missing or
     // misnaming any part of it fails here with serde saying which.
-    let snapshot: DiscoverySnapshot = serde_json::from_value(
+    let snapshot: DiscoverySnapshot = serde::Deserialize::deserialize(
         run.metadata
             .get("snapshot")
-            .cloned()
             .context("discovery run has no input snapshot")?,
     )
     .context("discovery run snapshot does not match the recorded evidence shape")?;
@@ -262,10 +261,9 @@ pub(crate) async fn verify(repos: &crate::db::Repos, run: &EngineRunRecord) -> a
         snapshot.observations,
         snapshot.structures,
     )?;
-    let manifest: Vec<DerivedId> = serde_json::from_value(
+    let manifest: Vec<DerivedId> = serde::Deserialize::deserialize(
         run.metadata
             .get("outputs")
-            .cloned()
             .context("discovery run has no output manifest")?,
     )?;
     ensure!(

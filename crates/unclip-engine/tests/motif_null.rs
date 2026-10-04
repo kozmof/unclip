@@ -65,7 +65,9 @@ fn domain(existing: bool) -> DomainSnapshot {
                 label: Some("prior interpretation".into()),
                 properties: BTreeMap::from([(
                     "graph_pattern".into(),
-                    PropertyValue::Structured(proposal().value["pattern"].clone()),
+                    PropertyValue::Structured(std::sync::Arc::new(
+                        proposal().value["pattern"].clone(),
+                    )),
                 )]),
             },
         );
@@ -78,14 +80,14 @@ fn domain(existing: bool) -> DomainSnapshot {
             label: None,
             properties: BTreeMap::from([(
                 "graph_pattern".into(),
-                PropertyValue::Structured(json!({"matching": "different"})),
+                PropertyValue::Structured(std::sync::Arc::new(json!({"matching": "different"}))),
             )]),
         },
     );
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units,
+        units: unclip_domain::shared_map(units),
         relations: BTreeMap::new(),
     }
 }
@@ -112,7 +114,7 @@ fn evaluate(
         },
         MeasurementRun {
             id: "null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("null.existing-motif"), params.into())]),
         },
     )?;

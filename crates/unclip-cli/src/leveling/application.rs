@@ -145,13 +145,12 @@ pub(crate) async fn run(
             == Some(candidate.proposal.domain_version_id.as_str()),
         "tested counterfactual uses a different baseline domain version"
     );
-    let bindings: Option<RelationBindings> = serde_json::from_value(
+    let bindings: Option<RelationBindings> = serde::Deserialize::deserialize(
         tested_application
             .provenance
             .params
             .get("relation_bindings")
-            .context("tested counterfactual has no relation-binding parameter")?
-            .clone(),
+            .context("tested counterfactual has no relation-binding parameter")?,
     )
     .context("tested counterfactual has invalid relation bindings")?;
 
@@ -192,7 +191,7 @@ pub(crate) async fn run(
         &tracked_candidate,
         bindings.as_ref(),
         revision_id.as_str(),
-        Timestamp::new(timestamp.clone()),
+        Timestamp::new(&timestamp),
     )?;
     checked_application_parameter(
         &tested_application.provenance,

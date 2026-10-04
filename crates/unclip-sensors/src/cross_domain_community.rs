@@ -164,7 +164,7 @@ impl ProductSensor for CrossDomainCommunitySensor {
             reading,
             confidence: None,
             sample_count,
-            context: MeasurementContext { values: context },
+            context: MeasurementContext::new(context),
         }))
     }
 }

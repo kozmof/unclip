@@ -116,7 +116,7 @@ pub fn compare_profiles(
             after[&pair.after],
             crate::MeasurementRun {
                 id: &id,
-                timestamp: run.timestamp.clone(),
+                timestamp: run.timestamp,
                 params: run.params,
             },
         )?;
@@ -149,7 +149,7 @@ pub fn compare_profiles(
             unclip_epistemic::PluginId::new("compare.profile"),
             semver::Version::new(0, 1, 0),
             params,
-            run.timestamp,
+            run.timestamp.clone(),
         )
         .with_algorithm("explicit_profile_comparison"),
         dependencies,

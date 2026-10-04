@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -37,7 +38,7 @@ pub struct UnassessedCrossDomainInteraction {
     pub right: UnitId,
     pub have: usize,
     pub need: usize,
-    pub excluded_observations: Vec<unclip_observe::ObservationId>,
+    pub excluded_observations: Arc<[unclip_observe::ObservationId]>,
 }
 
 /// Bipartite connected components without semantic labels.
@@ -115,7 +116,7 @@ pub fn detect_cross_domain_communities(
                 right: axis.right.clone(),
                 have: axis.sample_count,
                 need: config.minimum_samples.get(),
-                excluded_observations: axis.excluded_observations.clone(),
+                excluded_observations: Arc::clone(&axis.excluded_observations),
             });
         }
     }
@@ -194,7 +195,7 @@ fn unassessed_axis(
         right: axis.right.clone(),
         have: axis.have,
         need,
-        excluded_observations: axis.excluded_observations.clone(),
+        excluded_observations: Arc::clone(&axis.excluded_observations),
     }
 }
 

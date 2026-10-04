@@ -149,18 +149,21 @@ pub fn observation_split_run_record(
     if split.id().as_str() != format!("{}/observation-split", run.id) {
         return Err(invalid("observation split belongs to a different run"));
     }
+    let mut record_metadata = serde_json::json!({
+        "observation_split": {
+            "id": split.id(),
+            "provenance": split.provenance(),
+            "value": split.value(),
+        },
+    });
+    // Moved in rather than listed in `json!`, which would serialize a copy of
+    // the caller's tree through a reference.
+    record_metadata["request"] = metadata;
     Ok(run_record(
         plan,
         run.params,
         run.id,
         run.timestamp,
-        serde_json::json!({
-            "request": metadata,
-            "observation_split": {
-                "id": split.id(),
-                "provenance": split.provenance(),
-                "value": split.value(),
-            },
-        }),
+        record_metadata,
     ))
 }

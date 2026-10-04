@@ -79,7 +79,7 @@ async fn explicit_splits_replay_from_persisted_run_with_shared_batch_provenance(
         &selected,
         MeasurementRun {
             id: "run",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &params,
         },
         json!({"purpose":"experiment"}),
@@ -103,7 +103,7 @@ async fn explicit_splits_replay_from_persisted_run_with_shared_batch_provenance(
         &selected,
         MeasurementRun {
             id: "different",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &params
         },
         json!({})

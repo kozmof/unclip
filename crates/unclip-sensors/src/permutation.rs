@@ -91,12 +91,10 @@ impl Sensor for PermutationSensor {
                             },
                             confidence: None,
                             sample_count: Some(sample_count),
-                            context: MeasurementContext {
-                                values: BTreeMap::from([(
-                                    "observation".into(),
-                                    serde_json::json!(ranking.observation.as_str()),
-                                )]),
-                            },
+                            context: MeasurementContext::new(BTreeMap::from([(
+                                "observation".into(),
+                                serde_json::json!(ranking.observation.as_str()),
+                            )])),
                         }
                     }
                     None => Measurement {
@@ -105,12 +103,10 @@ impl Sensor for PermutationSensor {
                         reading: Reading::InsufficientEvidence { have: 0, need: 1 },
                         confidence: None,
                         sample_count: Some(0),
-                        context: MeasurementContext {
-                            values: BTreeMap::from([(
-                                "observation".into(),
-                                serde_json::json!(ranking.observation.as_str()),
-                            )]),
-                        },
+                        context: MeasurementContext::new(BTreeMap::from([(
+                            "observation".into(),
+                            serde_json::json!(ranking.observation.as_str()),
+                        )])),
                     },
                 };
                 token.emit(measurement)

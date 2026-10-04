@@ -179,7 +179,7 @@ mod tests {
             metric: unclip_measure::PairwiseMetric::Spearman,
             eigenpairs: Vec::new(),
             minimum_cell_samples: 2,
-            units: Vec::new(),
+            units: Vec::new().into(),
             sweeps: 0,
             tolerance: 0.5,
         };

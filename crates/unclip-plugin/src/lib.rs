@@ -825,6 +825,7 @@ pub struct CrossProductMeasureCtx<'a> {
 /// used to take these six references positionally, where each source parameter
 /// had the same type as its target counterpart, so transposing a pair compiled
 /// and produced a context that read as the opposite direction throughout.
+#[derive(Clone, Copy)]
 pub struct CrossProductSide<'a> {
     pub product: &'a Tracked<ProductDomainSnapshot>,
     pub frame: &'a Tracked<ProductMeasurementFrame>,
@@ -949,7 +950,8 @@ pub struct InterpretationRequest {
     pub model: String,
     pub model_version: String,
     pub instructions: String,
-    pub structure: EmpiricalStructure,
+    /// Shared with the tracked input it was read from, not copied out of it.
+    pub structure: Arc<EmpiricalStructure>,
     pub parameters: Params,
     pub response_schema: Params,
 }
@@ -960,9 +962,12 @@ pub struct InterpretationRequest {
 /// separate from [`Inferrer`]: the nondeterministic call is isolated so the
 /// surrounding logic can be tested against a recorded response. The CLI treats
 /// that recorded response file as the reproducible boundary to the provider.
+///
+/// The response is returned shared so a recorded response can be handed out
+/// without copying it; a live provider wraps the tree it parsed.
 #[async_trait]
 pub trait InterpretationIo: Send + Sync {
-    async fn request(&self, request: &InterpretationRequest) -> Result<serde_json::Value>;
+    async fn request(&self, request: &InterpretationRequest) -> Result<Arc<serde_json::Value>>;
 }
 
 /// Capability-scoped access to one tracked empirical structure and model I/O.
@@ -993,6 +998,12 @@ impl<'a> InterpretCtx<'a> {
 
     pub fn structure(&self) -> &EmpiricalStructure {
         self.dependencies.read(self.structure)
+    }
+
+    /// The same structure as a shared handle, for a caller that must keep it
+    /// past this borrow without copying its JSON tree.
+    pub fn structure_shared(&self) -> Arc<EmpiricalStructure> {
+        self.dependencies.read_shared(self.structure)
     }
 
     pub fn params(&self) -> &Params {
@@ -1345,7 +1356,7 @@ fn resolve_ids<T: ?Sized + Described>(
                     actual: actual.clone(),
                 });
             }
-            Ok(plugin.clone())
+            Ok(Arc::clone(plugin))
         })
         .collect()
 }

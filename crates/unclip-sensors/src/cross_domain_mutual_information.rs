@@ -160,7 +160,7 @@ impl ProductSensor for CrossDomainMutualInformationSensor {
             reading,
             confidence: None,
             sample_count,
-            context: MeasurementContext { values: context },
+            context: MeasurementContext::new(context),
         }))
     }
 }

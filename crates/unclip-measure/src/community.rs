@@ -86,7 +86,7 @@ pub fn detect_communities(
                     result.unassessed.push(UnassessedPair {
                         left: units[left].clone(),
                         right: units[right].clone(),
-                        evidence: cell.clone(),
+                        evidence: *cell,
                     });
                     continue;
                 }

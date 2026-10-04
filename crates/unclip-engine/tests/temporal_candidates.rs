@@ -7,7 +7,7 @@ use unclip_measure::{Measurement, MeasurementContext, MeasurementValue, Reading}
 use unclip_plugin::{EngineProfile, PluginSelection};
 
 fn measurement(coefficient: f64) -> Measurement {
-    Measurement {sensor:PluginId::new("sensor.lagged-dependency"),sensor_version:"0.1.0".parse().unwrap(),reading:Reading::Value {value:MeasurementValue::Scalar(coefficient)},confidence:None,sample_count:Some(3),context:MeasurementContext {values:serde_json::from_value(json!({"source":"a","target":"b","lag_steps":1,"sequence":[{"observation":"z","position":0},{"observation":"a","position":10},{"observation":"m","position":30},{"observation":"b","position":40}],"evidence":"directional association, not causality"})).unwrap()}}
+    Measurement {sensor:PluginId::new("sensor.lagged-dependency"),sensor_version:"0.1.0".parse().unwrap(),reading:Reading::Value {value:MeasurementValue::Scalar(coefficient)},confidence:None,sample_count:Some(3),context:MeasurementContext::new(serde_json::from_value(json!({"source":"a","target":"b","lag_steps":1,"sequence":[{"observation":"z","position":0},{"observation":"a","position":10},{"observation":"m","position":30},{"observation":"b","position":40}],"evidence":"directional association, not causality"})).unwrap())}
 }
 fn generate(
     inputs: &[Tracked<Measurement>],
@@ -30,7 +30,7 @@ fn generate(
         },
         MeasurementRun {
             id: "discovery",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("generate.temporal-coupling"), params.into())]),
         },
     )
@@ -45,8 +45,8 @@ fn params(threshold: f64) -> Value {
 fn preserves_direction_lag_order_and_independent_profiles_without_causal_claims() {
     let forward = measurement(0.9);
     let mut reverse = measurement(0.8);
-    reverse.context.values.insert("source".into(), json!("b"));
-    reverse.context.values.insert("target".into(), json!("a"));
+    std::sync::Arc::make_mut(&mut reverse.context.values).insert("source".into(), json!("b"));
+    std::sync::Arc::make_mut(&mut reverse.context.values).insert("target".into(), json!("a"));
     let mut inputs = vec![input("reverse", reverse), input("forward", forward.clone())];
     let candidates = generate(&inputs, params(0.7)).unwrap();
     assert_eq!(candidates.len(), 2);
@@ -100,7 +100,7 @@ fn signed_thresholds_and_sample_floors_keep_zero_and_sparse_evidence_distinct() 
     ] {
         let mut value = measurement(0.9);
         value.reading = reading;
-        value.context.values.clear();
+        std::sync::Arc::make_mut(&mut value.context.values).clear();
         assert!(generate(&[input("sparse", value)], params(0.8))
             .unwrap()
             .is_empty());
@@ -117,18 +117,28 @@ fn malformed_temporal_evidence_is_rejected_even_below_selection_threshold() {
         let mut value = measurement(0.0);
         match change {
             0 => {
-                value.context.values.remove("sequence");
+                std::sync::Arc::make_mut(&mut value.context.values).remove("sequence");
             }
             1 => {
-                value.context.values.insert("lag_steps".into(), json!(0));
+                std::sync::Arc::make_mut(&mut value.context.values)
+                    .insert("lag_steps".into(), json!(0));
             }
-            2 => value.context.values.get_mut("sequence").unwrap()[1]["observation"] = json!("z"),
-            3 => value.context.values.get_mut("sequence").unwrap()[1]["position"] = json!(0),
+            2 => {
+                std::sync::Arc::make_mut(&mut value.context.values)
+                    .get_mut("sequence")
+                    .unwrap()[1]["observation"] = json!("z")
+            }
+            3 => {
+                std::sync::Arc::make_mut(&mut value.context.values)
+                    .get_mut("sequence")
+                    .unwrap()[1]["position"] = json!(0)
+            }
             4 => value.sample_count = None,
             5 => value.sample_count = Some(4),
             6 => value.sample_count = Some(1),
             7 => {
-                value.context.values.insert("source".into(), json!(""));
+                std::sync::Arc::make_mut(&mut value.context.values)
+                    .insert("source".into(), json!(""));
             }
             8 => {
                 value.reading = Reading::Value {

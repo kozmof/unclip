@@ -185,7 +185,7 @@ fn stored_plans_pin_discovery_versions_parameters_and_hashes_in_canonical_order(
         &plan,
         &params,
         "discovery",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
         serde_json::json!({}),
     );
     assert_eq!(
@@ -216,7 +216,7 @@ fn stored_plans_pin_discovery_versions_parameters_and_hashes_in_canonical_order(
         &engine.plan(&reverse).unwrap(),
         &params,
         "discovery",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
         serde_json::json!({}),
     );
     assert_eq!(record, replay);

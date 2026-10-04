@@ -20,7 +20,7 @@ fn snapshot() -> DomainSnapshot {
     source_properties.insert("note".into(), PropertyValue::Text("stable".into()));
     source_properties.insert(
         "metadata".into(),
-        PropertyValue::Structured(json!({"tags": ["a", "b"]})),
+        PropertyValue::Structured(std::sync::Arc::new(json!({"tags": ["a", "b"]}))),
     );
 
     let units = [
@@ -44,6 +44,7 @@ fn snapshot() -> DomainSnapshot {
         ),
     ]
     .into_iter()
+    .map(|(id, value)| (id, std::sync::Arc::new(value)))
     .collect();
 
     let relation_id = RelationId::new("connects");
@@ -60,6 +61,7 @@ fn snapshot() -> DomainSnapshot {
         },
     )]
     .into_iter()
+    .map(|(id, value)| (id, std::sync::Arc::new(value)))
     .collect();
 
     DomainSnapshot {
@@ -111,6 +113,7 @@ async fn invalid_property_rolls_back_the_whole_version() {
     invalid
         .units
         .get_mut(&UnitId::new("source"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties
         .insert("invalid".into(), PropertyValue::Number(f64::NAN));
@@ -182,6 +185,7 @@ async fn structured_rows_holding_scalars_hydrate_in_canonical_form() {
     let properties = &mut domain
         .units
         .get_mut(&UnitId::new("source"))
+        .map(std::sync::Arc::make_mut)
         .unwrap()
         .properties;
     // `PropertyValue::structured` is canonicalizing, so these are stored under
@@ -217,7 +221,9 @@ async fn structured_rows_holding_scalars_hydrate_in_canonical_form() {
     );
     assert_eq!(
         loaded_properties.get("composite"),
-        Some(&PropertyValue::Structured(json!({"k": [1, 2]})))
+        Some(&PropertyValue::Structured(std::sync::Arc::new(
+            json!({"k": [1, 2]})
+        )))
     );
 
     // Each round-trips through the wire form to the same value it came back as,

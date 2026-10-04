@@ -47,14 +47,14 @@ fn distinct_profiles_keep_disagreement_and_replay_exactly() {
             &[input("profile-b/m", -1.0), input("profile-a/m", 1.0)],
             method,
             "g",
-            Timestamp::new("now"),
+            &Timestamp::new("now"),
         )
         .unwrap();
         let replay = derive_empirical(
             &[input("profile-a/m", 1.0), input("profile-b/m", -1.0)],
             method,
             "g",
-            Timestamp::new("now"),
+            &Timestamp::new("now"),
         )
         .unwrap();
         assert_eq!(first.len(), 2);
@@ -86,12 +86,12 @@ fn distinct_profiles_keep_disagreement_and_replay_exactly() {
 #[test]
 fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
     let method = methods()[0];
-    assert!(derive_empirical(&[], method, "g", Timestamp::new("now")).is_err());
+    assert!(derive_empirical(&[], method, "g", &Timestamp::new("now")).is_err());
     assert!(derive_empirical(
         &[input("a", 1.0), input("a", -1.0)],
         method,
         "g",
-        Timestamp::new("now")
+        &Timestamp::new("now")
     )
     .is_err());
     for method in [
@@ -105,7 +105,7 @@ fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
             max_sweeps: NonZeroUsize::new(1).unwrap(),
         },
     ] {
-        assert!(derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now")).is_err());
+        assert!(derive_empirical(&[input("a", 1.0)], method, "g", &Timestamp::new("now")).is_err());
     }
     let collector = unclip_epistemic::DependencyCollector::default();
     let source = input("a", 1.0);
@@ -117,7 +117,7 @@ fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
             std::slice::from_ref(&sparse),
             method,
             "g",
-            Timestamp::new("now")
+            &Timestamp::new("now")
         )
         .unwrap()[0]
             .structure
@@ -133,7 +133,7 @@ fn invalid_selection_and_parameters_fail_without_fabricating_structures() {
         )],
         method,
         "g",
-        Timestamp::new("now")
+        &Timestamp::new("now")
     )
     .is_err());
 }
@@ -152,7 +152,7 @@ fn matrix_sample_floor_is_not_a_measured_empty_structure() {
         },
     ] {
         let result =
-            derive_empirical(&[input("a", 1.0)], method, "g", Timestamp::new("now")).unwrap();
+            derive_empirical(&[input("a", 1.0)], method, "g", &Timestamp::new("now")).unwrap();
         assert_eq!(result[0].measurement, DerivedId::new("a"));
         assert!(result[0].structure.is_none());
     }
@@ -160,7 +160,7 @@ fn matrix_sample_floor_is_not_a_measured_empty_structure() {
         &[input("a", -1.0)],
         methods()[0],
         "g",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
     )
     .unwrap();
     assert!(measured[0].structure.is_some());
@@ -190,7 +190,7 @@ fn interpreted_measurements_cannot_be_reused_as_empirical_evidence() {
         &[Tracked::from(&interpreted)],
         methods()[0],
         "run",
-        Timestamp::new("now"),
+        &Timestamp::new("now"),
     )
     .unwrap_err();
     assert!(error.to_string().contains("must be calculated evidence"));

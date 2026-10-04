@@ -269,7 +269,7 @@ impl Sensor for SelectedPairSensor {
             reading,
             confidence: None,
             sample_count: Some(if missing_condition { 0 } else { sample_count }),
-            context: MeasurementContext { values: context },
+            context: MeasurementContext::new(context),
         })])
     }
 }

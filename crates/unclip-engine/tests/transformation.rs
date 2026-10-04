@@ -40,7 +40,9 @@ fn domain(existing_transformation: bool) -> DomainSnapshot {
                 label: Some("prior interpretation is ignored".into()),
                 properties: BTreeMap::from([(
                     "transformation_pattern".into(),
-                    PropertyValue::Structured(proposal().value["pattern"].clone()),
+                    PropertyValue::Structured(std::sync::Arc::new(
+                        proposal().value["pattern"].clone(),
+                    )),
                 )]),
             },
         );
@@ -48,7 +50,7 @@ fn domain(existing_transformation: bool) -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units,
+        units: unclip_domain::shared_map(units),
         relations: BTreeMap::new(),
     }
 }
@@ -107,7 +109,7 @@ fn evaluate_null(
         },
         MeasurementRun {
             id: "transformation-null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("null.existing-transformation"),
                 params.into(),
@@ -144,15 +146,15 @@ fn transformation_application_is_anonymous_directional_and_replayable() {
     assert_eq!(transformation.label, None);
     assert_eq!(
         transformation.properties["transformation_pattern"],
-        PropertyValue::Structured(proposal().value["pattern"].clone())
+        PropertyValue::Structured(std::sync::Arc::new(proposal().value["pattern"].clone()))
     );
     assert_eq!(
         transformation.properties["before_units"],
-        PropertyValue::Structured(json!(["a", "b"]))
+        PropertyValue::Structured(std::sync::Arc::new(json!(["a", "b"])))
     );
     assert_eq!(
         transformation.properties["after_units"],
-        PropertyValue::Structured(json!(["b", "c"]))
+        PropertyValue::Structured(std::sync::Arc::new(json!(["b", "c"])))
     );
     assert_eq!(
         transformation.properties["causal_claim"],
@@ -160,7 +162,7 @@ fn transformation_application_is_anonymous_directional_and_replayable() {
     );
     assert_eq!(
         transformation.properties["candidate_evidence"],
-        PropertyValue::Structured(Value::Object(proposal().value))
+        PropertyValue::Structured(std::sync::Arc::new(Value::Object(proposal().value)))
     );
     assert_eq!(
         result.provenance().inputs,

@@ -162,15 +162,13 @@ fn conditional_requirements_validate_context_counts_and_retained_readings() {
         },
         confidence: None,
         sample_count: samples,
-        context: MeasurementContext {
-            values: BTreeMap::from([
-                ("pair".into(), serde_json::json!(["a", "b"])),
-                (
-                    "conditioning_variables".into(),
-                    serde_json::json!([condition]),
-                ),
-            ]),
-        },
+        context: MeasurementContext::new(BTreeMap::from([
+            ("pair".into(), serde_json::json!(["a", "b"])),
+            (
+                "conditioning_variables".into(),
+                serde_json::json!([condition]),
+            ),
+        ])),
     };
     let assess = |value: Measurement, constraint: &ExperimentConstraint| {
         assess_experiment_constraints(
@@ -240,12 +238,10 @@ fn scalar_transfer_requires_disjoint_comparable_evidence_and_preserves_failures(
                 },
                 confidence: None,
                 sample_count: samples,
-                context: MeasurementContext {
-                    values: BTreeMap::from([
-                        ("observations".into(), serde_json::json!(observations)),
-                        ("pair".into(), serde_json::json!(["a", "b"])),
-                    ]),
-                },
+                context: MeasurementContext::new(BTreeMap::from([
+                    ("observations".into(), serde_json::json!(observations)),
+                    ("pair".into(), serde_json::json!(["a", "b"])),
+                ])),
             },
         )
     };

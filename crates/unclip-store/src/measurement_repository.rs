@@ -609,14 +609,14 @@ mod tests {
     /// becomes unreadable. This pins them to one another.
     #[test]
     fn the_borrowed_context_writes_what_the_owned_one_reads() {
-        let values = MeasurementContext {
-            values: [
+        let values = MeasurementContext::new(
+            [
                 ("axis".to_owned(), serde_json::json!("a")),
                 ("samples".to_owned(), serde_json::json!(3)),
             ]
             .into_iter()
             .collect(),
-        };
+        );
         for sparse_reading in [
             None,
             Some(Reading::InsufficientEvidence { have: 1, need: 4 }),

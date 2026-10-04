@@ -95,7 +95,7 @@ impl ExactPatternNull {
                         .properties
                         .get(self.property)
                         .and_then(|value| match value {
-                            unclip_domain::PropertyValue::Structured(value) => Some(value),
+                            unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                             _ => None,
                         })
                         == Some(pattern)

@@ -1,7 +1,7 @@
 //! Temporary candidate application; no repository writes or domain promotion.
 use crate::support::invalid;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use unclip_domain::{
     CandidateKind, CandidateProposal, DomainSnapshot, PropertyValue, Relation, RelationId, Unit,
     UnitId, UnitKind,
@@ -120,6 +120,69 @@ fn required_field<T: serde::de::DeserializeOwned>(
     let value = proposal.get(field).ok_or_else(|| invalid(missing))?;
     serde::Deserialize::deserialize(value).map_err(invalid)
 }
+/// What every applied unit or relation records about the candidate behind it.
+struct CandidateRecord<'a> {
+    candidate: &'a DerivedId,
+    pattern: PropertyValue,
+    evidence: PropertyValue,
+}
+
+impl CandidateRecord<'_> {
+    /// The recorded identity, pattern and evidence, followed by `extra`.
+    ///
+    /// Cloning `pattern` and `evidence` shares their JSON trees.
+    fn properties<const N: usize>(
+        &self,
+        extra: [(&str, PropertyValue); N],
+    ) -> BTreeMap<String, PropertyValue> {
+        let mut properties = BTreeMap::from([
+            (
+                "candidate_id".into(),
+                PropertyValue::Text(self.candidate.to_string()),
+            ),
+            ("candidate_pattern".into(), self.pattern.clone()),
+            ("candidate_evidence".into(), self.evidence.clone()),
+        ]);
+        properties.extend(extra.map(|(name, value)| (name.to_owned(), value)));
+        properties
+    }
+
+    /// Add the candidate's unit, carrying these properties, to the
+    /// counterfactual, refusing an identity the baseline already uses.
+    fn add_unit<const N: usize>(
+        &self,
+        baseline: &DomainSnapshot,
+        temporary: &mut DomainSnapshot,
+        added: &mut Vec<UnitId>,
+        kind: UnitKind,
+        extra: [(&str, PropertyValue); N],
+        collision: &str,
+    ) -> Result<()> {
+        let id = UnitId::new(format!("candidate:{}", self.candidate));
+        if baseline.units.contains_key(&id) {
+            return Err(invalid(collision));
+        }
+        temporary.units.insert(
+            id.clone(),
+            Arc::new(Unit {
+                id: id.clone(),
+                kind,
+                label: None,
+                properties: self.properties(extra),
+            }),
+        );
+        added.push(id);
+        Ok(())
+    }
+}
+
+/// A typed value recorded as a structured property.
+fn structured(value: &impl Serialize) -> Result<PropertyValue> {
+    Ok(PropertyValue::structured(
+        serde_json::to_value(value).map_err(invalid)?,
+    ))
+}
+
 impl crate::Engine {
     /// Apply a supported proposal to a clone. The caller supplies a unique run ID.
     /// This prepares a counterfactual; it does not accept or persist the candidate.
@@ -207,6 +270,8 @@ impl crate::Engine {
                 "temporary domain version must differ from baseline",
             ));
         }
+        // Units and relations are shared, so this copies one handle per entry;
+        // only an entry the candidate changes is copied, by `Arc::make_mut`.
         let mut temporary = domain.clone();
         temporary.version = version.clone();
         if bindings.is_some() && proposal.kind != CandidateKind::Relation {
@@ -217,45 +282,25 @@ impl crate::Engine {
         let mut added_units = Vec::new();
         let mut added_relations = Vec::new();
         let mut property_changes = Vec::new();
+        // Every applied unit or relation records the pattern and the whole
+        // proposal. Each is converted once here; a structured property is a
+        // shared tree, so the arms below alias these rather than copy them —
+        // including the arms that record the pattern under a second name.
+        let recorded = CandidateRecord {
+            candidate: candidate.id(),
+            pattern: PropertyValue::structured(pattern_value.clone()),
+            evidence: PropertyValue::structured(serde_json::Value::Object(proposal.value.clone())),
+        };
         if proposal.kind == CandidateKind::CrossDomainStructure {
             let product_binding = crate::discovery::cross_domain::validate_candidate(proposal)?;
-            let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-            if domain.units.contains_key(&unit_id) {
-                return Err(invalid(
-                    "candidate unit identity already exists in the baseline",
-                ));
-            }
-            temporary.units.insert(
-                unit_id.clone(),
-                Unit {
-                    id: unit_id.clone(),
-                    kind: UnitKind::CrossDomainStructure,
-                    label: None,
-                    properties: BTreeMap::from([
-                        (
-                            "candidate_id".into(),
-                            PropertyValue::Text(candidate.id().to_string()),
-                        ),
-                        (
-                            "candidate_pattern".into(),
-                            PropertyValue::structured(pattern_value.clone()),
-                        ),
-                        (
-                            "candidate_evidence".into(),
-                            PropertyValue::structured(serde_json::Value::Object(
-                                proposal.value.clone(),
-                            )),
-                        ),
-                        (
-                            "product_binding".into(),
-                            PropertyValue::structured(
-                                serde_json::to_value(product_binding).map_err(invalid)?,
-                            ),
-                        ),
-                    ]),
-                },
-            );
-            added_units.push(unit_id);
+            recorded.add_unit(
+                domain,
+                &mut temporary,
+                &mut added_units,
+                UnitKind::CrossDomainStructure,
+                [("product_binding", structured(&product_binding)?)],
+                "candidate unit identity already exists in the baseline",
+            )?;
         }
         match proposal.kind {
             CandidateKind::AtomicMeaning => {
@@ -268,37 +313,14 @@ impl crate::Engine {
                         "atomic application requires a nonempty exact observed-label pattern",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in the baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::AtomicMeaning,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::AtomicMeaning,
+                    [],
+                    "candidate unit identity already exists in the baseline",
+                )?;
             }
             CandidateKind::CompositeMeaning => {
                 let pattern: CommunityPattern =
@@ -342,43 +364,14 @@ impl crate::Engine {
                         "community candidate pattern and selection conflict with recorded evidence",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in the baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::CompositeMeaning,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "members".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.members).map_err(invalid)?,
-                                ),
-                            ),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::CompositeMeaning,
+                    [("members", structured(&pattern.members)?)],
+                    "candidate unit identity already exists in the baseline",
+                )?;
             }
             CandidateKind::LatentAxis => {
                 let pattern: LatentPattern =
@@ -411,7 +404,7 @@ impl crate::Engine {
                     .get(evidence.eigenpair_index)
                     .ok_or_else(|| invalid("latent eigenpair index is out of range"))?;
                 if evidence.structure.is_empty()
-                    || pattern.units != evidence.result.units
+                    || pattern.units[..] != evidence.result.units[..]
                     || pattern.eigenvalue != pair.eigenvalue
                     || pattern.loadings != pair.loadings
                     || selection.metric != evidence.result.metric
@@ -425,239 +418,75 @@ impl crate::Engine {
                         "latent pattern and selection conflict with recorded spectral evidence",
                     ));
                 }
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in the baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::LatentAxis,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "units".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.units).map_err(invalid)?,
-                                ),
-                            ),
-                            (
-                                "eigenvalue".into(),
-                                PropertyValue::Number(pattern.eigenvalue),
-                            ),
-                            (
-                                "loadings".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.loadings).map_err(invalid)?,
-                                ),
-                            ),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::LatentAxis,
+                    [
+                        ("units", structured(&pattern.units)?),
+                        ("eigenvalue", PropertyValue::Number(pattern.eigenvalue)),
+                        ("loadings", structured(&pattern.loadings)?),
+                    ],
+                    "candidate unit identity already exists in the baseline",
+                )?;
             }
             CandidateKind::DynamicCoupling => {
                 let coupling_units = crate::applications::coupling::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in the baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::DynamicCoupling,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "units".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&coupling_units).map_err(invalid)?,
-                                ),
-                            ),
-                            ("causal_claim".into(), PropertyValue::Boolean(false)),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::DynamicCoupling,
+                    [
+                        ("units", structured(&coupling_units)?),
+                        ("causal_claim", PropertyValue::Boolean(false)),
+                    ],
+                    "candidate unit identity already exists in the baseline",
+                )?;
             }
             CandidateKind::GraphMotif => {
                 crate::applications::motif::validate(proposal)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in the baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::GraphMotif,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "graph_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::GraphMotif,
+                    [("graph_pattern", recorded.pattern.clone())],
+                    "candidate unit identity already exists in the baseline",
+                )?;
             }
             CandidateKind::SemanticRole => {
                 let pattern = crate::applications::role::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::SemanticRole,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "role_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "members".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.members).map_err(invalid)?,
-                                ),
-                            ),
-                            (
-                                "incoming_relation_kinds".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.incoming).map_err(invalid)?,
-                                ),
-                            ),
-                            (
-                                "outgoing_relation_kinds".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.outgoing).map_err(invalid)?,
-                                ),
-                            ),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::SemanticRole,
+                    [
+                        ("role_pattern", recorded.pattern.clone()),
+                        ("members", structured(&pattern.members)?),
+                        ("incoming_relation_kinds", structured(&pattern.incoming)?),
+                        ("outgoing_relation_kinds", structured(&pattern.outgoing)?),
+                    ],
+                    "candidate unit identity already exists in baseline",
+                )?;
             }
             CandidateKind::Transformation => {
                 let pattern = crate::applications::transformation::validate(proposal, domain)?;
-                let unit_id = UnitId::new(format!("candidate:{}", candidate.id()));
-                if domain.units.contains_key(&unit_id) {
-                    return Err(invalid(
-                        "candidate unit identity already exists in baseline",
-                    ));
-                }
-                temporary.units.insert(
-                    unit_id.clone(),
-                    Unit {
-                        id: unit_id.clone(),
-                        kind: UnitKind::Transformation,
-                        label: None,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                            (
-                                "transformation_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "before_units".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.before).map_err(invalid)?,
-                                ),
-                            ),
-                            (
-                                "after_units".into(),
-                                PropertyValue::structured(
-                                    serde_json::to_value(&pattern.after).map_err(invalid)?,
-                                ),
-                            ),
-                            ("causal_claim".into(), PropertyValue::Boolean(false)),
-                        ]),
-                    },
-                );
-                added_units.push(unit_id);
+                recorded.add_unit(
+                    domain,
+                    &mut temporary,
+                    &mut added_units,
+                    UnitKind::Transformation,
+                    [
+                        ("transformation_pattern", recorded.pattern.clone()),
+                        ("before_units", structured(&pattern.before)?),
+                        ("after_units", structured(&pattern.after)?),
+                        ("causal_claim", PropertyValue::Boolean(false)),
+                    ],
+                    "candidate unit identity already exists in baseline",
+                )?;
             }
             CandidateKind::Relation => {
                 let pattern: RelationPattern =
@@ -704,28 +533,13 @@ impl crate::Engine {
                 }
                 temporary.relations.insert(
                     id.clone(),
-                    Relation {
+                    Arc::new(Relation {
                         id: id.clone(),
                         source: endpoints.source.clone(),
                         target: endpoints.target.clone(),
                         kind: pattern.relation_kind,
-                        properties: BTreeMap::from([
-                            (
-                                "candidate_id".into(),
-                                PropertyValue::Text(candidate.id().to_string()),
-                            ),
-                            (
-                                "candidate_pattern".into(),
-                                PropertyValue::structured(pattern_value.clone()),
-                            ),
-                            (
-                                "candidate_evidence".into(),
-                                PropertyValue::structured(serde_json::Value::Object(
-                                    proposal.value.clone(),
-                                )),
-                            ),
-                        ]),
-                    },
+                        properties: recorded.properties([]),
+                    }),
                 );
                 added_relations.push(id);
             }
@@ -751,32 +565,38 @@ impl crate::Engine {
                 let proposed: PropertyValue =
                     serde_json::from_value(pattern.proposed_value).map_err(invalid)?;
                 crate::nulls::weight::numeric(&proposed)?;
+                // `make_mut` copies only the one targeted entry; every other unit
+                // and relation stays shared with the baseline.
                 let properties = match &pattern.target {
                     PropertyTarget::Unit { id } => {
-                        &mut temporary
-                            .units
-                            .get_mut(id)
-                            .ok_or_else(|| invalid("weight target unit does not exist"))?
-                            .properties
+                        &mut Arc::make_mut(
+                            temporary
+                                .units
+                                .get_mut(id)
+                                .ok_or_else(|| invalid("weight target unit does not exist"))?,
+                        )
+                        .properties
                     }
                     PropertyTarget::Relation { id } => {
-                        &mut temporary
-                            .relations
-                            .get_mut(id)
-                            .ok_or_else(|| invalid("weight target relation does not exist"))?
-                            .properties
+                        &mut Arc::make_mut(
+                            temporary
+                                .relations
+                                .get_mut(id)
+                                .ok_or_else(|| invalid("weight target relation does not exist"))?,
+                        )
+                        .properties
                     }
                 };
-                let previous = properties
-                    .get(&pattern.property)
-                    .ok_or_else(|| invalid("weight property does not exist in baseline"))?
-                    .clone();
-                let before = crate::nulls::weight::numeric(&previous)?;
+                let slot = properties
+                    .get_mut(&pattern.property)
+                    .ok_or_else(|| invalid("weight property does not exist in baseline"))?;
+                let before = crate::nulls::weight::numeric(slot)?;
                 let after = crate::nulls::weight::numeric(&proposed)?;
                 if !(after - before).is_finite() {
                     return Err(invalid("weight change exceeds finite numeric range"));
                 }
-                properties.insert(pattern.property.clone(), proposed.clone());
+                // A numeric property is a scalar, so this clone copies no tree.
+                let previous = std::mem::replace(slot, proposed.clone());
                 property_changes.push(PropertyChange {
                     target: pattern.target,
                     property: pattern.property,

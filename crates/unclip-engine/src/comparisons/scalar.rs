@@ -1,6 +1,7 @@
 //! Explicit, tracked comparisons; scalar subtraction is one comparator only.
 use crate::support::{invalid, invalid_params};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use unclip_epistemic::{
     Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, PluginId,
     SharedParams, Tracked,
@@ -141,9 +142,23 @@ pub fn compare_measurements(
     after: &Tracked<Measurement>,
     run: crate::MeasurementRun<'_>,
 ) -> Result<Vec<Calculated<Delta>>> {
+    compare_with_comparators(&plan.comparators, before, after, run)
+}
+
+/// Run exactly these comparators over one before/after pair.
+///
+/// A comparison reads nothing from a plan but its comparators, so a caller that
+/// has selected some — the independence stage runs them one at a time — passes
+/// them directly instead of building a plan around them.
+pub(crate) fn compare_with_comparators(
+    comparators: &[Arc<dyn Comparator>],
+    before: &Tracked<Measurement>,
+    after: &Tracked<Measurement>,
+    run: crate::MeasurementRun<'_>,
+) -> Result<Vec<Calculated<Delta>>> {
     crate::require_calculated_evidence(before, "comparison input measurement")?;
     crate::require_calculated_evidence(after, "comparison input measurement")?;
-    let mut comparators = plan.comparators.iter().collect::<Vec<_>>();
+    let mut comparators = comparators.iter().collect::<Vec<_>>();
     comparators.sort_by_key(|p| &p.descriptor().id);
     let mut results = Vec::new();
     let empty = SharedParams::new(serde_json::json!({}));

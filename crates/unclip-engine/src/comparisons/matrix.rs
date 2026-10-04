@@ -153,14 +153,14 @@ impl Comparator for PairwiseMatrixComparator {
                                     ));
                                 }
                                 MatrixCellDifference::Value {
-                                    before: a.clone(),
-                                    after: b.clone(),
+                                    before: *a,
+                                    after: *b,
                                     difference,
                                 }
                             }
                             _ => MatrixCellDifference::Unavailable {
-                                before: a.clone(),
-                                after: b.clone(),
+                                before: *a,
+                                after: *b,
                             },
                         };
                         row.push(cell);

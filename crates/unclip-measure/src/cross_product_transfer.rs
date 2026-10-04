@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -37,8 +38,8 @@ pub struct CrossProductAxisTransfer {
     pub absolute_change: f64,
     pub source_transitions: usize,
     pub target_transitions: usize,
-    pub source_excluded_transitions: Vec<CrossDomainTransition>,
-    pub target_excluded_transitions: Vec<CrossDomainTransition>,
+    pub source_excluded_transitions: Arc<[CrossDomainTransition]>,
+    pub target_excluded_transitions: Arc<[CrossDomainTransition]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,8 +49,8 @@ pub struct UnassessedCrossProductAxisTransfer {
     pub source_have: usize,
     pub target_have: usize,
     pub need: usize,
-    pub source_excluded_transitions: Vec<CrossDomainTransition>,
-    pub target_excluded_transitions: Vec<CrossDomainTransition>,
+    pub source_excluded_transitions: Arc<[CrossDomainTransition]>,
+    pub target_excluded_transitions: Arc<[CrossDomainTransition]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,8 +141,8 @@ pub fn cross_product_transfer(
                 source_have,
                 target_have,
                 need,
-                source_excluded_transitions: source_excluded.to_vec(),
-                target_excluded_transitions: target_excluded.to_vec(),
+                source_excluded_transitions: Arc::clone(source_excluded),
+                target_excluded_transitions: Arc::clone(target_excluded),
             });
             continue;
         };
@@ -151,8 +152,8 @@ pub fn cross_product_transfer(
                 source_have,
                 target_have,
                 need,
-                source_excluded_transitions: source_excluded.to_vec(),
-                target_excluded_transitions: target_excluded.to_vec(),
+                source_excluded_transitions: Arc::clone(source_excluded),
+                target_excluded_transitions: Arc::clone(target_excluded),
             });
             continue;
         }
@@ -165,8 +166,8 @@ pub fn cross_product_transfer(
             absolute_change: change.abs(),
             source_transitions: source_axis.transition_count,
             target_transitions: target_axis.transition_count,
-            source_excluded_transitions: source_axis.excluded_transitions.clone(),
-            target_excluded_transitions: target_axis.excluded_transitions.clone(),
+            source_excluded_transitions: Arc::clone(&source_axis.excluded_transitions),
+            target_excluded_transitions: Arc::clone(&target_axis.excluded_transitions),
         });
     }
 
@@ -227,7 +228,7 @@ fn movement_axes(
         .collect()
 }
 
-fn evidence_count(evidence: MovementEvidence<'_>) -> (usize, &[CrossDomainTransition]) {
+fn evidence_count(evidence: MovementEvidence<'_>) -> (usize, &Arc<[CrossDomainTransition]>) {
     match evidence {
         MovementEvidence::Measured(axis) => (axis.transition_count, &axis.excluded_transitions),
         MovementEvidence::Unassessed(axis) => (axis.have, &axis.excluded_transitions),
@@ -394,7 +395,7 @@ mod tests {
             left_only_transitions: 4 - concordant - discordant,
             right_only_transitions: 0,
             stationary_transitions: 0,
-            excluded_transitions: vec![],
+            excluded_transitions: vec![].into(),
         }
     }
 
@@ -404,7 +405,7 @@ mod tests {
             right: UnitId::new(right),
             have: 2,
             need: 3,
-            excluded_transitions: vec![transition(prefix, 0), transition(prefix, 1)],
+            excluded_transitions: vec![transition(prefix, 0), transition(prefix, 1)].into(),
         }
     }
 

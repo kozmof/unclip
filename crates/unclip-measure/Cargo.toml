@@ -17,3 +17,6 @@ serde_json.workspace = true
 unclip-domain.workspace = true
 unclip-epistemic.workspace = true
 unclip-observe.workspace = true
+
+[lints]
+workspace = true

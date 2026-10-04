@@ -28,7 +28,7 @@ fn domain(id: &str, version: &str, unit: &str) -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new(id),
         version: DomainVersion::new(version),
-        units: BTreeMap::from([(
+        units: unclip_domain::shared_map([(
             UnitId::new(unit),
             Unit {
                 id: UnitId::new(unit),
@@ -137,7 +137,7 @@ fn fixture(prefix: &str) -> Fixture {
                     },
                     MeasurementRun {
                         id: run_id,
-                        timestamp: Timestamp::new("2026-09-24T00:00:00Z"),
+                        timestamp: &Timestamp::new("2026-09-24T00:00:00Z"),
                         params: &params,
                     },
                 )
@@ -169,7 +169,7 @@ fn fixture(prefix: &str) -> Fixture {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&product_frame),
                 run_id: &format!("{prefix}-measure-product"),
-                timestamp: Timestamp::new("2026-09-24T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:00Z"),
             },
             &samples,
             CrossDomainMutualInformationConfig::default(),
@@ -563,7 +563,7 @@ fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
         &fixture,
         &composition,
         ExpectedIndependentBehavior::Structured {
-            value: observed.clone(),
+            value: std::sync::Arc::clone(observed),
         },
         "compare-independence-expectations",
     );
@@ -576,7 +576,7 @@ fn product_behavior_is_compared_expected_to_observed_with_typed_provenance() {
             &expectations,
             MeasurementRun {
                 id: "compare-independence-run",
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
                 params: &params,
             },
         )
@@ -709,7 +709,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         &expectations,
         MeasurementRun {
             id: "unavailable-comparison",
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     )
@@ -740,7 +740,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         &expectations,
         MeasurementRun {
             id: "wrong-comparator",
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     );
@@ -757,7 +757,7 @@ fn independence_comparison_preserves_undefined_rules_and_requires_typed_comparat
         &expectations,
         MeasurementRun {
             id: "foreign-expectations",
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     );
@@ -785,7 +785,7 @@ fn compare_for_candidates(
         &expectations,
         MeasurementRun {
             id: &format!("{prefix}-comparison"),
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     )
@@ -808,7 +808,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
         derive_cross_domain_deviations(
             &comparison.profile,
             "cross-domain-candidate-derive",
-            Timestamp::new("2026-09-25T00:00:00Z"),
+            &Timestamp::new("2026-09-25T00:00:00Z"),
         )
     };
     let structures = derive().unwrap();
@@ -855,7 +855,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
             },
             MeasurementRun {
                 id: "cross-domain-candidate-generate",
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
                 params: &BTreeMap::new(),
             },
         )
@@ -900,7 +900,7 @@ fn measured_product_deviations_generate_anonymous_cross_domain_candidates() {
         },
         MeasurementRun {
             id: "cross-domain-candidate-foreign",
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     );
@@ -926,14 +926,14 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
         &fixture,
         &composition,
         ExpectedIndependentBehavior::Structured {
-            value: observed.clone(),
+            value: std::sync::Arc::clone(observed),
         },
         "equal-cross-domain-candidate",
     );
     assert!(derive_cross_domain_deviations(
         &equal.profile,
         "equal-cross-domain-candidate-derive",
-        Timestamp::new("2026-09-25T00:00:00Z"),
+        &Timestamp::new("2026-09-25T00:00:00Z"),
     )
     .unwrap()
     .is_empty());
@@ -950,7 +950,7 @@ fn equal_or_unavailable_product_comparisons_do_not_become_candidates() {
     assert!(derive_cross_domain_deviations(
         &unavailable.profile,
         "unavailable-cross-domain-candidate-derive",
-        Timestamp::new("2026-09-25T00:00:00Z"),
+        &Timestamp::new("2026-09-25T00:00:00Z"),
     )
     .unwrap()
     .is_empty());
@@ -977,7 +977,7 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
     let structures = derive_cross_domain_deviations(
         &comparison.profile,
         "cross-domain-pipeline-derive",
-        Timestamp::new("2026-09-25T00:00:00Z"),
+        &Timestamp::new("2026-09-25T00:00:00Z"),
     )
     .unwrap();
     let tracked_structures = structures.iter().map(Tracked::from).collect::<Vec<_>>();
@@ -1003,7 +1003,7 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
         },
         MeasurementRun {
             id: "cross-domain-pipeline-generate",
-            timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+            timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
             params: &BTreeMap::new(),
         },
     )
@@ -1030,9 +1030,9 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
     assert_eq!(added.label, None);
     assert_eq!(
         added.properties["product_binding"],
-        unclip_domain::PropertyValue::Structured(
+        unclip_domain::PropertyValue::Structured(std::sync::Arc::new(
             serde_json::to_value(&composition.value().product.binding).unwrap()
-        )
+        ))
     );
     assert_eq!(application.value().domain.units.len(), 2);
     assert!(!application
@@ -1142,7 +1142,7 @@ fn cross_domain_candidate_uses_standard_application_and_experiment_pipeline() {
             ExperimentConstraints::default(),
             MeasurementRun {
                 id: "cross-domain-pipeline-experiment",
-                timestamp: Timestamp::new("2026-09-25T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-25T00:00:00Z"),
                 params: &BTreeMap::new(),
             },
         )

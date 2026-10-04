@@ -76,7 +76,7 @@ pub fn compare_pareto(
             ));
         }
     }
-    let mut dimensions = dimensions.to_vec();
+    let mut dimensions = dimensions.iter().collect::<Vec<_>>();
     dimensions.sort_by(|a, b| a.name.cmp(&b.name));
     let mut names = BTreeSet::new();
     let mut left_ids = BTreeSet::new();
@@ -137,7 +137,7 @@ pub fn compare_pareto(
             }
         };
         evidence.push(ParetoEvidence {
-            dimension: dimension.clone(),
+            dimension: (*dimension).clone(),
             left: left.reading.clone(),
             right: right.reading.clone(),
             relation,

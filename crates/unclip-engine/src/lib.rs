@@ -176,10 +176,11 @@ pub fn builtin_registry() -> Result<Registry> {
 }
 
 /// Inputs controlled by the harness for one inference stage.
+#[derive(Clone, Copy)]
 pub struct InferenceRun<'a> {
     pub id: &'a str,
-    pub source: SourceRef,
-    pub timestamp: Timestamp,
+    pub source: &'a SourceRef,
+    pub timestamp: &'a Timestamp,
     pub params: &'a PluginParams,
     pub io: &'a dyn unclip_plugin::InferenceIo,
 }
@@ -280,6 +281,7 @@ pub(crate) fn require_calculated_evidence<T>(input: &Tracked<T>, kind: &str) -> 
 }
 
 /// Inputs already established by observation and inference stages.
+#[derive(Clone, Copy)]
 pub struct MeasurementInputs<'a> {
     pub domain: &'a DomainSnapshot,
     pub frame: &'a MeasurementFrame,
@@ -289,16 +291,21 @@ pub struct MeasurementInputs<'a> {
 }
 
 /// Reproducible inputs controlled by the run harness.
+///
+/// Every field borrows, so one run can be handed to each stage and sub-stage
+/// by value without cloning anything out of it.
+#[derive(Clone, Copy)]
 pub struct MeasurementRun<'a> {
     pub id: &'a str,
-    pub timestamp: Timestamp,
+    pub timestamp: &'a Timestamp,
     pub params: &'a PluginParams,
 }
 
 /// Reproducible inputs controlled by one interpretation stage.
+#[derive(Clone, Copy)]
 pub struct InterpretationRun<'a> {
     pub id: &'a str,
-    pub timestamp: Timestamp,
+    pub timestamp: &'a Timestamp,
     pub params: &'a PluginParams,
     pub io: &'a dyn unclip_plugin::InterpretationIo,
 }
@@ -380,7 +387,7 @@ impl Engine {
     ) -> Result<PipelineResults> {
         let measurement_run = MeasurementRun {
             id: run.id,
-            timestamp: run.timestamp.clone(),
+            timestamp: run.timestamp,
             params: run.params,
         };
         let inference = self.infer(plan, domain, run).await?;
@@ -631,7 +638,7 @@ pub fn run_record(
     plan: &RunPlan,
     params: &PluginParams,
     id: impl Into<String>,
-    started_at: Timestamp,
+    started_at: &Timestamp,
     metadata: serde_json::Value,
 ) -> unclip_record::EngineRunRecord {
     /// One family's entries, in id order.
@@ -848,7 +855,7 @@ mod tests {
                 },
                 MeasurementRun {
                     id: "run-1",
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                     params: &params,
                 },
             )
@@ -923,7 +930,7 @@ mod tests {
                 },
                 MeasurementRun {
                     id: "run-schema",
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                     params: &params,
                 },
             )
@@ -1030,7 +1037,7 @@ mod tests {
                 },
                 MeasurementRun {
                     id: "run-impostor",
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                     params: &params,
                 },
             )
@@ -1089,7 +1096,7 @@ mod tests {
                     },
                     MeasurementRun {
                         id,
-                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                         params: &params,
                     },
                 )
@@ -1105,8 +1112,8 @@ mod tests {
                     &domain,
                     InferenceRun {
                         id,
-                        source: SourceRef::new("notes/blank.txt"),
-                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        source: &SourceRef::new("notes/blank.txt"),
+                        timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                         params: &params,
                         io: &OrdinaryTextIo,
                     },
@@ -1124,7 +1131,7 @@ mod tests {
                     &structures,
                     InterpretationRun {
                         id,
-                        timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                        timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                         params: &params,
                         io: &RefusingInterpretationIo,
                     },
@@ -1173,8 +1180,8 @@ mod tests {
                 &domain,
                 InferenceRun {
                     id: "run-schema",
-                    source: SourceRef::new("notes/schema.txt"),
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    source: &SourceRef::new("notes/schema.txt"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                     params: &inferrer_params,
                     io: &OrdinaryTextIo,
                 },
@@ -1205,7 +1212,7 @@ mod tests {
                 &structures,
                 InterpretationRun {
                     id: "run-schema",
-                    timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                     params: &interpreter_params,
                     io: &RefusingInterpretationIo,
                 },
@@ -1243,7 +1250,7 @@ mod tests {
             &measurement("after"),
             MeasurementRun {
                 id: "run-schema",
-                timestamp: Timestamp::new("2026-09-17T00:00:00Z"),
+                timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
                 params: &comparator_params,
             },
         )
@@ -1264,7 +1271,7 @@ mod tests {
         async fn request(
             &self,
             _request: &unclip_plugin::InterpretationRequest,
-        ) -> unclip_plugin::Result<serde_json::Value> {
+        ) -> unclip_plugin::Result<std::sync::Arc<serde_json::Value>> {
             panic!("interpretation I/O must not be reached for a blank run id")
         }
     }
@@ -1292,7 +1299,7 @@ mod tests {
 
     #[tokio::test]
     async fn ordinary_text_is_ranked_before_state_sensors_run() {
-        use unclip_domain::{FrameAxis, Relation, Unit, UnitId, UnitKind};
+        use unclip_domain::{FrameAxis, Unit, UnitId, UnitKind};
         use unclip_measure::MeasurementValue;
 
         let engine = Engine::with_builtins().unwrap();
@@ -1335,8 +1342,9 @@ mod tests {
                 ),
             ]
             .into_iter()
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
-            relations: BTreeMap::<unclip_domain::RelationId, Relation>::new(),
+            relations: BTreeMap::new(),
         };
         let frame = MeasurementFrame {
             id: FrameId::new("ordinary.general"),
@@ -1371,8 +1379,8 @@ mod tests {
                 &frame,
                 InferenceRun {
                     id: "run-text",
-                    source: SourceRef::new("notes/ordinary.txt"),
-                    timestamp: Timestamp::new("2026-09-18T00:00:00Z"),
+                    source: &SourceRef::new("notes/ordinary.txt"),
+                    timestamp: &Timestamp::new("2026-09-18T00:00:00Z"),
                     params: &params,
                     io: &OrdinaryTextIo,
                 },
@@ -1454,7 +1462,7 @@ mod tests {
                 &plan,
                 &params,
                 "run-text",
-                Timestamp::new("2026-09-18T00:00:00Z"),
+                &Timestamp::new("2026-09-18T00:00:00Z"),
                 serde_json::json!({}),
             ),
             sensor_runs: Vec::new(),
@@ -1502,7 +1510,7 @@ mod tests {
                 &replay,
                 MeasurementRun {
                     id: "run-text",
-                    timestamp: Timestamp::new("2026-09-18T00:00:00Z"),
+                    timestamp: &Timestamp::new("2026-09-18T00:00:00Z"),
                     params: &params,
                 },
             )
@@ -1535,7 +1543,7 @@ mod tests {
             &plan,
             &params,
             "run-record",
-            Timestamp::new("2026-09-18T00:00:00Z"),
+            &Timestamp::new("2026-09-18T00:00:00Z"),
             serde_json::json!({"source": "notes.txt"}),
         );
 

@@ -50,6 +50,7 @@ fn domain() -> DomainSnapshot {
                 },
             )
         })
+        .map(|(id, value)| (id, std::sync::Arc::new(value)))
         .collect();
     DomainSnapshot {
         id: DomainId::new("domain"),

@@ -82,7 +82,7 @@ pub(crate) async fn verify(repositories: &crate::db::Repos, run_id: &str) -> any
         &replay,
         unclip_engine::MeasurementRun {
             id: run_id,
-            timestamp: unclip_epistemic::Timestamp::new(replay.run.started_at.clone()),
+            timestamp: &unclip_epistemic::Timestamp::new(&replay.run.started_at),
             params: &params,
         },
     )?;

@@ -19,3 +19,6 @@ unclip-match.workspace = true
 
 [dev-dependencies]
 serde_norway.workspace = true
+
+[lints]
+workspace = true

@@ -71,7 +71,7 @@ impl NullModel for ExistingMotifNull {
                     .properties
                     .get("graph_pattern")
                     .and_then(|value| match value {
-                        unclip_domain::PropertyValue::Structured(value) => Some(value),
+                        unclip_domain::PropertyValue::Structured(value) => Some(&**value),
                         _ => None,
                     })
                     == Some(pattern)

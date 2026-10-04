@@ -42,6 +42,7 @@ fn domain() -> DomainSnapshot {
             ),
         ]
         .into_iter()
+        .map(|(id, value)| (id, std::sync::Arc::new(value)))
         .collect(),
         relations: BTreeMap::new(),
     }

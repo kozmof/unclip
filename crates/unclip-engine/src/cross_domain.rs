@@ -30,11 +30,12 @@ const CROSS_PRODUCT_TRANSFER_SENSOR_ID: &str = "sensor.cross-product-transfer";
 /// method stays under the argument count that used to require a
 /// `too_many_arguments` exemption, and so the four methods that share these
 /// inputs are visibly taking the same thing.
+#[derive(Clone, Copy)]
 pub struct CrossDomainRun<'a> {
     pub product: &'a Tracked<ProductDomainSnapshot>,
     pub frame: &'a Tracked<ProductMeasurementFrame>,
     pub run_id: &'a str,
-    pub timestamp: Timestamp,
+    pub timestamp: &'a Timestamp,
 }
 
 /// One side of a cross-product transfer: a product domain, its measurement
@@ -47,6 +48,7 @@ pub struct CrossDomainRun<'a> {
 /// counterpart. Swapping a pair compiled, passed every validation, and recorded
 /// a transfer measured in the opposite direction. Naming the sides at
 /// construction is what removes that.
+#[derive(Clone, Copy)]
 pub struct TransferSide<'a> {
     pub product: &'a Tracked<ProductDomainSnapshot>,
     pub frame: &'a Tracked<ProductMeasurementFrame>,
@@ -54,11 +56,12 @@ pub struct TransferSide<'a> {
 }
 
 /// Both sides of a cross-product transfer with the run identity.
+#[derive(Clone, Copy)]
 pub struct CrossProductTransferInputs<'a> {
     pub source: TransferSide<'a>,
     pub target: TransferSide<'a>,
     pub run_id: &'a str,
-    pub timestamp: Timestamp,
+    pub timestamp: &'a Timestamp,
 }
 
 /// Hold a product sensor to its declared `params_schema` before invoking it.
@@ -207,7 +210,7 @@ impl crate::Engine {
             descriptor.id.clone(),
             descriptor.version.clone(),
             params,
-            timestamp,
+            timestamp.clone(),
         )
         .with_algorithm("regularized_canonical_correlation");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
@@ -291,7 +294,7 @@ impl crate::Engine {
             descriptor.id.clone(),
             descriptor.version.clone(),
             params,
-            timestamp,
+            timestamp.clone(),
         )
         .with_algorithm("equal_width_cross_domain_mutual_information");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
@@ -369,7 +372,7 @@ impl crate::Engine {
             descriptor.id.clone(),
             descriptor.version.clone(),
             params,
-            timestamp,
+            timestamp.clone(),
         )
         .with_algorithm("thresholded_bipartite_mutual_information_communities");
         let ctx = ProductMeasureCtx::with_mutual_information(
@@ -458,7 +461,7 @@ impl crate::Engine {
             descriptor.id.clone(),
             descriptor.version.clone(),
             params,
-            timestamp,
+            timestamp.clone(),
         )
         .with_algorithm("signed_consecutive_cross_domain_movement");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
@@ -568,7 +571,7 @@ impl crate::Engine {
             descriptor.id.clone(),
             descriptor.version.clone(),
             params,
-            timestamp,
+            timestamp.clone(),
         )
         .with_algorithm("mapped_cross_product_movement_transfer");
         let ctx = CrossProductMeasureCtx::new(

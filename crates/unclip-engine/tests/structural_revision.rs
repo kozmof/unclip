@@ -19,7 +19,7 @@ fn domain() -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: DomainVersion::new("1"),
-        units: BTreeMap::from([(
+        units: unclip_domain::shared_map([(
             UnitId::new("existing"),
             Unit {
                 id: UnitId::new("existing"),

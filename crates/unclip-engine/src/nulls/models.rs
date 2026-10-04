@@ -139,7 +139,7 @@ impl NullModel for RandomCooccurrenceNull {
     }
 }
 /// Explicit evidence available to configured null models.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct NullInputs<'a> {
     pub observations: &'a [Tracked<Observation>],
     pub rankings: &'a [Tracked<unclip_observe::PartialRanking>],

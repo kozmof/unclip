@@ -32,6 +32,7 @@ fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -149,7 +150,7 @@ fn engine_interaction_movement_is_order_stable_sparse_versioned_and_tracked() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "movement-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             samples,
             config(1),
@@ -219,7 +220,7 @@ fn engine_interaction_movement_keeps_partial_and_total_shortfalls_typed() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "partial-movement-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             &samples,
             config(2),
@@ -244,7 +245,7 @@ fn engine_interaction_movement_keeps_partial_and_total_shortfalls_typed() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "insufficient-movement-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             &samples,
             config(4),
@@ -285,7 +286,7 @@ fn engine_interaction_movement_rejects_sequence_mismatch() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "wrong-sequence-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             &samples(),
             config,

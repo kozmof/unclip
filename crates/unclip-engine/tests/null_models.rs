@@ -53,7 +53,7 @@ fn evaluate(
         observations,
         MeasurementRun {
             id: "null-run",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("null.random-cooccurrence"), params.into())]),
         },
     )
@@ -192,7 +192,7 @@ fn evaluate_ranking(
         rankings,
         MeasurementRun {
             id: "ranking-null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("null.ranking-constraints"), params().into())]),
         },
     )
@@ -294,7 +294,7 @@ fn evaluate_context(
         observations,
         MeasurementRun {
             id: "context-null",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(
                 PluginId::new("null.contextual-cooccurrence"),
                 params.into(),

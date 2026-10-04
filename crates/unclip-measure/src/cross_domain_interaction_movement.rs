@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::{ProductFrameAxis, UnitId};
@@ -60,7 +61,8 @@ pub struct CrossDomainAxisMovement {
     pub left_only_transitions: usize,
     pub right_only_transitions: usize,
     pub stationary_transitions: usize,
-    pub excluded_transitions: Vec<CrossDomainTransition>,
+    /// Shared: a cross-product transfer reports this list verbatim.
+    pub excluded_transitions: Arc<[CrossDomainTransition]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +72,7 @@ pub struct UnassessedCrossDomainAxisMovement {
     pub right: UnitId,
     pub have: usize,
     pub need: usize,
-    pub excluded_transitions: Vec<CrossDomainTransition>,
+    pub excluded_transitions: Arc<[CrossDomainTransition]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -241,7 +243,7 @@ pub fn cross_domain_interaction_movement_iter<'a>(
                 right: axis.right.clone(),
                 have: complete,
                 need: config.minimum_transitions.get(),
-                excluded_transitions: excluded,
+                excluded_transitions: excluded.into(),
             });
         } else {
             measured.push(CrossDomainAxisMovement {
@@ -254,7 +256,7 @@ pub fn cross_domain_interaction_movement_iter<'a>(
                 left_only_transitions: left_only,
                 right_only_transitions: right_only,
                 stationary_transitions: stationary,
-                excluded_transitions: excluded,
+                excluded_transitions: excluded.into(),
             });
         }
     }

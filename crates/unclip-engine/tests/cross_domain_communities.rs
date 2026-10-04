@@ -33,6 +33,7 @@ fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -129,7 +130,7 @@ fn mutual_information(
                 product: &Tracked::from(product),
                 frame: &Tracked::from(frame),
                 run_id: "mi-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             &samples,
             CrossDomainMutualInformationConfig {
@@ -173,7 +174,7 @@ fn engine_communities_preserve_bipartite_identity_versions_and_provenance() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "community-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             &tracked_mi,
             community_config(2),
@@ -249,7 +250,7 @@ fn engine_communities_keep_a_higher_sample_floor_typed() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "sparse-community-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             &Tracked::from_derived(&mi, profile),
             community_config(5),
@@ -280,7 +281,7 @@ fn engine_communities_reject_mismatched_or_incomplete_mi_profiles() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "wrong-binding",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             &Tracked::from_derived(&mi, profile),
             community_config(2),
@@ -298,7 +299,7 @@ fn engine_communities_reject_mismatched_or_incomplete_mi_profiles() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "missing-axis",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             &Tracked::from_derived(&mi, profile),
             community_config(2),

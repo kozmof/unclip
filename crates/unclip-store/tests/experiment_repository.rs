@@ -600,7 +600,7 @@ fn successor(version: &str) -> DomainSnapshot {
     DomainSnapshot {
         id: DomainId::new("d"),
         version: unclip_epistemic::DomainVersion::new(version),
-        units: BTreeMap::from([(
+        units: unclip_domain::shared_map([(
             UnitId::new("accepted"),
             Unit {
                 id: UnitId::new("accepted"),
@@ -608,7 +608,9 @@ fn successor(version: &str) -> DomainSnapshot {
                 label: None,
                 properties: BTreeMap::from([(
                     "candidate_evidence".into(),
-                    PropertyValue::Structured(json!({"candidate": "candidate"})),
+                    PropertyValue::Structured(std::sync::Arc::new(
+                        json!({"candidate": "candidate"}),
+                    )),
                 )]),
             },
         )]),

@@ -32,6 +32,7 @@ fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -152,7 +153,7 @@ fn engine_cross_domain_mi_preserves_axes_versions_and_dependencies() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "mi-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             samples,
             config(),
@@ -230,7 +231,7 @@ fn engine_cross_domain_mi_keeps_assessed_and_sparse_axes_separate() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "sparse-mi",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
             },
             &samples,
             config(),
@@ -261,7 +262,7 @@ fn engine_cross_domain_mi_reports_an_all_sparse_profile() {
                 product: &Tracked::from(&product),
                 frame: &Tracked::from(&frame),
                 run_id: "insufficient-mi",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
             },
             &[sample(
                 "only",

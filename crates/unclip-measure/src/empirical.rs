@@ -54,7 +54,7 @@ mod tests {
     fn conversion_rejects_nonfinite_values_and_mismatched_or_unknown_payloads() {
         let mut spectral = SpectralDecomposition {
             metric: PairwiseMetric::Spearman,
-            units: vec![],
+            units: vec![].into(),
             eigenpairs: vec![Eigenpair {
                 eigenvalue: f64::NAN,
                 loadings: vec![],

@@ -36,6 +36,7 @@ fn domain(id: &str, units: &[&str]) -> DomainSnapshot {
                     },
                 )
             })
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -162,7 +163,7 @@ fn movement(
                 product: &Tracked::from(product),
                 frame: &Tracked::from(frame),
                 run_id: &format!("{prefix}-movement-run"),
-                timestamp: Timestamp::new("2026-09-24T00:00:01Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:01Z"),
             },
             samples,
             CrossDomainInteractionMovementConfig {
@@ -268,7 +269,7 @@ fn engine_cross_product_transfer_preserves_signed_zero_versions_and_dependencies
                     ),
                 },
                 run_id: "transfer-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             config(2),
         )
@@ -349,7 +350,7 @@ fn engine_cross_product_transfer_keeps_shortfalls_typed() {
                     ),
                 },
                 run_id: "sparse-transfer-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             config(5),
         )
@@ -394,7 +395,7 @@ fn engine_cross_product_transfer_rejects_stale_or_incomplete_movement() {
                     ),
                 },
                 run_id: "stale-transfer-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             config(2),
         )
@@ -421,7 +422,7 @@ fn engine_cross_product_transfer_rejects_stale_or_incomplete_movement() {
                     movement: &Tracked::from_derived(&fixture.target_measurement, target_movement),
                 },
                 run_id: "incomplete-transfer-run",
-                timestamp: Timestamp::new("2026-09-24T00:00:02Z"),
+                timestamp: &Timestamp::new("2026-09-24T00:00:02Z"),
             },
             config(2),
         )

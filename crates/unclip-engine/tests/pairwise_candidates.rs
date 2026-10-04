@@ -21,9 +21,7 @@ fn input(id: &str, metric: &str, cell: Value) -> Tracked<Measurement> {
             },
             confidence: None,
             sample_count: Some(4),
-            context: MeasurementContext {
-                values: BTreeMap::from([("fixture".into(), json!(id))]),
-            },
+            context: MeasurementContext::new(BTreeMap::from([("fixture".into(), json!(id))])),
         },
     )
 }
@@ -48,7 +46,7 @@ fn generate(
         },
         MeasurementRun {
             id: "discover",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new("generate.pairwise-coupling"), params.into())]),
         },
     )

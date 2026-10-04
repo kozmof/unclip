@@ -29,10 +29,10 @@ pub enum PartitionComparison {
 }
 /// The write side of [`PartitionComparison`], borrowing what it serializes.
 ///
-/// The `Value` arm already owns the canonicalized partitions it reports, so it
-/// keeps them; the arms that report whole readings borrow, because they are
-/// reached when a reading is not a partition and can therefore carry a matrix
-/// or a graph. The round-trip test below pins this shape to the owning one.
+/// Every arm borrows: the `Value` arm reports the canonicalized partitions as
+/// sorted views of the readings' own member names, and the arms that report
+/// whole readings borrow them because they are reached when a reading is not a
+/// partition and can therefore carry a matrix or a graph. The round-trip test below pins this shape to the owning one.
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum PartitionComparisonRef<'a> {
@@ -43,8 +43,8 @@ enum PartitionComparisonRef<'a> {
         separate_in_both: usize,
         split_pairs: usize,
         merged_pairs: usize,
-        before: Vec<Vec<String>>,
-        after: Vec<Vec<String>>,
+        before: Vec<Vec<&'a str>>,
+        after: Vec<Vec<&'a str>>,
     },
     Unavailable {
         reason: &'a str,
@@ -73,8 +73,11 @@ impl Default for PartitionRandComparator {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Parameters {}
-fn canonical(groups: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
-    let mut result = groups.to_vec();
+fn canonical(groups: &[Vec<String>]) -> Result<Vec<Vec<&str>>> {
+    let mut result = groups
+        .iter()
+        .map(|group| group.iter().map(String::as_str).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     let mut seen = std::collections::BTreeSet::new();
     for group in &mut result {
         if group.is_empty() {
@@ -92,11 +95,11 @@ fn canonical(groups: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
     result.sort();
     Ok(result)
 }
-fn membership(groups: &[Vec<String>]) -> BTreeMap<&str, usize> {
+fn membership<'a>(groups: &[Vec<&'a str>]) -> BTreeMap<&'a str, usize> {
     groups
         .iter()
         .enumerate()
-        .flat_map(|(index, group)| group.iter().map(move |member| (member.as_str(), index)))
+        .flat_map(|(index, group)| group.iter().map(move |member| (*member, index)))
         .collect()
 }
 impl Comparator for PartitionRandComparator {
@@ -213,6 +216,7 @@ mod tests {
         };
         let missing = Reading::NotMeasured;
         let groups = vec![vec!["a".to_owned()], vec!["b".to_owned()]];
+        let borrowed = vec![vec!["a"], vec!["b"]];
         let cases = [
             (
                 PartitionComparisonRef::Value {
@@ -222,8 +226,8 @@ mod tests {
                     separate_in_both: 0,
                     split_pairs: 1,
                     merged_pairs: 0,
-                    before: groups.clone(),
-                    after: groups.clone(),
+                    before: borrowed.clone(),
+                    after: borrowed,
                 },
                 PartitionComparison::Value {
                     rand_similarity: 0.5,

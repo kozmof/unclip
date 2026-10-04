@@ -3,6 +3,7 @@
 use anyhow::{ensure, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 use unclip_epistemic::{DerivedId, Timestamp};
 use unclip_store::{
     CandidateInterpretationRepository, CandidateRepository, EngineRunRepository, EngineRunStatus,
@@ -16,7 +17,7 @@ struct ResponseDocument {
     structure: String,
     model: String,
     model_version: String,
-    response: Value,
+    response: Arc<Value>,
 }
 
 struct FileInterpretationIo {
@@ -28,7 +29,7 @@ impl unclip_plugin::InterpretationIo for FileInterpretationIo {
     async fn request(
         &self,
         request: &unclip_plugin::InterpretationRequest,
-    ) -> unclip_plugin::Result<Value> {
+    ) -> unclip_plugin::Result<Arc<Value>> {
         if self.document.model != request.model
             || self.document.model_version != request.model_version
         {
@@ -42,7 +43,7 @@ impl unclip_plugin::InterpretationIo for FileInterpretationIo {
                 "interpretation response must be a JSON object".into(),
             ));
         }
-        Ok(self.document.response.clone())
+        Ok(Arc::clone(&self.document.response))
     }
 }
 
@@ -126,7 +127,7 @@ pub(crate) async fn run(
         &plan,
         &parsed.params,
         &run_id,
-        Timestamp::new(timestamp.clone()),
+        &Timestamp::new(&timestamp),
         serde_json::json!({
             "stage":"interpretation",
             "candidate":candidate_id,
@@ -160,7 +161,7 @@ pub(crate) async fn run(
                 &[source],
                 unclip_engine::InterpretationRun {
                     id: &run_id,
-                    timestamp: Timestamp::new(timestamp),
+                    timestamp: &Timestamp::new(timestamp),
                     params: &parsed.params,
                     io: &io,
                 },

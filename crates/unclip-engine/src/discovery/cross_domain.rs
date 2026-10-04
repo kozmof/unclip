@@ -255,7 +255,7 @@ pub(crate) fn validate_candidate(
 pub fn derive_cross_domain_deviations(
     profile: &Calculated<IndependenceComparisonProfile>,
     run_id: &str,
-    timestamp: Timestamp,
+    timestamp: &Timestamp,
 ) -> Result<Vec<Calculated<EmpiricalStructure>>> {
     if run_id.trim().is_empty() {
         return Err(invalid(

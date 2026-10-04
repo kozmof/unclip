@@ -1,6 +1,7 @@
 //! Deterministic symmetric eigendecomposition of a complete pairwise matrix.
 
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use unclip_domain::UnitId;
@@ -21,7 +22,7 @@ pub struct Eigenpair {
 #[serde(deny_unknown_fields)]
 pub struct SpectralDecomposition {
     pub metric: PairwiseMetric,
-    pub units: Vec<UnitId>,
+    pub units: Arc<[UnitId]>,
     pub eigenpairs: Vec<Eigenpair>,
     /// Smallest sample count across all input cells, including the diagonal.
     pub minimum_cell_samples: usize,
@@ -123,7 +124,7 @@ pub fn spectral_decomposition(
     eigenpairs.sort_by(|left, right| right.eigenvalue.total_cmp(&left.eigenvalue));
     Ok(Some(SpectralDecomposition {
         metric: matrix.metric(),
-        units: matrix.units().to_vec(),
+        units: matrix.units_shared(),
         eigenpairs,
         minimum_cell_samples,
         tolerance,

@@ -118,7 +118,7 @@ fn fixture() -> Fixture {
             },
             MeasurementRun {
                 id: "residual",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &BTreeMap::new(),
             },
         )
@@ -153,7 +153,7 @@ fn run_generator(
         },
         MeasurementRun {
             id: "discover",
-            timestamp: Timestamp::new("now"),
+            timestamp: &Timestamp::new("now"),
             params: &BTreeMap::from([(PluginId::new(generator), params.into())]),
         },
     )
@@ -486,7 +486,7 @@ fn relation_fixture() -> Fixture {
             },
             MeasurementRun {
                 id: "residual",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &BTreeMap::new(),
             },
         )
@@ -656,7 +656,7 @@ fn remeasure_relations(fixture: &mut Fixture) {
             },
             MeasurementRun {
                 id: "residual",
-                timestamp: Timestamp::new("now"),
+                timestamp: &Timestamp::new("now"),
                 params: &BTreeMap::new(),
             },
         )
@@ -872,13 +872,15 @@ fn generated_motif_applies_without_inventing_domain_edges_and_rejects_corrupt_su
     assert_eq!(unit.label, None);
     assert_eq!(
         unit.properties["graph_pattern"],
-        unclip_domain::PropertyValue::Structured(candidates[0].value().value["pattern"].clone())
+        unclip_domain::PropertyValue::Structured(std::sync::Arc::new(
+            candidates[0].value().value["pattern"].clone()
+        ))
     );
     assert_eq!(
         unit.properties["candidate_evidence"],
-        unclip_domain::PropertyValue::Structured(serde_json::Value::Object(
+        unclip_domain::PropertyValue::Structured(std::sync::Arc::new(serde_json::Value::Object(
             candidates[0].value().value.clone()
-        ))
+        )))
     );
     assert!(result.value().added_relations.is_empty());
     assert_eq!(result.value().domain.relations, fixture.domain.relations);

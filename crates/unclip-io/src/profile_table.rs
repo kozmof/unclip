@@ -115,9 +115,10 @@ mod tests {
             reading: value,
             sample_count: Some(4),
             confidence: Some(0.9),
-            context: MeasurementContext {
-                values: BTreeMap::from([("pair".into(), serde_json::json!(["a", "b"]))]),
-            },
+            context: MeasurementContext::new(BTreeMap::from([(
+                "pair".into(),
+                serde_json::json!(["a", "b"]),
+            )])),
         }
     }
 
@@ -187,9 +188,7 @@ mod tests {
     fn duplicate_readings_versions_and_contexts_are_not_collapsed() {
         let first = reading("sensor.a", Reading::NotMeasured);
         let mut different_context = first.clone();
-        different_context
-            .context
-            .values
+        std::sync::Arc::make_mut(&mut different_context.context.values)
             .insert("pair".into(), serde_json::json!(["b", "c"]));
         different_context.sample_count = None;
         different_context.confidence = None;

@@ -46,7 +46,7 @@ pub fn derive_empirical(
     measurements: &[Tracked<Measurement>],
     method: EmpiricalMethod,
     run_id: &str,
-    timestamp: Timestamp,
+    timestamp: &Timestamp,
 ) -> Result<Vec<EmpiricalResult>> {
     let invalid = |message: &str| PluginError::Message(message.into());
     if run_id.is_empty() || measurements.is_empty() {

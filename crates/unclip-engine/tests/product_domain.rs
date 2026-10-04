@@ -24,6 +24,7 @@ fn domain(id: &str, version: &str, units: &[&str]) -> DomainSnapshot {
         units: units
             .iter()
             .map(|id| (UnitId::new(*id), unit(id)))
+            .map(|(id, value)| (id, std::sync::Arc::new(value)))
             .collect(),
         relations: BTreeMap::new(),
     }
@@ -228,13 +229,13 @@ fn product_domain_rejects_unbacked_ambiguous_or_invalid_pairs() {
     let mut dangling = domain("dangling", "1", &["x"]);
     dangling.relations.insert(
         RelationId::new("broken"),
-        Relation {
+        std::sync::Arc::new(Relation {
             id: RelationId::new("broken"),
             source: UnitId::new("x"),
             target: UnitId::new("missing"),
             kind: "broken".into(),
             properties: BTreeMap::new(),
-        },
+        }),
     );
     assert!(materialize_product_domain(
         &left,

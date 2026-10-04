@@ -8,6 +8,7 @@ use unclip_measure::Measurement;
 use unclip_observe::{Alignment, PartialRanking};
 use unclip_plugin::{Result, RunPlan};
 
+#[derive(Clone, Copy)]
 pub struct HeldOutInputs<'a> {
     pub baseline: &'a Tracked<DomainSnapshot>,
     pub frame: &'a Tracked<MeasurementFrame>,
@@ -119,7 +120,7 @@ impl super::Engine {
                 collector.read(inputs.split);
             },
         )?;
-        let mut input_ids = dependencies.snapshot().into_iter().collect::<BTreeSet<_>>();
+        let mut input_ids = dependencies.to_set();
         input_ids.extend(
             split
                 .training
@@ -141,6 +142,7 @@ impl super::Engine {
 
 /// Both sides use one frame, split, sensor plan and parameter map. Inference
 /// products are supplied separately because candidate application can change them.
+#[derive(Clone, Copy)]
 pub struct CounterfactualMeasurementInputs<'a> {
     pub baseline: HeldOutInputs<'a>,
     pub counterfactual: &'a Calculated<super::CounterfactualSnapshot>,
@@ -232,7 +234,7 @@ impl super::Engine {
             inputs.baseline,
             super::MeasurementRun {
                 id: &before_id,
-                timestamp: run.timestamp.clone(),
+                timestamp: run.timestamp,
                 params: run.params,
             },
         )?;
@@ -279,8 +281,6 @@ impl super::Engine {
             ));
         }
         let comparison_id = format!("{}/comparison", run.id);
-        let timestamp = run.timestamp.clone();
-        let params = run.params;
         let measurements = self.measure_counterfactual(plan, inputs, run)?;
         let before = measurements
             .before
@@ -299,8 +299,7 @@ impl super::Engine {
             pairs,
             super::MeasurementRun {
                 id: &comparison_id,
-                timestamp,
-                params,
+                ..run
             },
         )?;
         Ok(CounterfactualComparison {
