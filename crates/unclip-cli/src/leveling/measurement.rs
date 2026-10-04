@@ -126,59 +126,60 @@ pub(crate) async fn measure(
         None,
     )
     .await?;
-    let calculated = engine.measure(
-        &plan,
-        unclip_engine::MeasurementInputs {
-            domain: &domain,
-            frame: &frame,
-            observations: &observations,
-            alignments: &alignments,
-            rankings: &rankings,
-        },
-        unclip_engine::MeasurementRun {
-            id: &run_id,
-            timestamp: unclip_epistemic::Timestamp::new(timestamp.clone()),
-            params: &parsed.params,
-        },
-    )?;
+    let executed: anyhow::Result<Vec<String>> = async {
+        let calculated = engine.measure(
+            &plan,
+            unclip_engine::MeasurementInputs {
+                domain: &domain,
+                frame: &frame,
+                observations: &observations,
+                alignments: &alignments,
+                rankings: &rankings,
+            },
+            unclip_engine::MeasurementRun {
+                id: &run_id,
+                timestamp: unclip_epistemic::Timestamp::new(timestamp.clone()),
+                params: &parsed.params,
+            },
+        )?;
 
-    let mut records = Vec::with_capacity(calculated.len());
-    for value in &calculated {
-        let measurement = value.value();
-        let descriptor = plan
-            .sensors
-            .iter()
-            .map(|sensor| sensor.descriptor())
-            .find(|descriptor| descriptor.id == measurement.sensor)
-            .ok_or_else(|| {
-                anyhow::anyhow!("resolved sensor disappeared: {}", measurement.sensor)
-            })?;
-        let kind = match &measurement.reading {
-            unclip_measure::Reading::Value { value } => value.kind(),
-            _ => *descriptor.produces.first().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "sensor declares no measurement kind: {}",
-                    measurement.sensor.as_str()
-                )
-            })?,
-        };
-        unclip_store::ProvenanceRepository::insert_provenance(
-            &repositories.provenance,
-            unclip_store::StoredProvenance {
+        // Everything the profile needs is assembled first and written in one
+        // transaction, and nothing is printed until it has committed, so a
+        // failure leaves neither orphan rows nor reported measurements.
+        let mut provenance = Vec::with_capacity(calculated.len());
+        let mut sensor_runs = Vec::with_capacity(calculated.len());
+        let mut records = Vec::with_capacity(calculated.len());
+        let mut lines = Vec::with_capacity(calculated.len());
+        for value in &calculated {
+            let measurement = value.value();
+            let descriptor = plan
+                .sensors
+                .iter()
+                .map(|sensor| sensor.descriptor())
+                .find(|descriptor| descriptor.id == measurement.sensor)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("resolved sensor disappeared: {}", measurement.sensor)
+                })?;
+            let kind = match &measurement.reading {
+                unclip_measure::Reading::Value { value } => value.kind(),
+                _ => *descriptor.produces.first().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "sensor declares no measurement kind: {}",
+                        measurement.sensor.as_str()
+                    )
+                })?,
+            };
+            provenance.push(unclip_store::StoredProvenance {
                 id: value.id().clone(),
                 run_id: Some(run_id.clone()),
                 provenance: value.shared_provenance(),
-            },
-        )
-        .await?;
-        let params = parsed
-            .params
-            .get(&measurement.sensor)
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}).into());
-        unclip_store::MeasurementRepository::insert_sensor_run(
-            &repositories.measurements,
-            unclip_store::SensorRunRecord {
+            });
+            let params = parsed
+                .params
+                .get(&measurement.sensor)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}).into());
+            sensor_runs.push(unclip_store::SensorRunRecord {
                 id: value.id().to_string(),
                 engine_run_id: run_id.clone(),
                 sensor: measurement.sensor.clone(),
@@ -188,49 +189,50 @@ pub(crate) async fn measure(
                 status: "completed".into(),
                 started_at: timestamp.clone(),
                 completed_at: Some(unclip_store::now()),
+            });
+            records.push(unclip_store::MeasurementRecord {
+                id: format!("{}/measurement", value.id()),
+                sensor_run_id: value.id().to_string(),
+                provenance: value.id().clone(),
+                kind,
+                measurement: value.shared(),
+            });
+            lines.push(format!(
+                "MEASUREMENT\tCALCULATED\t{}@{}\t{}",
+                measurement.sensor,
+                measurement.sensor_version,
+                serde_json::to_string(&measurement.reading)?
+            ));
+        }
+        // A sensor may emit nothing, so an empty result is an error to
+        // report, not an invariant to assert.
+        let profile_provenance = calculated
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("the selected sensors produced no measurements"))?
+            .id()
+            .clone();
+        unclip_store::MeasurementRepository::insert_calculated_profile(
+            &repositories.measurements,
+            provenance,
+            sensor_runs,
+            unclip_store::MeasurementProfileHeader {
+                id: profile_id.clone(),
+                engine_run_id: run_id.clone(),
+                observation_id: (observation_ids.len() == 1).then(|| observation_ids[0].clone()),
+                frame: frame_id,
+                frame_version,
+                provenance: profile_provenance,
+                created_at: unclip_store::now(),
             },
+            records,
         )
         .await?;
-        records.push(unclip_store::MeasurementRecord {
-            id: format!("{}/measurement", value.id()),
-            sensor_run_id: value.id().to_string(),
-            provenance: value.id().clone(),
-            kind,
-            measurement: value.shared(),
-        });
-        crate::output::outln!(
-            "MEASUREMENT\tCALCULATED\t{}@{}\t{}",
-            measurement.sensor,
-            measurement.sensor_version,
-            serde_json::to_string(&measurement.reading)?
-        );
+        Ok(lines)
     }
-    let profile_provenance = calculated
-        .first()
-        .expect("non-empty sensor plan emits one result per sensor")
-        .id()
-        .clone();
-    unclip_store::MeasurementRepository::insert_profile(
-        &repositories.measurements,
-        unclip_store::MeasurementProfileHeader {
-            id: profile_id.clone(),
-            engine_run_id: run_id.clone(),
-            observation_id: (observation_ids.len() == 1).then(|| observation_ids[0].clone()),
-            frame: frame_id,
-            frame_version,
-            provenance: profile_provenance,
-            created_at: unclip_store::now(),
-        },
-        records,
-    )
-    .await?;
-    unclip_store::EngineRunRepository::transition_run(
-        &repositories.engine_runs,
-        &run_id,
-        unclip_store::EngineRunStatus::Completed,
-        Some(unclip_store::now()),
-    )
-    .await?;
+    .await;
+    for line in super::finish_run(&repositories.engine_runs, &run_id, executed).await? {
+        crate::output::outln!("{line}");
+    }
     crate::output::outln!("PROFILE\tCALCULATED\t{profile_id}");
     Ok(())
 }

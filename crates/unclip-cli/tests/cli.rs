@@ -1301,6 +1301,73 @@ async fn level_observe_explain_measure_discover_experiment_and_apply_workflow() 
     assert!(stderr(&unversioned).contains("domain@version"));
 }
 
+/// A run whose inference fails is closed as `failed`, not left `running`.
+///
+/// `level observe` used to mark its run `Running` and then return through `?`
+/// when the inferrer failed, so the run never reached a terminal status.
+#[tokio::test(flavor = "current_thread")]
+async fn failed_observe_marks_its_run_failed() {
+    use sea_orm::ConnectionTrait;
+
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    let domain = db.write(
+        "domain.yaml",
+        "domain:\n  id: coffee\n  version: \"7\"\n  units: {}\n  relations: {}\n",
+    );
+    let imported = unclip(
+        &path,
+        &["level", "domain", "import", domain.to_str().unwrap()],
+    );
+    assert!(
+        imported.status.success(),
+        "domain import failed: {}",
+        stderr(&imported)
+    );
+
+    // The inferrer reads an observation file that does not exist.
+    let missing = db.dir.join("missing-observation.json");
+    let profile = db.write(
+        "engine.json",
+        &serde_json::json!({
+            "domain": "coffee@7",
+            "inferrers": [{
+                "id": "infer.manual",
+                "params": {"file": missing.to_str().unwrap()}
+            }]
+        })
+        .to_string(),
+    );
+    let observed = unclip(
+        &path,
+        &[
+            "level",
+            "observe",
+            missing.to_str().unwrap(),
+            "--profile",
+            profile.to_str().unwrap(),
+        ],
+    );
+    assert!(!observed.status.success(), "observe should fail");
+
+    let connection = unclip_store::connect(&format!("sqlite://{}?mode=rw", path.display()))
+        .await
+        .unwrap();
+    let rows = connection
+        .query_all(sea_orm::Statement::from_string(
+            connection.get_database_backend(),
+            "SELECT status, completed_at FROM engine_runs",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "observe should have recorded one run");
+    let status: String = rows[0].try_get("", "status").unwrap();
+    let completed_at: Option<String> = rows[0].try_get("", "completed_at").unwrap();
+    assert_eq!(status, "failed");
+    assert!(completed_at.is_some(), "a failed run records when it ended");
+}
+
 #[test]
 fn level_help_lists_plugins_command() {
     let db = TempDb::new();

@@ -151,6 +151,68 @@ async fn invalid_nested_measurement_rolls_back_the_profile() {
     assert!(repo.get_profile("invalid-profile").await.unwrap().is_none());
 }
 
+async fn sensor_run_count(db: &DatabaseConnection) -> i64 {
+    let row = db
+        .query_one(sea_orm::Statement::from_string(
+            db.get_database_backend(),
+            "SELECT COUNT(*) AS n FROM sensor_runs",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    row.try_get("", "n").unwrap()
+}
+
+#[tokio::test]
+async fn calculated_profile_writes_sensor_runs_and_profile_together() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let repo = SeaOrmMeasurementRepository::new(db.clone());
+
+    let value = value_record("a-value", 2.0);
+    let expected = MeasurementProfile {
+        measurements: vec![(*value.measurement).clone()],
+    };
+    repo.insert_calculated_profile(
+        Vec::new(),
+        vec![sensor_run("value-run", "sensor.value")],
+        header("calculated-profile"),
+        vec![value],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(sensor_run_count(&db).await, 1);
+    assert_eq!(
+        repo.get_profile("calculated-profile")
+            .await
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+}
+
+/// A measurement that fails validation takes its sensor run down with it:
+/// nothing from the bundle survives.
+#[tokio::test]
+async fn failed_calculated_profile_leaves_no_sensor_runs() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    seed_parents(&db).await;
+    let repo = SeaOrmMeasurementRepository::new(db.clone());
+
+    repo.insert_calculated_profile(
+        Vec::new(),
+        vec![sensor_run("value-run", "sensor.value")],
+        header("failed-profile"),
+        vec![value_record("invalid", f64::NAN)],
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(sensor_run_count(&db).await, 0);
+    assert!(repo.get_profile("failed-profile").await.unwrap().is_none());
+}
+
 #[tokio::test]
 async fn missing_nested_provenance_rolls_back_the_profile() {
     let db = connect_and_migrate("sqlite::memory:").await.unwrap();

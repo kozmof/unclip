@@ -178,24 +178,7 @@ pub(crate) async fn run(
         Ok(output)
     }
     .await;
-    let output = match executed {
-        Ok(output) => output,
-        Err(error) => {
-            repos
-                .engine_runs
-                .transition_run(&run_id, EngineRunStatus::Failed, Some(unclip_store::now()))
-                .await?;
-            return Err(error);
-        }
-    };
-    repos
-        .engine_runs
-        .transition_run(
-            &run_id,
-            EngineRunStatus::Completed,
-            Some(unclip_store::now()),
-        )
-        .await?;
+    let output = super::finish_run(&repos.engine_runs, &run_id, executed).await?;
 
     crate::output::outln!("INTERPRETED\tLABEL\trun={run_id}");
     crate::output::outln!(

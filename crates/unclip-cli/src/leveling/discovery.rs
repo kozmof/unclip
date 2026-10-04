@@ -227,21 +227,7 @@ pub(crate) async fn discover(
         Ok(())
     }
     .await;
-    if let Err(error) = persist {
-        repos
-            .engine_runs
-            .transition_run(&run_id, EngineRunStatus::Failed, Some(unclip_store::now()))
-            .await?;
-        return Err(error);
-    }
-    repos
-        .engine_runs
-        .transition_run(
-            &run_id,
-            EngineRunStatus::Completed,
-            Some(unclip_store::now()),
-        )
-        .await?;
+    super::finish_run(&repos.engine_runs, &run_id, persist).await?;
     crate::output::outln!("CALCULATED\tDISCOVERY\trun={run_id}");
     for candidate in outputs {
         crate::output::outln!(

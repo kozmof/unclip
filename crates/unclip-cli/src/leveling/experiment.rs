@@ -556,26 +556,9 @@ pub(crate) async fn run(
                 deltas: persistable.deltas,
             },
         )
-        .await;
-    if let Err(error) = result {
-        repos
-            .engine_runs
-            .transition_run(
-                &request.run_id,
-                EngineRunStatus::Failed,
-                Some(unclip_store::now()),
-            )
-            .await?;
-        return Err(error.into());
-    }
-    repos
-        .engine_runs
-        .transition_run(
-            &request.run_id,
-            EngineRunStatus::Completed,
-            Some(unclip_store::now()),
-        )
-        .await?;
+        .await
+        .map_err(anyhow::Error::from);
+    super::finish_run(&repos.engine_runs, &request.run_id, result).await?;
     crate::output::outln!("EXPERIMENT\tEXPERIMENTAL\t{}", experiment_id);
     crate::output::outln!(
         "RESULT\t{}",

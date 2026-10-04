@@ -133,21 +133,7 @@ pub(crate) async fn derive(
         Ok(())
     }
     .await;
-    if let Err(error) = persist {
-        repos
-            .engine_runs
-            .transition_run(&run.id, EngineRunStatus::Failed, Some(unclip_store::now()))
-            .await?;
-        return Err(error);
-    }
-    repos
-        .engine_runs
-        .transition_run(
-            &run.id,
-            EngineRunStatus::Completed,
-            Some(unclip_store::now()),
-        )
-        .await?;
+    super::finish_run(&repos.engine_runs, &run.id, persist).await?;
     crate::output::outln!("CALCULATED\tEMPIRICAL\trun={}", run.id);
     for output in outputs {
         match output.structure {

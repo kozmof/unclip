@@ -21,6 +21,48 @@ pub(crate) mod measurement;
 pub(crate) use inspection::{explain, profile_show, provenance, verify};
 pub(crate) use measurement::measure;
 
+/// Close a `Running` engine run with the outcome of its work.
+///
+/// `Ok` marks the run `Completed`; `Err` marks it `Failed` and returns the
+/// work's error. Every run a command moves to `Running` ends here, so a failure
+/// cannot leave it `Running` forever — which `level observe` and
+/// `level measure` did, each returning early through `?` before reaching their
+/// `Completed` transition.
+///
+/// If recording `Failed` itself fails, the work's error is still the one
+/// returned, with the bookkeeping failure attached as context: the cause the
+/// user needs is why the run failed, not why its status could not be written.
+pub(crate) async fn finish_run<T>(
+    runs: &impl unclip_store::EngineRunRepository,
+    run_id: &str,
+    outcome: anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    use unclip_store::EngineRunStatus;
+
+    match outcome {
+        Ok(value) => {
+            runs.transition_run(
+                run_id,
+                EngineRunStatus::Completed,
+                Some(unclip_store::now()),
+            )
+            .await?;
+            Ok(value)
+        }
+        Err(error) => {
+            match runs
+                .transition_run(run_id, EngineRunStatus::Failed, Some(unclip_store::now()))
+                .await
+            {
+                Ok(()) => Err(error),
+                Err(status) => Err(error.context(format!(
+                    "run {run_id} also could not be marked failed: {status}"
+                ))),
+            }
+        }
+    }
+}
+
 /// Mint an engine run id as `{kind}-{timestamp}-{random}`.
 ///
 /// The timestamp keeps ids readable and roughly sortable, but it has only
@@ -109,28 +151,25 @@ pub(crate) async fn observe(
         None,
     )
     .await?;
-    let results = engine
-        .infer(
-            &plan,
-            &domain,
-            unclip_engine::InferenceRun {
-                id: &run_id,
-                source: unclip_epistemic::SourceRef::new(source),
-                timestamp: unclip_epistemic::Timestamp::new(timestamp),
-                params: &parsed.params,
-                io: &FileInferenceIo,
-            },
-        )
-        .await?;
-
-    persist_inference(repositories, &run_id, &domain_id, &domain_version, &results).await?;
-    unclip_store::EngineRunRepository::transition_run(
-        &repositories.engine_runs,
-        &run_id,
-        unclip_store::EngineRunStatus::Completed,
-        Some(unclip_store::now()),
-    )
-    .await?;
+    let executed: anyhow::Result<_> = async {
+        let results = engine
+            .infer(
+                &plan,
+                &domain,
+                unclip_engine::InferenceRun {
+                    id: &run_id,
+                    source: unclip_epistemic::SourceRef::new(source),
+                    timestamp: unclip_epistemic::Timestamp::new(timestamp),
+                    params: &parsed.params,
+                    io: &FileInferenceIo,
+                },
+            )
+            .await?;
+        persist_inference(repositories, &run_id, &domain_id, &domain_version, &results).await?;
+        Ok(results)
+    }
+    .await;
+    let results = finish_run(&repositories.engine_runs, &run_id, executed).await?;
 
     crate::output::outln!("RUN\t{run_id}");
     for output in &results.outputs {

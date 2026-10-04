@@ -112,6 +112,20 @@ pub trait MeasurementRepository: Sync {
         header: MeasurementProfileHeader,
         measurements: Vec<MeasurementRecord>,
     ) -> StoreResult<()>;
+    /// Atomically persist one calculated profile: each measurement's
+    /// provenance (topologically ordered), the sensor runs that produced
+    /// them, and the profile with its measurements.
+    ///
+    /// Writing these one call at a time left a failure partway through with
+    /// provenance and sensor-run rows pointing at a profile that was never
+    /// written; here either all of it lands or none of it does.
+    async fn insert_calculated_profile(
+        &self,
+        provenance: Vec<StoredProvenance>,
+        sensor_runs: Vec<SensorRunRecord>,
+        header: MeasurementProfileHeader,
+        measurements: Vec<MeasurementRecord>,
+    ) -> StoreResult<()>;
     async fn get_profile(&self, id: &str) -> StoreResult<Option<MeasurementProfile>>;
     /// Hydrate measurements with their stored provenance identities.
     async fn get_profile_records(&self, id: &str) -> StoreResult<Option<Vec<MeasurementRecord>>>;
@@ -392,6 +406,25 @@ impl MeasurementRepository for SeaOrmMeasurementRepository {
     ) -> StoreResult<()> {
         let txn = self.db.begin().await?;
         insert_profile_in_transaction(&txn, header, records).await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn insert_calculated_profile(
+        &self,
+        provenance: Vec<StoredProvenance>,
+        sensor_runs: Vec<SensorRunRecord>,
+        header: MeasurementProfileHeader,
+        measurements: Vec<MeasurementRecord>,
+    ) -> StoreResult<()> {
+        let txn = self.db.begin().await?;
+        for value in provenance {
+            insert_provenance_in_transaction(&txn, value).await?;
+        }
+        for run in sensor_runs {
+            insert_sensor_run_in_transaction(&txn, run).await?;
+        }
+        insert_profile_in_transaction(&txn, header, measurements).await?;
         txn.commit().await?;
         Ok(())
     }
