@@ -26,19 +26,17 @@ const PREFER_BONUS_PER_MATCH: f64 = 0.5;
 const RECENT_PENALTY: f64 = 0.25;
 /// Floor so a candidate with weight 0 can still be chosen if nothing else is.
 const MIN_SCORE: f64 = 1e-6;
-/// Ceiling that keeps a dominant score from collapsing into a tie.
+/// Ceiling that keeps every score finite.
 ///
-/// [`Reservoir`] keys a candidate as `u^(1/score)`. Once `score` reaches about
-/// `1e30`, `1/score` is small enough that `u^(1/score)` rounds to exactly `1.0`
-/// for *every* `u`, so all such candidates hold the identical key and the
-/// strictly-greater comparison in `offer` lets whichever arrived first hold its
-/// slot against all of them. That turns weighted sampling into first-come order
-/// precisely among the candidates that should dominate it.
+/// [`Reservoir`] keys a candidate as `ln(u) / score`, which divides cleanly for
+/// any finite positive score but turns into `-0.0` for *every* `u` once the
+/// score is infinite. All such candidates would then hold the identical key,
+/// and the strictly-greater comparison in `offer` would let whichever arrived
+/// first hold its slot against all of them.
 ///
-/// At `1e12` the keys stay distinct, and nothing below the ceiling changes: the
-/// gap between `1e12` and a larger score was never representable in the key
-/// anyway. Saturating here rather than at [`f64::MAX`] costs no ordering that
-/// f64 could express.
+/// The key used to be `u^(1/score)`, which collapsed to `1.0` far earlier
+/// (around `1e30`); this ceiling dates from then. It still costs nothing: the
+/// gap between `1e12` and a larger score is a weight ratio no archive needs.
 const MAX_SCORE: f64 = 1e12;
 
 /// The RNG every seeded selection draws from.
@@ -153,8 +151,8 @@ pub struct Reservoir {
 /// the `take` largest keys, and exactly-equal keys are interchangeable in that
 /// set. But they can pick different branches, so a seed that produced a packet
 /// containing a tied candidate may now produce its twin. Ties are rare by
-/// construction — [`MAX_SCORE`] exists to keep keys distinct — and require two
-/// `u^(1/score)` draws to collide bit-for-bit.
+/// construction — the log-space key and [`MAX_SCORE`] exist to keep keys
+/// distinct — and require two `ln(u) / score` draws to collide bit-for-bit.
 struct Keyed {
     key: f64,
     /// Acceptance order, not offer order: a rejected offer never takes a number,
@@ -206,7 +204,13 @@ impl Reservoir {
         if self.take == 0 {
             return;
         }
-        let key = u.powf(1.0 / score);
+        // Compared in log space. `u^(1/score)` orders candidates identically
+        // (`exp` is monotonic, so every seed selects what it always did), but
+        // underflows to exactly `0.0` once `ln(u) / score` drops below about
+        // `-745` — for nearly every draw at `MIN_SCORE`, and for about half of
+        // them at a score of `1e-3`. Those candidates then tied, and the
+        // tie-break handed their slots out in path order instead of at random.
+        let key = u.ln() / score;
         let sequence = self.accepted;
         if self.kept.len() < self.take {
             self.accepted += 1;
@@ -396,8 +400,8 @@ mod tests {
     /// already shuffled the heap.
     ///
     /// Equal keys are forced here the direct way — `offer` takes the score
-    /// already scored, so an infinite one makes `u^(1/score)` exactly `1.0` for
-    /// every draw. [`score`] clamps to [`MAX_SCORE`] before this point, which
+    /// already scored, so an infinite one makes `ln(u) / score` exactly `-0.0`
+    /// for every draw. [`score`] clamps to [`MAX_SCORE`] before this point, which
     /// is what keeps keys distinct in practice; this test is about what happens
     /// when they nonetheless collide. Without a stated tie-break the heap could
     /// evict either candidate, so this pins the rule rather than merely
@@ -531,11 +535,13 @@ mod tests {
 #[cfg(test)]
 mod saturation_tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn a_dominant_score_still_sorts_by_its_random_draw() {
         // Every candidate saturates, so the reservoir has nothing but the draw
-        // to order them by. Before `MAX_SCORE` each key rounded to exactly 1.0
+        // to order them by. Before `MAX_SCORE` each key (then `u^(1/score)`)
+        // rounded to exactly 1.0
         // and `offer`'s strictly-greater test kept whichever came first,
         // regardless of what was drawn afterwards.
         let mut reservoir = Reservoir::new(1);
@@ -583,6 +589,40 @@ mod saturation_tests {
         let mut branch = Branch::new("/zero");
         branch.weight = 0.0;
         assert_eq!(score_of(&branch), MIN_SCORE);
+    }
+
+    /// Candidates at the score floor are still drawn at random, not in arrival
+    /// order.
+    ///
+    /// At `MIN_SCORE` the old `u^(1/score)` key underflowed to exactly `0.0`
+    /// for all but about one draw in a thousand, so every zero-weight
+    /// candidate tied and the first one offered kept the slot for nearly every
+    /// seed. Each of the eight equally-weighted candidates should win some of
+    /// the 256 seeds (about 32 apiece).
+    #[test]
+    fn floor_scores_still_sort_by_their_random_draw() {
+        let branches = (0..8)
+            .map(|index| {
+                let mut branch = Branch::new(format!("/zero-{index}"));
+                branch.weight = 0.0;
+                branch
+            })
+            .collect::<Vec<_>>();
+        let mut wins = BTreeMap::new();
+        for seed in 0..256u64 {
+            let mut rng = rng_from_seed(seed);
+            let mut reservoir = Reservoir::new(1);
+            for branch in &branches {
+                reservoir.offer(branch.clone(), score_of(branch), &mut rng);
+            }
+            let winner = reservoir.into_branches().remove(0).path;
+            *wins.entry(winner).or_insert(0usize) += 1;
+        }
+        assert_eq!(wins.len(), branches.len(), "winners: {wins:?}");
+        assert!(
+            wins.values().all(|&count| count >= 10),
+            "floor-scored candidates should win roughly evenly: {wins:?}"
+        );
     }
 
     fn score_of(branch: &Branch) -> f64 {
