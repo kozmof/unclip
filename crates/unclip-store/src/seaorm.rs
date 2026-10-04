@@ -14,7 +14,10 @@ use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 ///
 /// `busy_timeout` lets a second writer (e.g. a concurrent CLI invocation in a
 /// separate process) wait briefly for a lock instead of failing immediately
-/// with "database is locked".
+/// with "database is locked". It does not cover a deferred transaction that
+/// has already read and then needs to write after another process committed:
+/// SQLite reports that `SQLITE_BUSY` at once, because waiting cannot refresh
+/// the transaction's snapshot.
 ///
 /// `journal_mode = WAL` lets readers proceed while a writer holds the database.
 /// Under the default rollback journal a second `unclip` process blocks for the
@@ -51,7 +54,15 @@ pub async fn connect_and_migrate(url: &str) -> StoreResult<DatabaseConnection> {
 pub async fn connect_and_migrate_with_options(
     opt: ConnectOptions,
 ) -> StoreResult<DatabaseConnection> {
+    connect_and_migrate_counted(opt).await.map(|(db, _)| db)
+}
+
+/// Open configured connection options, run pending migrations, and report how
+/// many were applied.
+pub async fn connect_and_migrate_counted(
+    opt: ConnectOptions,
+) -> StoreResult<(DatabaseConnection, usize)> {
     let db = connect_with_options(opt).await?;
-    unclip_migration::up(&db, None).await?;
-    Ok(db)
+    let applied = unclip_migration::up_counted(&db, None).await?;
+    Ok((db, applied))
 }

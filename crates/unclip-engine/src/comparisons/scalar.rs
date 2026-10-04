@@ -156,6 +156,7 @@ pub(crate) fn compare_with_comparators(
     after: &Tracked<Measurement>,
     run: crate::MeasurementRun<'_>,
 ) -> Result<Vec<Calculated<Delta>>> {
+    crate::support::require_run_id("comparison", run.id)?;
     crate::require_calculated_evidence(before, "comparison input measurement")?;
     crate::require_calculated_evidence(after, "comparison input measurement")?;
     let mut comparators = comparators.iter().collect::<Vec<_>>();
@@ -174,7 +175,9 @@ pub(crate) fn compare_with_comparators(
             ctx.shared_params(),
             run.timestamp.clone(),
         ));
-        results.push(comparator.compare(&ctx, token)?);
+        let delta = comparator.compare(&ctx, token)?;
+        crate::support::require_producer(&descriptor.id, &delta)?;
+        results.push(delta);
     }
     Ok(results)
 }

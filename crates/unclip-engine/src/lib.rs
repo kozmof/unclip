@@ -501,19 +501,8 @@ impl Engine {
             match classify_sensor(sensor.as_ref(), &ctx) {
                 SensorDecision::Run => {
                     let emitted = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
-                    // A sensor can mint its own token rather than use the one
-                    // it was handed, so check here, where `verify` passes too,
-                    // that every value names the sensor that was invoked.
-                    if let Some(foreign) = emitted
-                        .iter()
-                        .find(|value| value.provenance().producer != descriptor.id)
-                    {
-                        return Err(unclip_plugin::PluginError::Message(format!(
-                            "sensor {} returned measurement {} produced by {}",
-                            descriptor.id,
-                            foreign.id(),
-                            foreign.provenance().producer
-                        )));
+                    for value in &emitted {
+                        support::require_producer(&descriptor.id, value)?;
                     }
                     measurements.extend(emitted);
                 }
@@ -562,6 +551,7 @@ impl Engine {
                     InferenceToken::from_harness(metadata, DependencyCollector::default()),
                 )
                 .await?;
+            support::require_producer(&descriptor.id, &output)?;
             results.push(output);
         }
         Ok(results)
@@ -622,11 +612,11 @@ impl Engine {
                     run.timestamp.clone(),
                 )
                 .with_model(model.clone());
-                outputs.push(
-                    interpreter
-                        .interpret(&ctx, ctx.interpretation_token(metadata))
-                        .await?,
-                );
+                let output = interpreter
+                    .interpret(&ctx, ctx.interpretation_token(metadata))
+                    .await?;
+                support::require_producer(&descriptor.id, &output)?;
+                outputs.push(output);
             }
         }
         Ok(outputs)
@@ -1043,10 +1033,95 @@ mod tests {
             )
             .expect_err("a value naming another producer must not be accepted");
         assert!(
-            error.to_string().contains("sensor.impostor"),
+            matches!(
+                &error,
+                unclip_plugin::PluginError::ForeignProducer { plugin, producer, .. }
+                    if plugin == "sensor.impostor" && producer == "sensor.kendall"
+            ),
             "got: {error}"
         );
-        assert!(error.to_string().contains("sensor.kendall"), "got: {error}");
+    }
+
+    /// `measure` was the only stage that checked who produced a returned value.
+    /// An inferrer can mint a token just as a sensor can, so `infer` is held to
+    /// the same rule.
+    #[tokio::test]
+    async fn inference_rejects_values_attributed_to_another_producer() {
+        use std::sync::Arc;
+        use unclip_epistemic::{DependencyCollector, EmitMetadata, InferenceToken, Inferred};
+        use unclip_plugin::{InferCtx, InferenceOutput, Inferrer, InferrerDescriptor, Registry};
+
+        struct ImpostorInferrer(InferrerDescriptor);
+
+        #[async_trait::async_trait]
+        impl Inferrer for ImpostorInferrer {
+            fn descriptor(&self) -> &InferrerDescriptor {
+                &self.0
+            }
+
+            async fn infer(
+                &self,
+                _ctx: &InferCtx<'_>,
+                _token: InferenceToken,
+            ) -> unclip_plugin::Result<Inferred<InferenceOutput>> {
+                let forged = InferenceToken::from_harness(
+                    EmitMetadata::new(
+                        DerivedId::new("forged"),
+                        PluginId::new("infer.manual"),
+                        self.0.version.clone(),
+                        serde_json::json!({}),
+                        Timestamp::new("2026-09-17T00:00:00Z"),
+                    ),
+                    DependencyCollector::default(),
+                );
+                Ok(forged.emit(InferenceOutput::Observations(Vec::new())))
+            }
+        }
+
+        let mut registry = Registry::default();
+        registry
+            .register_inferrer(Arc::new(ImpostorInferrer(InferrerDescriptor {
+                id: PluginId::new("infer.impostor"),
+                version: semver::Version::new(0, 1, 0),
+                params_schema: "{}",
+            })))
+            .unwrap();
+        let engine = Engine::new(registry);
+        let plan = engine
+            .plan(&EngineProfile {
+                inferrers: vec![PluginSelection::any("infer.impostor")],
+                ..EngineProfile::default()
+            })
+            .unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("test"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let params = BTreeMap::new();
+        let error = engine
+            .infer(
+                &plan,
+                &domain,
+                InferenceRun {
+                    id: "run-impostor",
+                    source: &SourceRef::new("notes/impostor.txt"),
+                    timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
+                    params: &params,
+                    io: &OrdinaryTextIo,
+                },
+            )
+            .await
+            .expect_err("an inference naming another producer must not be accepted");
+        assert!(
+            matches!(
+                &error,
+                unclip_plugin::PluginError::ForeignProducer { plugin, producer, .. }
+                    if plugin == "infer.impostor" && producer == "infer.manual"
+            ),
+            "got: {error}"
+        );
     }
 
     /// Every stage mints `{run_id}/{plugin_id}`, so every stage must refuse a
@@ -1141,6 +1216,54 @@ mod tests {
             assert!(
                 interpret.to_string().contains("interpretation requires"),
                 "got: {interpret}"
+            );
+        }
+    }
+
+    /// `#n` marks a token's later emissions, so a run id carrying `#` could mint
+    /// an id that reads as another run's emission. It is refused like a blank one.
+    #[test]
+    fn measurement_refuses_run_ids_with_the_emission_separator() {
+        let engine = Engine::with_builtins().unwrap();
+        let plan = engine
+            .plan(&EngineProfile {
+                sensors: vec![PluginSelection::any("sensor.coverage")],
+                ..EngineProfile::default()
+            })
+            .unwrap();
+        let domain = DomainSnapshot {
+            id: DomainId::new("reserved"),
+            version: DomainVersion::new("domain-1"),
+            units: BTreeMap::new(),
+            relations: BTreeMap::new(),
+        };
+        let frame = MeasurementFrame {
+            id: FrameId::new("reserved.general"),
+            version: FrameVersion::new("frame-1"),
+            axes: Vec::new(),
+        };
+        let params = BTreeMap::new();
+        for id in ["run#1", "#"] {
+            let error = engine
+                .measure(
+                    &plan,
+                    MeasurementInputs {
+                        domain: &domain,
+                        frame: &frame,
+                        observations: &[],
+                        alignments: &[],
+                        rankings: &[],
+                    },
+                    MeasurementRun {
+                        id,
+                        timestamp: &Timestamp::new("2026-09-17T00:00:00Z"),
+                        params: &params,
+                    },
+                )
+                .expect_err("a run id with the emission separator must be refused");
+            assert!(
+                error.to_string().contains("must not contain"),
+                "got: {error}"
             );
         }
     }

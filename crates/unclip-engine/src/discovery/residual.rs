@@ -173,6 +173,7 @@ pub fn generate_candidates(
     inputs: CandidateInputs<'_>,
     run: crate::MeasurementRun<'_>,
 ) -> Result<Vec<Calculated<CandidateProposal>>> {
+    crate::support::require_run_id("candidate generation", run.id)?;
     for measurement in inputs.measurements {
         crate::require_calculated_evidence(measurement, "candidate input measurement")?;
     }
@@ -202,7 +203,11 @@ pub fn generate_candidates(
             ctx.shared_params(),
             run.timestamp.clone(),
         ));
-        results.extend(generator.generate(&ctx, token)?);
+        let candidates = generator.generate(&ctx, token)?;
+        for candidate in &candidates {
+            crate::support::require_producer(&descriptor.id, candidate)?;
+        }
+        results.extend(candidates);
     }
     Ok(results)
 }

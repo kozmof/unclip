@@ -22,6 +22,16 @@
 //!     value
 //! }
 //! ```
+//!
+//! A tracked input's payload cannot be taken without going through a
+//! [`DependencyCollector`], so every read lands in provenance.
+//!
+//! ```compile_fail
+//! use unclip_epistemic::{DerivedId, Tracked};
+//!
+//! let input = Tracked::from_recorded(DerivedId::new("input"), 1_u32);
+//! let _ = input.shared();
+//! ```
 
 #![forbid(unsafe_code)]
 
@@ -489,7 +499,11 @@ impl<T: ?Sized> Tracked<T> {
     }
 
     /// Share this payload without copying it.
-    pub fn shared(&self) -> Arc<T> {
+    ///
+    /// Test-only: outside this crate a tracked payload is reachable only
+    /// through [`DependencyCollector`], so every read lands in provenance.
+    #[cfg(test)]
+    pub(crate) fn shared(&self) -> Arc<T> {
         Arc::clone(&self.value)
     }
 
@@ -772,6 +786,12 @@ pub struct EmitToken<O: OperationKind> {
 }
 
 impl<O: OperationKind> EmitToken<O> {
+    /// Mint a token. Meant for the engine harness only.
+    ///
+    /// Rust cannot restrict a public function to one downstream crate, so a
+    /// plugin can call this too. The engine therefore checks the producer of
+    /// every value a plugin returns against the plugin it invoked, and rejects
+    /// a mismatch as `PluginError::ForeignProducer`.
     #[doc(hidden)]
     pub fn from_harness(metadata: EmitMetadata, dependencies: DependencyCollector) -> Self {
         Self {

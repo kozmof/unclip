@@ -410,6 +410,13 @@ pub fn co_foreground_frequency(
 ///
 /// The plug-in estimate is reported in bits. Unknown and missing samples are
 /// excluded pairwise; `None` indicates fewer than two comparable samples.
+///
+/// The plug-in estimate is biased upward, and the bias grows with the number
+/// of distinct rank values relative to the sample count. When most samples hold
+/// a distinct rank pair, the result approaches the marginal entropy (up to
+/// `log2(n)` bits) whether or not the trajectories are related. Compare it
+/// against a null, such as a permutation baseline over the same trajectories,
+/// rather than reading the raw value as evidence of dependence.
 pub fn mutual_information(
     left: &RankTrajectory,
     right: &RankTrajectory,
@@ -449,6 +456,9 @@ pub fn mutual_information(
 ///
 /// The plug-in estimate is reported in bits over triple-complete samples.
 /// `None` indicates fewer than two comparable triples.
+///
+/// The upward bias described on [`mutual_information`] is worse here, because
+/// each conditioning stratum holds only a fraction of the samples.
 pub fn conditional_mutual_information(
     left: &RankTrajectory,
     right: &RankTrajectory,

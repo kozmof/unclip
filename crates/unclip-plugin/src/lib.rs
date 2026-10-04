@@ -89,9 +89,9 @@ use unclip_domain::{
     DomainSnapshot, MeasurementFrame, ProductDomainSnapshot, ProductMeasurementFrame,
 };
 use unclip_epistemic::{
-    Calculated, CalculationToken, DependencyCollector, EmitMetadata, ExperimentToken, Experimental,
-    FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted, ModelRef, PluginId,
-    SharedParams, SourceRef, Tracked,
+    Calculated, CalculationToken, DependencyCollector, DerivedId, EmitMetadata, ExperimentToken,
+    Experimental, FrameVersion, InferenceToken, Inferred, InterpretationToken, Interpreted,
+    ModelRef, PluginId, SharedParams, SourceRef, Tracked,
 };
 use unclip_measure::{
     CrossDomainInteractionMovement, CrossDomainMutualInformation, CrossDomainSample, Delta,
@@ -110,6 +110,9 @@ pub type Params = serde_json::Value;
 pub enum PluginError {
     #[error("plugin id is already registered: {0}")]
     DuplicatePlugin(PluginId),
+    /// A plugin id contains a separator that derived ids reserve.
+    #[error("plugin id {plugin} must not contain {reserved:?}, which derived IDs reserve")]
+    InvalidPluginId { plugin: PluginId, reserved: char },
     /// A plugin's declared `params_schema` is not a schema this crate can
     /// enforce, so registration refused it.
     ///
@@ -149,6 +152,17 @@ pub enum PluginError {
     /// calculation.
     #[error("invalid plugin parameters: {0}")]
     InvalidParams(String),
+    /// A plugin returned a value whose provenance names a different producer.
+    ///
+    /// Emit tokens can be minted outside the engine, so the engine checks every
+    /// returned value against the plugin it invoked. A mismatch means the
+    /// plugin forged or forwarded another plugin's provenance.
+    #[error("plugin {plugin} returned {value} produced by {producer}")]
+    ForeignProducer {
+        plugin: PluginId,
+        value: DerivedId,
+        producer: PluginId,
+    },
     /// A failure with no more specific variant, carrying its own message.
     #[error("{0}")]
     Message(String),
@@ -1227,6 +1241,15 @@ impl Registry {
         if self.contains(&id) {
             return Err(PluginError::DuplicatePlugin(id));
         }
+        // Derived ids are `{run_id}/{plugin_id}`, with `#n` for a token's later
+        // emissions. A plugin id holding either separator would make those ids
+        // ambiguous, so one run could mint another's id.
+        if let Some(reserved) = id.chars().find(|c| matches!(c, '/' | '#')) {
+            return Err(PluginError::InvalidPluginId {
+                plugin: id,
+                reserved,
+            });
+        }
         if let Err(error) = check_schema(plugin.plugin_schema()) {
             return Err(PluginError::MalformedSchema {
                 plugin: id,
@@ -2026,6 +2049,31 @@ mod tests {
             sensor_first.register_null_model(null_model()).unwrap_err(),
             PluginError::DuplicatePlugin(PluginId::new("sensor.stub"))
         );
+    }
+
+    /// Derived ids join run and plugin ids with `/` and number later emissions
+    /// with `#`, so a plugin id may hold neither.
+    #[test]
+    fn registration_rejects_ids_with_reserved_separators() {
+        for (id, reserved) in [("sensor/stub", '/'), ("sensor#stub", '#')] {
+            let mut registry = Registry::default();
+            let error = registry
+                .register_generator(Arc::new(StubGenerator {
+                    descriptor: PluginDescriptor {
+                        id: PluginId::new(id),
+                        version: Version::new(0, 1, 0),
+                        params_schema: "{}",
+                    },
+                }))
+                .unwrap_err();
+            assert_eq!(
+                error,
+                PluginError::InvalidPluginId {
+                    plugin: PluginId::new(id),
+                    reserved,
+                }
+            );
+        }
     }
 
     #[test]

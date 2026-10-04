@@ -268,8 +268,14 @@ pub trait BranchWriter: Sync {
     /// [`StoreError::HasDescendants`] when removing it would orphan deeper
     /// branches. Unlike a `get` + probe + [`Self::delete`] sequence, all three
     /// steps share one transaction, so a descendant committed by a concurrent
-    /// writer either blocks the delete or fails to commit — it cannot slip
-    /// through the window between the probe and the delete.
+    /// writer cannot slip through the window between the probe and the delete.
+    ///
+    /// The transaction is SQLite's default deferred kind, so it reads before it
+    /// takes the write lock. If another process commits in between, the upgrade
+    /// fails at once with `SQLITE_BUSY` ("database is locked"): under WAL,
+    /// `busy_timeout` cannot help a transaction whose read snapshot is stale.
+    /// The delete then fails and can be retried; it never applies against a
+    /// stale view.
     async fn delete_leaf(&self, path: &str) -> BranchRepositoryResult<()>;
     /// Delete a branch and every descendant atomically, returning how many
     /// branches were removed (0 when nothing matched the scope).

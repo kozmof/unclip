@@ -150,9 +150,7 @@ impl crate::Engine {
             run_id,
             timestamp,
         } = run;
-        if run_id.trim().is_empty() {
-            return Err(invalid("canonical correlation requires a nonempty run ID"));
-        }
+        crate::support::require_run_id("canonical correlation", run_id)?;
         crate::require_calculated_evidence(product, "CCA product domain")?;
         crate::require_calculated_evidence(frame, "CCA product frame")?;
         if samples.iter().any(|sample| {
@@ -214,7 +212,9 @@ impl crate::Engine {
         )
         .with_algorithm("regularized_canonical_correlation");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
-        sensor.measure(&ctx, ctx.calculation_token(metadata))
+        let output = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+        crate::support::require_producer(&descriptor.id, &output)?;
+        Ok(output)
     }
 }
 
@@ -236,11 +236,7 @@ impl crate::Engine {
             run_id,
             timestamp,
         } = run;
-        if run_id.trim().is_empty() {
-            return Err(invalid(
-                "cross-domain mutual information requires a nonempty run ID",
-            ));
-        }
+        crate::support::require_run_id("cross-domain mutual information", run_id)?;
         crate::require_calculated_evidence(product, "cross-domain MI product domain")?;
         crate::require_calculated_evidence(frame, "cross-domain MI product frame")?;
         if samples.iter().any(|sample| {
@@ -298,7 +294,9 @@ impl crate::Engine {
         )
         .with_algorithm("equal_width_cross_domain_mutual_information");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
-        sensor.measure(&ctx, ctx.calculation_token(metadata))
+        let output = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+        crate::support::require_producer(&descriptor.id, &output)?;
+        Ok(output)
     }
 }
 
@@ -320,11 +318,7 @@ impl crate::Engine {
             run_id,
             timestamp,
         } = run;
-        if run_id.trim().is_empty() {
-            return Err(invalid(
-                "cross-domain communities require a nonempty run ID",
-            ));
-        }
+        crate::support::require_run_id("cross-domain communities", run_id)?;
         crate::require_calculated_evidence(product, "community product domain")?;
         crate::require_calculated_evidence(frame, "community product frame")?;
         crate::require_calculated_evidence(
@@ -382,7 +376,9 @@ impl crate::Engine {
             &sensor_params,
             dependencies,
         );
-        sensor.measure(&ctx, ctx.calculation_token(metadata))
+        let output = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+        crate::support::require_producer(&descriptor.id, &output)?;
+        Ok(output)
     }
 }
 
@@ -403,11 +399,7 @@ impl crate::Engine {
             run_id,
             timestamp,
         } = run;
-        if run_id.trim().is_empty() {
-            return Err(invalid(
-                "cross-domain interaction movement requires a nonempty run ID",
-            ));
-        }
+        crate::support::require_run_id("cross-domain interaction movement", run_id)?;
         crate::require_calculated_evidence(product, "interaction-movement product domain")?;
         crate::require_calculated_evidence(frame, "interaction-movement product frame")?;
         if samples.iter().any(|sample| {
@@ -465,7 +457,9 @@ impl crate::Engine {
         )
         .with_algorithm("signed_consecutive_cross_domain_movement");
         let ctx = ProductMeasureCtx::new(product, frame, samples, &sensor_params, dependencies);
-        sensor.measure(&ctx, ctx.calculation_token(metadata))
+        let output = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+        crate::support::require_producer(&descriptor.id, &output)?;
+        Ok(output)
     }
 }
 
@@ -489,9 +483,7 @@ impl crate::Engine {
             (source.product, source.frame, source.movement);
         let (target_product, target_frame, target_movement) =
             (target.product, target.frame, target.movement);
-        if run_id.trim().is_empty() {
-            return Err(invalid("cross-product transfer requires a nonempty run ID"));
-        }
+        crate::support::require_run_id("cross-product transfer", run_id)?;
         for (input, kind) in [
             (source_product, "transfer source product domain"),
             (target_product, "transfer target product domain"),
@@ -588,6 +580,8 @@ impl crate::Engine {
             &sensor_params,
             dependencies,
         );
-        sensor.measure(&ctx, ctx.calculation_token(metadata))
+        let output = sensor.measure(&ctx, ctx.calculation_token(metadata))?;
+        crate::support::require_producer(&descriptor.id, &output)?;
+        Ok(output)
     }
 }

@@ -53,5 +53,6 @@ pub use repository::{
     STREAM_PAGE_SIZE,
 };
 pub use seaorm::{
-    connect, connect_and_migrate, connect_and_migrate_with_options, connect_with_options,
+    connect, connect_and_migrate, connect_and_migrate_counted, connect_and_migrate_with_options,
+    connect_with_options,
 };

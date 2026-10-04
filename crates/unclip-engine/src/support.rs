@@ -78,11 +78,40 @@ pub(crate) fn require_declared_params(
 /// still says which stage refused.
 ///
 /// [`DerivedId`]: unclip_epistemic::DerivedId
+///
+/// `#` is rejected as well, because it marks a token's later emissions: a run
+/// id `r#1` would mint `r#1/p`, which reads as an emission of run `r`. `/` is
+/// allowed, since stages nest sub-runs as `{run_id}/before`; the registry keeps
+/// plugin ids free of `/`, so `{run_id}/{plugin_id}` still splits one way.
 pub(crate) fn require_run_id(stage: &str, id: &str) -> unclip_plugin::Result<()> {
     if id.trim().is_empty() {
         return Err(invalid(format!("{stage} requires a non-empty run ID")));
     }
+    if id.contains('#') {
+        return Err(invalid(format!(
+            "{stage} run ID {id:?} must not contain '#', which derived IDs reserve"
+        )));
+    }
     Ok(())
+}
+
+/// Reject a value whose provenance names a plugin other than the one invoked.
+///
+/// A plugin can mint its own emit token instead of using the one it was handed,
+/// so every family's output is checked here, where `verify` passes too.
+pub(crate) fn require_producer<T: ?Sized, O: unclip_epistemic::OperationKind>(
+    plugin: &unclip_epistemic::PluginId,
+    value: &unclip_epistemic::Derived<T, O>,
+) -> unclip_plugin::Result<()> {
+    let producer = &value.provenance().producer;
+    if producer == plugin {
+        return Ok(());
+    }
+    Err(PluginError::ForeignProducer {
+        plugin: plugin.clone(),
+        value: value.id().clone(),
+        producer: producer.clone(),
+    })
 }
 
 /// Take the map produced by an object-shaped JSON literal without copying it.

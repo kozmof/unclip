@@ -62,11 +62,26 @@ pub async fn up(
     db: &sea_orm::DatabaseConnection,
     steps: Option<u32>,
 ) -> Result<(), sea_orm::DbErr> {
+    up_counted(db, steps).await.map(drop)
+}
+
+/// [`up`], returning how many migrations it applied.
+///
+/// The count is taken inside the same transaction as the upgrade, so it is
+/// exactly what this call applied. Callers use it to tell the user when merely
+/// opening an archive changed its schema.
+pub async fn up_counted(
+    db: &sea_orm::DatabaseConnection,
+    steps: Option<u32>,
+) -> Result<usize, sea_orm::DbErr> {
     use sea_orm::TransactionTrait;
 
     let txn = db.begin().await?;
+    let pending = Migrator::get_pending_migrations(&txn).await?.len();
+    let applied = steps.map_or(pending, |steps| pending.min(steps as usize));
     Migrator::up(&txn, steps).await?;
-    txn.commit().await
+    txn.commit().await?;
+    Ok(applied)
 }
 
 /// Roll back migrations atomically on SQLite.

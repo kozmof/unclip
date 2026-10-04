@@ -152,6 +152,7 @@ pub fn evaluate_null_models_with_inputs(
     inputs: NullInputs<'_>,
     run: crate::MeasurementRun<'_>,
 ) -> Result<Vec<Calculated<Reading>>> {
+    crate::support::require_run_id("null model", run.id)?;
     let mut models = plan.null_models.iter().collect::<Vec<_>>();
     models.sort_by_key(|model| &model.descriptor().id);
     let mut results = Vec::new();
@@ -175,7 +176,9 @@ pub fn evaluate_null_models_with_inputs(
             ctx.shared_params(),
             run.timestamp.clone(),
         ));
-        results.push(model.evaluate(&ctx, token)?);
+        let reading = model.evaluate(&ctx, token)?;
+        crate::support::require_producer(&descriptor.id, &reading)?;
+        results.push(reading);
     }
     Ok(results)
 }

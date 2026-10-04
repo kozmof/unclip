@@ -51,10 +51,11 @@ pub async fn open(path: &Path) -> anyhow::Result<DatabaseConnection> {
 /// Only `init` should create a database; every other command opens SQLite in
 /// read-write-only mode. This makes the existence requirement atomic with the
 /// open: a typo or a file removed concurrently cannot create a fresh, empty
-/// archive. Migrations are still applied so an existing database is
-/// transparently upgraded.
+/// archive. Migrations are still applied so an existing database is upgraded,
+/// and the upgrade is reported on stderr: it is one-way, so a build older than
+/// this one can no longer open the file.
 pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
-    unclip_store::connect_and_migrate_with_options(db_options(path, false)?)
+    let (db, applied) = unclip_store::connect_and_migrate_counted(db_options(path, false)?)
         .await
         .with_context(|| {
             // The existence check is only for wording the failure, and runs
@@ -74,7 +75,15 @@ pub async fn open_existing(path: &Path) -> anyhow::Result<DatabaseConnection> {
                     path.display()
                 )
             }
-        })
+        })?;
+    if applied > 0 {
+        crate::output::errln!(
+            "upgraded database schema of {} ({applied} migration{})",
+            path.display(),
+            if applied == 1 { "" } else { "s" }
+        );
+    }
+    Ok(db)
 }
 
 /// A bundle of repositories sharing one connection.

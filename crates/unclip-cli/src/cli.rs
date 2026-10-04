@@ -134,6 +134,8 @@ pub(crate) enum Command {
         weighted: bool,
         #[arg(long = "avoid-recent")]
         avoid_recent: bool,
+        /// RNG seed. A seed reproduces the same selection only through
+        /// `sample`; `compose` draws differently from the same seed.
         #[arg(long)]
         seed: Option<u64>,
         #[arg(long, default_value = "yaml", value_parser = parse_format)]
@@ -153,6 +155,8 @@ pub(crate) enum Command {
         /// Number of packets to generate (batch).
         #[arg(long, default_value_t = 1)]
         count: usize,
+        /// RNG seed. A seed reproduces the same selection only through
+        /// `compose`; `sample` draws differently from the same seed.
         #[arg(long)]
         seed: Option<u64>,
         #[arg(long, default_value = "yaml", value_parser = parse_format)]
