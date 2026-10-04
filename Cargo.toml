@@ -87,4 +87,7 @@ async-trait = "0.1"
 # Matching / sampling / time
 daachorse = "3"
 rand = "0.8"
+# The sampling RNG, named directly rather than through `rand::rngs::StdRng`,
+# whose algorithm rand reserves the right to change between releases.
+rand_chacha = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

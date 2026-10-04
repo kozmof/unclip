@@ -16,8 +16,8 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 use std::rc::Rc;
 
-use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha12Rng;
 use unclip_core::{Branch, SampleParams, SampleQuery};
 
 /// Each matched `prefer_o2m` value multiplies the score by this much.
@@ -41,9 +41,18 @@ const MIN_SCORE: f64 = 1e-6;
 /// f64 could express.
 const MAX_SCORE: f64 = 1e12;
 
+/// The RNG every seeded selection draws from.
+///
+/// Named as ChaCha12 rather than `rand::rngs::StdRng`. `StdRng` is ChaCha12
+/// today, but rand documents its algorithm as free to change between releases,
+/// and a packet's recorded seed is only replayable while the algorithm behind
+/// it holds still. Naming the algorithm makes changing it a visible decision
+/// instead of a side effect of a dependency bump.
+pub type SampleRng = ChaCha12Rng;
+
 /// Build a seeded RNG.
-pub fn rng_from_seed(seed: u64) -> StdRng {
-    StdRng::seed_from_u64(seed)
+pub fn rng_from_seed(seed: u64) -> SampleRng {
+    SampleRng::seed_from_u64(seed)
 }
 
 /// Draw a fresh random seed from system entropy.
@@ -190,7 +199,7 @@ impl Reservoir {
 
     /// Offer one candidate with its score (must be positive; [`score`]
     /// guarantees that via its `MIN_SCORE` floor).
-    pub fn offer(&mut self, branch: Branch, score: f64, rng: &mut StdRng) {
+    pub fn offer(&mut self, branch: Branch, score: f64, rng: &mut SampleRng) {
         // Always draw, even when the candidate cannot be kept, so the RNG
         // stream stays aligned with the candidate sequence.
         let u: f64 = rng.gen();
@@ -244,12 +253,18 @@ impl Reservoir {
 /// candidates (a refcount bump, not a deep copy), so a caller that draws
 /// repeatedly from the same shared pool — e.g. `compose`, once per output
 /// packet — does not pay for a full `Branch` clone on every selection.
+///
+/// This draws from a shrinking pool, while [`Reservoir`] keys each candidate.
+/// The two select with the same distribution (the `equivalence` tests hold
+/// them to it) but consume the RNG differently, so one seed picks different
+/// branches through each. A seed is reproducible only through the path that
+/// recorded it: `sample` packets through the reservoir, `compose` through this.
 pub fn sample(
     candidates: &[Rc<Branch>],
     query: &SampleQuery,
     params: &SampleParams,
     recent_ids: &HashSet<i64>,
-    rng: &mut StdRng,
+    rng: &mut SampleRng,
 ) -> Vec<Rc<Branch>> {
     let take = params.count.min(candidates.len());
     if take == 0 {
@@ -293,6 +308,19 @@ pub fn sample(
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// Packets recorded while sampling went through `StdRng` must replay
+    /// unchanged now that the algorithm is named directly.
+    #[test]
+    fn sample_rng_matches_the_std_rng_it_replaced() {
+        for seed in [0, 1, 7, u64::MAX] {
+            let mut ours = rng_from_seed(seed);
+            let mut std = rand::rngs::StdRng::seed_from_u64(seed);
+            for _ in 0..64 {
+                assert_eq!(ours.gen::<u64>(), std.gen::<u64>());
+            }
+        }
+    }
 
     fn branch(path: &str, id: i64, weight: f64) -> Branch {
         let mut b = Branch::new(path);
@@ -587,7 +615,7 @@ mod equivalence {
         weights: &[f64],
         take: usize,
         trials: u64,
-        mut draw: impl FnMut(&[Rc<Branch>], usize, &mut StdRng) -> Vec<String>,
+        mut draw: impl FnMut(&[Rc<Branch>], usize, &mut SampleRng) -> Vec<String>,
     ) -> BTreeMap<String, f64> {
         let candidates: Vec<Rc<Branch>> = weights
             .iter()

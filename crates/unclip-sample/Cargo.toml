@@ -12,3 +12,4 @@ description = "Seeded weighted sampling utilities for unclip selections."
 [dependencies]
 unclip-core.workspace = true
 rand.workspace = true
+rand_chacha.workspace = true
