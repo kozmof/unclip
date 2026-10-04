@@ -3,6 +3,14 @@
 //! Derived values cannot be constructed or relabeled directly outside this
 //! crate; operation-specific tokens must emit them.
 //!
+//! The type system guarantees that much and no more. Tokens are minted by
+//! the harness — `unclip-plugin`'s contexts, the engine, and the CLI's
+//! revision step — through the hidden `EmitToken::from_harness`, and values
+//! restored from storage are relabeled through the `Tracked` constructors.
+//! Both are public, because the harness spans several crates. Plugin
+//! implementations must only emit through the token they are handed; CI's
+//! `check-harness-boundary.sh` holds the plugin crates to that.
+//!
 //! ```compile_fail
 //! use std::marker::PhantomData;
 //! use unclip_epistemic::{ops, Derived};

@@ -108,7 +108,24 @@ pub async fn sample_cmd(
         weighted,
         avoid_recent,
     };
-    run_sample(branches, history, query, params, seed, format, dry_run).await
+    let controls = DrawControls {
+        seed,
+        format,
+        dry_run,
+        recent_before: None,
+    };
+    run_sample(branches, history, query, params, controls).await
+}
+
+/// How one draw is seeded, rendered, persisted, and windowed for recency.
+struct DrawControls<'a> {
+    seed: Option<u64>,
+    format: Format,
+    dry_run: bool,
+    /// Count only usage recorded before this timestamp toward the recency
+    /// penalty. `replay` sets it to the packet's `created_at`; a fresh draw
+    /// leaves it unset and sees all history.
+    recent_before: Option<&'a str>,
 }
 
 /// Draw one packet from a fully assembled query/params pair.
@@ -126,14 +143,20 @@ async fn run_sample(
     history: &impl HistoryRepository,
     query: SampleQuery,
     params: SampleParams,
-    seed: Option<u64>,
-    format: Format,
-    dry_run: bool,
+    controls: DrawControls<'_>,
 ) -> anyhow::Result<()> {
+    let DrawControls {
+        seed,
+        format,
+        dry_run,
+        recent_before,
+    } = controls;
     ensure!(params.count > 0, "sample count must be greater than zero");
 
     let recent = if params.avoid_recent {
-        history.recent_branch_ids(RECENT_LIMIT).await?
+        history
+            .recent_branch_ids(RECENT_LIMIT, recent_before)
+            .await?
     } else {
         Default::default()
     };
@@ -218,6 +241,8 @@ pub struct ComposeInput {
     pub seed: Option<u64>,
     pub format: Format,
     pub dry_run: bool,
+    /// See [`DrawControls::recent_before`].
+    pub recent_before: Option<String>,
 }
 
 pub async fn compose_cmd(
@@ -246,7 +271,9 @@ pub async fn compose_cmd(
     // recent set for later ones, keeping every packet's draw distribution
     // identical and reproducible from `base_seed`.
     let recent = if frame.slots.iter().any(|s| s.avoid_recent) {
-        history.recent_branch_ids(RECENT_LIMIT).await?
+        history
+            .recent_branch_ids(RECENT_LIMIT, input.recent_before.as_deref())
+            .await?
     } else {
         Default::default()
     };
@@ -403,6 +430,7 @@ pub async fn replay_cmd(
                     seed,
                     format: input.format,
                     dry_run: input.dry_run,
+                    recent_before: packet.created_at,
                 },
             )
             .await
@@ -417,16 +445,13 @@ pub async fn replay_cmd(
                 .context("packet has malformed query provenance")?;
             let params: SampleParams = serde_json::from_value(provenance)
                 .context("packet has malformed sampling-control provenance")?;
-            run_sample(
-                branches,
-                history,
-                query,
-                params,
+            let controls = DrawControls {
                 seed,
-                input.format,
-                input.dry_run,
-            )
-            .await
+                format: input.format,
+                dry_run: input.dry_run,
+                recent_before: packet.created_at.as_deref(),
+            };
+            run_sample(branches, history, query, params, controls).await
         }
     }
 }

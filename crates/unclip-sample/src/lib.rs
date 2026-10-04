@@ -750,3 +750,82 @@ mod equivalence {
         }
     }
 }
+
+#[cfg(test)]
+mod pinned {
+    //! Exact selections for fixed seeds, through both samplers.
+    //!
+    //! A packet's seed replays only while every step from seed to selection
+    //! holds still. Naming ChaCha12 pins the raw stream (see
+    //! `sample_rng_matches_the_std_rng_it_replaced`), but the draws also pass
+    //! through rand's `f64` conversion (`Reservoir::offer`) and its uniform
+    //! range sampler (`sample`), which a dependency bump could change without
+    //! changing the stream. These expectations fail on any such drift. Update
+    //! them only alongside a deliberate, announced break in replay.
+
+    use super::*;
+
+    fn candidates() -> Vec<Rc<Branch>> {
+        [1.0, 2.0, 3.0, 0.5, 4.0, 1.5, 2.5, 0.25]
+            .into_iter()
+            .enumerate()
+            .map(|(i, weight)| {
+                let mut b = Branch::new(format!("/p/b{i}"));
+                b.id = Some(i as i64);
+                b.weight = weight;
+                Rc::new(b)
+            })
+            .collect()
+    }
+
+    fn params() -> SampleParams {
+        SampleParams {
+            count: 3,
+            weighted: true,
+            ..Default::default()
+        }
+    }
+
+    fn pooled(seed: u64) -> Vec<String> {
+        let mut rng = rng_from_seed(seed);
+        sample(
+            &candidates(),
+            &SampleQuery::default(),
+            &params(),
+            &HashSet::new(),
+            &mut rng,
+        )
+        .iter()
+        .map(|b| b.path.clone())
+        .collect()
+    }
+
+    fn streamed(seed: u64) -> Vec<String> {
+        let mut rng = rng_from_seed(seed);
+        let query = SampleQuery::default();
+        let mut reservoir = Reservoir::new(params().count);
+        for candidate in candidates() {
+            let s = score(&candidate, &query, &params(), &HashSet::new());
+            reservoir.offer((*candidate).clone(), s, &mut rng);
+        }
+        reservoir
+            .into_branches()
+            .into_iter()
+            .map(|b| b.path)
+            .collect()
+    }
+
+    #[test]
+    fn pool_sampler_selections_are_pinned() {
+        assert_eq!(pooled(0), ["/p/b5", "/p/b4", "/p/b0"]);
+        assert_eq!(pooled(42), ["/p/b4", "/p/b2", "/p/b6"]);
+        assert_eq!(pooled(u64::MAX), ["/p/b0", "/p/b1", "/p/b6"]);
+    }
+
+    #[test]
+    fn reservoir_selections_are_pinned() {
+        assert_eq!(streamed(0), ["/p/b1", "/p/b5", "/p/b0"]);
+        assert_eq!(streamed(42), ["/p/b6", "/p/b2", "/p/b1"]);
+        assert_eq!(streamed(u64::MAX), ["/p/b6", "/p/b5", "/p/b4"]);
+    }
+}

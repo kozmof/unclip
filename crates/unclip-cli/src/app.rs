@@ -131,6 +131,7 @@ pub async fn run() -> anyhow::Result<()> {
                     seed,
                     format,
                     dry_run,
+                    recent_before: None,
                 },
             )
             .await?;

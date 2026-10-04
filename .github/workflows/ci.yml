@@ -28,6 +28,10 @@ jobs:
         shell: bash
         run: bash .github/scripts/check-sensor-dependencies.sh
 
+      - name: Harness boundary
+        shell: bash
+        run: bash .github/scripts/check-harness-boundary.sh
+
       - name: Clippy
         # Deny warnings on workspace crates only; --no-deps avoids treating
         # dependency build-script warnings as hard errors.

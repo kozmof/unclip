@@ -2040,6 +2040,54 @@ fn replay_reproduces_sample_and_compose_packets() {
     assert!(stdout(&reseeded).contains("seed: 8"));
 }
 
+/// A persisted `--avoid-recent` packet records usage for its own selections.
+/// Replaying it must still draw against the recency window the original saw,
+/// not one that now penalizes exactly the branches it picked.
+#[test]
+fn replay_of_an_avoid_recent_packet_ignores_usage_recorded_since() {
+    let db = TempDb::new();
+    let path = db.path();
+    assert!(unclip(&path, &["init"]).status.success());
+    for i in 0..8 {
+        let branch = format!("/r/b{i}");
+        assert!(unclip(&path, &["add", &branch]).status.success());
+    }
+
+    fn selected_paths(yaml: &str) -> Vec<String> {
+        yaml.lines()
+            .filter(|l| l.trim_start().starts_with("path: "))
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    // Several seeds, so a replay that sees the packet's own usage cannot pass
+    // by luck on one draw.
+    for seed in ["1", "2", "3", "4", "5"] {
+        let sampled = unclip(
+            &path,
+            &[
+                "sample",
+                "--under",
+                "/r",
+                "--count",
+                "3",
+                "--avoid-recent",
+                "--seed",
+                seed,
+            ],
+        );
+        assert!(sampled.status.success(), "sample: {}", stderr(&sampled));
+        let packet = db.write("recent-packet.yaml", &stdout(&sampled));
+        let replayed = unclip(&path, &["replay", packet.to_str().unwrap(), "--dry-run"]);
+        assert!(replayed.status.success(), "replay: {}", stderr(&replayed));
+        assert_eq!(
+            selected_paths(&stdout(&replayed)),
+            selected_paths(&stdout(&sampled)),
+            "seed {seed}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn level_measure_derive_interpret_and_verify_workflow() {
     use sea_orm::ConnectionTrait;

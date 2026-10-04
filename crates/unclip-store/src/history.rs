@@ -43,7 +43,17 @@ pub struct PacketUsageRecord {
 /// Persistence boundary used by sampling and usage-reporting commands.
 #[async_trait]
 pub trait HistoryRepository: Sync {
-    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>>;
+    /// The `limit` most recently used distinct branch ids, counting only usage
+    /// recorded strictly before `before` (an RFC3339 timestamp) when given.
+    ///
+    /// `replay` passes the packet's `created_at` so the recency window is the
+    /// one the original draw saw, not one that now includes the packet's own
+    /// selections and everything recorded since.
+    async fn recent_branch_ids(
+        &self,
+        limit: u64,
+        before: Option<&str>,
+    ) -> StoreResult<HashSet<i64>>;
     async fn usage_summaries(&self, branch_ids: &[i64]) -> StoreResult<HashMap<i64, UsageSummary>>;
     async fn usage_for(&self, branch_id: i64) -> StoreResult<UsageSummary>;
     /// Persist packets and their usage rows atomically: a failure on any packet
@@ -77,6 +87,18 @@ fn encode_seed(seed: u64) -> i64 {
 /// one canonical format.
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Re-render an RFC3339 timestamp in [`now`]'s canonical form, so it compares
+/// correctly against stored timestamps as text.
+fn canonical_timestamp(timestamp: &str) -> StoreResult<String> {
+    use anyhow::Context;
+
+    let parsed = chrono::DateTime::parse_from_rfc3339(timestamp)
+        .with_context(|| format!("invalid RFC3339 timestamp `{timestamp}`"))?;
+    Ok(parsed
+        .with_timezone(&chrono::Utc)
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }
 
 /// Usage history and packet store.
@@ -118,21 +140,37 @@ impl HistoryRepository for SeaOrmHistoryRepository {
     /// row per selected branch, all sharing a timestamp) cannot flush the whole
     /// recency window by itself: the window always covers `limit` different
     /// branches, however many rows each contributed.
-    async fn recent_branch_ids(&self, limit: u64) -> StoreResult<HashSet<i64>> {
+    async fn recent_branch_ids(
+        &self,
+        limit: u64,
+        before: Option<&str>,
+    ) -> StoreResult<HashSet<i64>> {
         #[derive(FromQueryResult)]
         struct RecentBranch {
             branch_id: i64,
         }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         // `MAX(id)` breaks ties so branches sharing a millisecond timestamp
         // have a stable, deterministic order under `LIMIT`.
-        let rows = RecentBranch::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT branch_id FROM usage_history GROUP BY branch_id \
-             ORDER BY MAX(used_at) DESC, MAX(id) DESC LIMIT ?",
-            [i64::try_from(limit).unwrap_or(i64::MAX).into()],
-        ))
-        .all(&self.db)
-        .await?;
+        let statement = match before {
+            None => Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT branch_id FROM usage_history GROUP BY branch_id \
+                 ORDER BY MAX(used_at) DESC, MAX(id) DESC LIMIT ?",
+                [limit.into()],
+            ),
+            // The cutoff is compared lexically, so it is first brought into
+            // the canonical form `now` writes every `used_at` in.
+            Some(before) => Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT branch_id FROM usage_history WHERE used_at < ? GROUP BY branch_id \
+                 ORDER BY MAX(used_at) DESC, MAX(id) DESC LIMIT ?",
+                [canonical_timestamp(before)?.into(), limit.into()],
+            ),
+        };
+        let rows = RecentBranch::find_by_statement(statement)
+            .all(&self.db)
+            .await?;
         Ok(rows.into_iter().map(|r| r.branch_id).collect())
     }
 

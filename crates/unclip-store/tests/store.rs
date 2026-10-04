@@ -924,14 +924,54 @@ async fn recent_branch_ids_counts_distinct_branches_not_usage_rows() {
 
     // A window of 2 distinct branches must still cover `/old`; under the old
     // row-based window the `/hot` burst alone would have flushed it out.
-    let recent = history.recent_branch_ids(2).await.unwrap();
+    let recent = history.recent_branch_ids(2, None).await.unwrap();
     assert!(recent.contains(&hot));
     assert!(recent.contains(&old), "got: {recent:?}");
 
     // A window of 1 keeps only the most recently used branch.
-    let recent = history.recent_branch_ids(1).await.unwrap();
+    let recent = history.recent_branch_ids(1, None).await.unwrap();
     assert_eq!(recent.len(), 1);
     assert!(recent.contains(&hot));
+}
+
+#[tokio::test]
+async fn recent_branch_ids_ignores_usage_at_or_after_the_cutoff() {
+    let db = connect_and_migrate("sqlite::memory:").await.unwrap();
+    let branches = SeaOrmBranchRepository::new(db.clone());
+    let history = SeaOrmHistoryRepository::new(db);
+
+    branches.add(&Branch::new("/before")).await.unwrap();
+    branches.add(&Branch::new("/after")).await.unwrap();
+    let before = branches.get("/before").await.unwrap().unwrap().id.unwrap();
+    let after = branches.get("/after").await.unwrap().unwrap().id.unwrap();
+
+    // Timestamps have millisecond precision; the pauses keep the three
+    // instants distinct.
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(5));
+    history
+        .record_usage(before, "sample", None, None)
+        .await
+        .unwrap();
+    pause();
+    let cutoff = unclip_store::now();
+    pause();
+    history
+        .record_usage(after, "sample", None, None)
+        .await
+        .unwrap();
+
+    let recent = history.recent_branch_ids(50, Some(&cutoff)).await.unwrap();
+    assert_eq!(recent, [before].into_iter().collect());
+
+    // Without a cutoff every usage counts.
+    let recent = history.recent_branch_ids(50, None).await.unwrap();
+    assert_eq!(recent, [before, after].into_iter().collect());
+
+    // A cutoff that is not RFC3339 is refused rather than compared as text.
+    assert!(history
+        .recent_branch_ids(50, Some("yesterday"))
+        .await
+        .is_err());
 }
 
 #[tokio::test]
